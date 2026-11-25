@@ -14,8 +14,8 @@ import { applyPropertyDefaults, getAllowedChronoTypes } from '../../spaces/schem
 import { chronoTypeError } from '../record-checks.js';
 import { RequestRefusal } from '../../util/errors.js';
 import { readMetaForWrite, stampOp, stampSetOf, stampUnsetOf } from '../../spaces/schema-stamp.js';
-import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
-import { mergeTags, mergeProperties, mergePropertiesOrKeep } from '../merge-fields.js';
+import { classifyChronoUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
+import { mergeTags, mergeProperties } from '../merge-fields.js';
 import { type SimilarMatch } from '../recall.js';
 import type { DupeCheckOpts } from '../write-options.js';
 import type { ChronoEntry, ChronoType, ChronoStatus } from '../../config/types.js';
@@ -23,7 +23,7 @@ import { linkTargets, refuseLinks } from './plan-links.js';
 import type { ReadSet, ReadWant } from './read-set.js';
 import type { WritePlan } from './types.js';
 import { trustFor, mintedWant, mintedRecord, insertIdentity, type PlanTrust } from './trust.js';
-import { convergeResult, finishInsert, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
+import { convergeResult, finishInsert, foldRemovals, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
 
 export interface ChronoFields {
   title: string;
@@ -53,6 +53,10 @@ export interface ChronoInput {
   fields: ChronoFields;
   ttlDays?: number | null;
   opts?: DupeCheckOpts & { onValidation?: (check: UpdateValidation) => void };
+  /** Dot paths removed from the stored entry after the merge (`foldRemovals`); refused on an insert, and a system field or a malformed path is refused by name. */
+  deleteFields?: readonly string[];
+  /** The target tag array, written as it is in place of the union (`foldRemovals`): how a caller takes one tag away. */
+  replaceTags?: readonly string[];
 }
 
 export interface ChronoPlanned {
@@ -92,21 +96,35 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   const withDefaults = existing
     ? fields.properties
     : applyPropertyDefaults(write.meta?.typeSchemas?.chrono?.[fields.type], fields.properties);
-  const check = classifyChronoUpsertAgainst(write.meta, existing,
-    { title: fields.title, type: fields.type, description: fields.description, tags: fields.tags, properties: withDefaults });
+  const status = fields.status ?? 'upcoming';
+  // A new entry has nothing to replace: the target IS its tags.
+  const tags = existing === null && input.replaceTags ? [...input.replaceTags] : fields.tags ?? [];
+  // The removals, after the merge: what the entry is LEFT with, and what the converge sets and unsets (`foldRemovals`).
+  const folded = foldRemovals('chrono', existing, existing ? {
+    tags: mergeTags(existing.tags, tags),
+    ...(fields.endsAt !== undefined ? { endsAt: fields.endsAt } : {}),
+    ...(fields.description !== undefined ? { description: fields.description } : {}),
+    ...(fields.confidence !== undefined ? { confidence: fields.confidence } : {}),
+    ...(withDefaults !== undefined ? { properties: mergeProperties(existing.properties, withDefaults) } : {}),
+    ...(fields.recurrence !== undefined ? { recurrence: fields.recurrence } : {}),
+  } : {}, input);
+  // A removal is judged on the entry it leaves, as a PATCH is; every other write on the merge of what it states over what is stored.
+  const check = folded.removing
+    ? classifyChronoUpsertAgainst(write.meta, existing,
+      recordAfterPatch(existing!, { title: fields.title, type: fields.type, startsAt: fields.startsAt, status, ...folded.data }, folded.unset))
+    : classifyChronoUpsertAgainst(write.meta, existing,
+      { title: fields.title, type: fields.type, description: fields.description, tags: existing === null ? tags : fields.tags, properties: withDefaults });
   if (check.blocked) throw new SchemaViolationError(check);
   opts?.onValidation?.(check);
   fields = { ...fields, properties: withDefaults };
 
   const now = new Date().toISOString();
-  const status = fields.status ?? 'upcoming';
-  const tags = fields.tags ?? [];
 
   // A suppressed record stays findable lexically: `derivedFieldsForWrite` stores its text with no vector.
-  // The text is the record the write STORES: on a converge the merge (see `planFact`), exactly what the `$set` below writes.
+  // The text is the record the write STORES: on a converge the merge (see `planFact`) with the removals applied, exactly what the `$set` below writes.
+  const left = folded.left as { tags?: string[]; description?: string; properties?: Record<string, string | number | boolean> };
   const embedText = existing
-    ? chronoEmbedText(fields.title, fields.type, status, fields.description ?? existing.description,
-      mergeTags(existing.tags, tags), mergePropertiesOrKeep(existing.properties, fields.properties))
+    ? chronoEmbedText(fields.title, fields.type, status, left.description, left.tags ?? [], left.properties)
     : chronoEmbedText(fields.title, fields.type, status, fields.description, tags, fields.properties);
   // Suppression wins over `waitForEmbedding`, on the record the write LEAVES (`Q-194`).
   const { suppressed, vector } = await vectorBeforeWrite({
@@ -125,16 +143,12 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   if (existing) {
     // Stamped when the converged record conforms, unstamped when it does not (a stamp means "conforms as stored").
     const stamp = stampOp(write, check);
+    // `folded.data` is the merged tags and every stated optional field (properties merged), with the removals applied.
     const $set: Record<string, unknown> = {
       title: fields.title, type: fields.type, startsAt: fields.startsAt, status,
-      tags: mergeTags(existing.tags, tags), updatedAt: now, ...derived.set, ...stampSetOf(stamp),
+      ...folded.data, updatedAt: now, ...derived.set, ...stampSetOf(stamp),
     };
-    if (fields.endsAt !== undefined) $set['endsAt'] = fields.endsAt;
-    if (fields.description !== undefined) $set['description'] = fields.description;
-    if (fields.confidence !== undefined) $set['confidence'] = fields.confidence;
-    if (fields.properties !== undefined) $set['properties'] = mergeProperties(existing.properties, fields.properties);
-    if (fields.recurrence !== undefined) $set['recurrence'] = fields.recurrence;
-    const $unset: Record<string, unknown> = { ...derived.unset, ...stampUnsetOf(stamp) };
+    const $unset: Record<string, unknown> = { ...folded.unset, ...derived.unset, ...stampUnsetOf(stamp) };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'chrono', existing: existing as unknown as Record<string, unknown> });
     const result = convergeResult(existing, $set, $unset);

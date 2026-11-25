@@ -11,8 +11,8 @@ import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
 import { applyPropertyDefaults } from '../../spaces/schema-validation.js';
 import { readMetaForWrite, stampOp, stampSetOf, stampUnsetOf } from '../../spaces/schema-stamp.js';
-import { classifyFactUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
-import { mergeTags, mergeProperties, mergePropertiesOrKeep } from '../merge-fields.js';
+import { classifyFactUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
+import { mergeTags, mergeProperties } from '../merge-fields.js';
 import { type SimilarMatch } from '../recall.js';
 import type { DupeCheckOpts } from '../write-options.js';
 import type { FactDoc } from '../../config/types.js';
@@ -20,7 +20,7 @@ import { linkTargets, refuseLinks } from './plan-links.js';
 import type { ReadSet, ReadWant } from './read-set.js';
 import type { WritePlan } from './types.js';
 import { trustFor, mintedWant, mintedRecord, insertIdentity, type PlanTrust } from './trust.js';
-import { convergeResult, finishInsert, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
+import { convergeResult, finishInsert, foldRemovals, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
 
 export interface FactInput {
   fact: string;
@@ -39,6 +39,10 @@ export interface FactInput {
    * them (the extractor, through `bulkWrite`'s trusted argument) and by nothing that reads a request.
    */
   instanceWrittenKeys?: readonly string[];
+  /** Dot paths removed from the stored fact after the merge (`foldRemovals`); refused on an insert, and a system field or a malformed path is refused by name. */
+  deleteFields?: readonly string[];
+  /** The target tag array, written as it is in place of the union (`foldRemovals`): how a caller takes one tag away. */
+  replaceTags?: readonly string[];
 }
 
 export interface FactPlanned {
@@ -55,10 +59,11 @@ export function factWant(input: FactInput, trust?: PlanTrust): ReadWant {
 /** `trust`: the minted id and the plan schema a trusted in-process caller hands the planner, never a request (`trust.ts`). */
 export async function planFact(spaceId: string, input: FactInput, view: ReadSet, trust?: PlanTrust): Promise<FactPlanned> {
   const linkEntities = input.linkEntities ?? [];
-  const tags = input.tags ?? [];
   const { fact, description, type, opts, ttlDays } = input;
   const trusted = trustFor(spaceId, trust, input.id);
   const existing = (input.id ? view.stored('fact', input.id) : mintedRecord(view, 'fact', trusted)) as unknown as FactDoc | null;
+  // A new fact has nothing to replace: the target IS its tags.
+  const tags = existing === null && input.replaceTags ? [...input.replaceTags] : input.tags ?? [];
 
   /*
    * THE LINKS ARE REFUSED BEFORE THE RECORD IS WRITTEN — a bad id after the insert would leave the fact
@@ -76,15 +81,25 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet,
   const properties = existing
     ? input.properties
     : applyPropertyDefaults(type ? write.meta?.typeSchemas?.fact?.[type] : undefined, input.properties);
-  const check = classifyFactUpsertAgainst(write.meta, existing, { fact, type, description, tags, properties }, input.instanceWrittenKeys);
+  // The removals, after the merge: what the record is LEFT with, and what the converge sets and unsets (`foldRemovals`).
+  const folded = foldRemovals('fact', existing, existing ? {
+    tags: mergeTags(existing.tags, tags),
+    ...(description !== undefined ? { description } : {}),
+    ...(properties !== undefined ? { properties: mergeProperties(existing.properties, properties) } : {}),
+  } : {}, input);
+  // A removal is judged on the record it leaves, as a PATCH is; every other write on the merge of what it states over what is stored.
+  const check = folded.removing
+    ? classifyFactUpsertAgainst(write.meta, existing, recordAfterPatch(existing!, { fact, ...(type !== undefined ? { type } : {}), ...folded.data }, folded.unset), input.instanceWrittenKeys)
+    : classifyFactUpsertAgainst(write.meta, existing, { fact, type, description, tags, properties }, input.instanceWrittenKeys);
   if (check.blocked) throw new SchemaViolationError(check);
   opts?.onValidation?.(check);
 
   // No entity names: a fact embeds its own content. See `factEmbedText` for the measurement. The text is the record the write
-  // STORES: on a converge the merge (tags union, properties shallow-merge, description kept when the write names none), exactly
-  // what the `$set` below writes, so a text stored or embedded here is the text the queued job would build (as `planEntity` does).
+  // STORES: on a converge the merge (tags union, properties shallow-merge, description kept when the write names none) with the removals
+  // applied, exactly what the `$set` below writes, so a text stored or embedded here is the text the queued job would build (as `planEntity` does).
+  const left = folded.left as { tags?: string[]; description?: string; properties?: Record<string, string | number | boolean> };
   const embedText = existing
-    ? factEmbedText(fact, mergeTags(existing.tags, tags), description ?? existing.description, mergePropertiesOrKeep(existing.properties, properties))
+    ? factEmbedText(fact, left.tags ?? [], left.description, left.properties)
     : factEmbedText(fact, tags, description, properties);
 
   /*
@@ -114,13 +129,12 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet,
     const derived = await derivedFieldsForWrite({ text: () => embedText, vector, suppressed, onto: 'stored' });
     // Stamped when the converged record conforms, unstamped when it does not (a stamp means "conforms as stored").
     const stamp = stampOp(write, check);
+    // `folded.data` is the merged tags, a stated description and the merged properties (when stated), with the removals applied.
     const $set: Record<string, unknown> = {
-      fact, tags: mergeTags(existing.tags, tags), updatedAt: now, ...derived.set, ...stampSetOf(stamp),
+      fact, ...folded.data, updatedAt: now, ...derived.set, ...stampSetOf(stamp),
     };
     if (type !== undefined) $set['type'] = type;
-    if (description !== undefined) $set['description'] = description;
-    if (properties !== undefined) $set['properties'] = mergeProperties(existing.properties, properties);
-    const $unset: Record<string, unknown> = { ...derived.unset, ...stampUnsetOf(stamp) };
+    const $unset: Record<string, unknown> = { ...folded.unset, ...derived.unset, ...stampUnsetOf(stamp) };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'fact', existing: existing as unknown as Record<string, unknown> });
     const result = convergeResult(existing, $set, $unset);

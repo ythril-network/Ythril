@@ -27,6 +27,8 @@ import { stampSkewOnCreate } from '../stamp-skew.js';
 import { stampOp, stampSetOf, type MetaForWrite, type SchemaCheckOutcome } from '../../spaces/schema-stamp.js';
 import type { DupeCheckOpts } from '../write-options.js';
 import type { SpaceMeta } from '../../config/types.js';
+import { RequestRefusal } from '../../util/errors.js';
+import { DELETABLE_FIELDS, reflectDeleteFields, refuseUndeletableFields } from '../delete-fields.js';
 import type { ReadSet } from './read-set.js';
 import type { PlanKind } from './types.js';
 
@@ -39,6 +41,82 @@ export function convergeResult(
   const result: Record<string, unknown> = { ...(existing as Record<string, unknown>), ...set };
   for (const key of Object.keys(unset)) delete result[key];
   return result;
+}
+
+/**
+ * What a write may take away from a record it converges onto. A converge merges (tags union, properties shallow-merge), so by itself it can never
+ * remove anything; these two inputs are how a caller that holds the target says what goes.
+ *
+ * - `deleteFields`: dot paths applied AFTER the merge (`applyDeleteFields`), the same as the update writers'.
+ * - `replaceTags`: the target tag array, written as it is. Never a union plus a deletion: the merge unions, and a whole-field `$unset` wins.
+ */
+export interface Removals {
+  readonly deleteFields?: readonly string[] | undefined;
+  readonly replaceTags?: readonly string[] | undefined;
+}
+
+/** What {@link foldRemovals} decided: the stated fields the converge writes, the fields it unsets, and the fields the record is LEFT with. */
+export interface FoldedRemovals {
+  /** The converge's stated fields (`tags`, `properties`, `description`, ...) after the removals: the planner spreads them into its `$set`. */
+  readonly data: Record<string, unknown>;
+  /** The listed fields the removals took away whole: the planner spreads them into its `$unset`. */
+  readonly unset: Record<string, unknown>;
+  /** The listed fields as the record is left with them, a removed one absent: what the embed text and the classification read. */
+  readonly left: Record<string, unknown>;
+  /** Whether anything is removed or replaced on a stored record: the planner then judges the record it LEAVES (`recordAfterPatch`), as a PATCH is. */
+  readonly removing: boolean;
+}
+
+/**
+ * The record a converge leaves once its removals are applied, decided in one place for the four planners.
+ *
+ * ## The question it answers, and what it prevents
+ *
+ * "What do the stated fields become after the merge and the removals?" A planner that applied the removal before the merge would see it undone
+ * (the merge unions tags and lays the stated properties over the stored ones), one that applied it to the stored record would mutate the read
+ * set's copy, one that took a path nobody validated would write a system field, and one that took `deleteFields` on an INSERT would accept it and
+ * do nothing. The order, the copy, the path rule and the insert refusal are all inside, so no planner can leave one out.
+ *
+ * `stated` is what the converge writes of the fields a removal can reach, already merged (`tags` union, `properties` shallow-merge, a stated
+ * `description`). A listed field it does not state is the stored one's. Nothing is cloned or reflected when nothing is removed, so a plan
+ * without removals costs what it did.
+ */
+export function foldRemovals(
+  kind: keyof typeof DELETABLE_FIELDS,
+  existing: object | null,
+  stated: Record<string, unknown>,
+  removal: Removals,
+): FoldedRemovals {
+  const paths = removal.deleteFields ?? [];
+  refuseUndeletableFields(paths);
+  if (existing === null) {
+    if (paths.length > 0) {
+      throw new RequestRefusal('`deleteFields` removes fields of a stored record, and this write creates a new one: there is nothing to remove');
+    }
+    return { data: removal.replaceTags ? { ...stated, tags: [...removal.replaceTags] } : stated, unset: {}, left: stated, removing: false };
+  }
+  const stored = existing as Record<string, unknown>;
+  const fields: readonly string[] = DELETABLE_FIELDS[kind];
+  if (paths.length === 0 && removal.replaceTags === undefined) {
+    const left: Record<string, unknown> = {};
+    for (const f of fields) {
+      const v = f in stated ? stated[f] : stored[f];
+      if (v !== undefined) left[f] = v;
+    }
+    return { data: stated, unset: {}, left, removing: false };
+  }
+  // Copies: `applyDeleteFields` mutates what it is given, and the stored record is the read set's, shared with every other plan of a batch.
+  const data: Record<string, unknown> = structuredClone(stated);
+  if (removal.replaceTags !== undefined) data['tags'] = [...removal.replaceTags];
+  const left: Record<string, unknown> = {};
+  for (const f of fields) {
+    const v = f in data ? data[f] : structuredClone(stored[f]);
+    left[f] = f === 'tags' ? (v ?? []) : f === 'properties' ? (v ?? {}) : v;
+  }
+  const unset: Record<string, unknown> = {};
+  reflectDeleteFields(left, paths, fields, data, unset);
+  for (const f of fields) if (left[f] === undefined) delete left[f];
+  return { data, unset, left, removing: true };
 }
 
 /** A vector computed before the write, in the fields a record stores it under. */

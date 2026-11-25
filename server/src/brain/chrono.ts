@@ -20,7 +20,7 @@ import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { readMetaForWrite, stampOpIfUnmoved, foldStampOp, carryStamp } from '../spaces/schema-stamp.js';
 import { classifyChronoUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { mergePropertiesOrKeep } from './merge-fields.js';
-import { applyDeleteFields } from './delete-fields.js';
+import { reflectDeleteFields, DELETABLE_FIELDS } from './delete-fields.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import type { WebhookActor } from '../webhooks/webhook-actor.js';
@@ -37,24 +37,6 @@ export { deriveChronoStatus } from './chrono-status.js';
 
 // The recurrence rule lives in its own leaf module (`recurrence.ts`) so the shared record checks can ask it; re-exported for its importers.
 export { RECURRENCE_FREQ, parseRecurrence } from './recurrence.js';
-
-/**
- * Every optional field a `deleteFields` path may clear on a chrono entry.
- *
- * A field that is settable and missing here is accepted at the door and then does nothing — the silent
- * no-op this whole mechanism exists to remove, reintroduced one field at a time. The REQUIRED fields
- * (`title`, `startsAt`, `status`) are refused by `validateDeleteFields` instead, so between the two lists
- * every path a caller can send is either performed or reported.
- *
- * **THE LINK CLASSES ARE NOT HERE, and they used to be — derived from `LINK_CLASSES`, because they were
- * not a fixed set.** 5.0 removed the arrays, so a chrono entry's links are not fields on it and
- * `deleteFields` has nothing to clear: detaching a class is `linkEntities: []` or `linkFacts: []`, which
- * says the same thing in the vocabulary that still exists. The rest are this record's own optional fields
- * and have no list to derive from.
- */
-const DELETABLE_CHRONO_FIELDS: readonly string[] = [
-  'description', 'tags', 'properties', 'recurrence', 'endsAt', 'confidence', 'suppressEmbeddings',
-];
 
 /**
  * Store a new chrono entry.
@@ -172,21 +154,11 @@ export async function updateChrono(
         ? updates.superseded
         : existing.superseded,
     };
-    applyDeleteFields(merged, deleteFieldsPaths);
-
-    // EVERY optional field, not a convenient subset. A field the writer forgets is accepted at the edge and
-    // then does nothing, which is the silent no-op this feature exists to remove — chrono's whole problem was
-    // that a property could not be removed and nothing said so. The REQUIRED fields (`title`, `startsAt`,
-    // `status`) are refused by `validateDeleteFields` instead, so between the two lists every path a caller
-    // can send is either performed or reported.
-    for (const field of DELETABLE_CHRONO_FIELDS) {
-      if (!(field in merged)) {
-        $unset[field] = '';
-        delete $set[field];
-      } else if (deleteFieldsPaths.some(p => p === field || p.startsWith(field + '.'))) {
-        $set[field] = merged[field];
-      }
-    }
+    // EVERY optional field, not a convenient subset (`DELETABLE_FIELDS.chrono`, the one list the planner reads too). A field the
+    // writer forgets is accepted at the edge and then does nothing, which is the silent no-op this feature exists to remove — chrono's
+    // whole problem was that a property could not be removed and nothing said so. The REQUIRED fields (`title`, `startsAt`, `status`)
+    // are refused by `validateDeleteFields` instead, so between the two lists every path a caller can send is either performed or reported.
+    reflectDeleteFields(merged, deleteFieldsPaths, DELETABLE_FIELDS.chrono, $set, $unset);
   }
 
   // There is no longer a "did an embedding-relevant field change?" branch here. It existed to decide whether

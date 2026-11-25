@@ -61,8 +61,11 @@ describe('the code really does converge on a supplied id', () => {
     assert.ok(at > 0, 'the idempotent branch was not found — the scanner is wrong, not the code');
     // Bounded by the branch's own closing brace, not by a character count.
     const branch = blockAfter(s, at, 'the idempotent branch');
-    assert.match(branch, /mergeTags\(existing\.tags, tags\)/, 'tags are unioned');
-    assert.match(branch, /mergeProperties\(existing\.properties, properties\)/, 'properties are shallow-merged');
+    // The merge is decided once, before the branch, as what the converge STATES (`foldRemovals` applies the removals to it); the branch writes it.
+    const stated = s.slice(s.indexOf('foldRemovals('), at);
+    assert.match(stated, /mergeTags\(existing\.tags, tags\)/, 'tags are unioned');
+    assert.match(stated, /mergeProperties\(existing\.properties, properties\)/, 'properties are shallow-merged');
+    assert.match(branch, /\.\.\.folded\.data/, 'and the branch stores what that merge left, not a replacement of it');
   });
 
   it('and `saveFact` accepts an id at all', () => {
