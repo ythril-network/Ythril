@@ -148,24 +148,55 @@ const SHARED_BASE_SHOWN = 120;
 export function otherHoldersOfRdfBase(cfg: { spaces: readonly SpaceConfig[] }, spaceId: string, base: string, rights: TokenRights | null | undefined):
   { holders: SpaceConfig[]; named: string[] } {
   const holders = cfg.spaces.filter(s => s.id !== spaceId && s.meta?.rdf?.enabled === true && s.meta.rdf.base === base);
-  const named = holders.filter(s => mayReadArea(rights, s.id, 'schema')).map(s => s.id);
-  return { holders, named };
+  return { holders, named: namedToCaller(holders, rights) };
+}
+
+/** Which of `holders` a caller with `rights` may be told of: instance administration, or `schema: read` on that space (the no-trace rule). */
+function namedToCaller(holders: readonly SpaceConfig[], rights: TokenRights | null | undefined): string[] {
+  return holders.filter(s => mayReadArea(rights, s.id, 'schema')).map(s => s.id);
+}
+
+/** The code of a base that starts the base of another space of this instance with RDF on, or is started by it (409): refused at the save. */
+export const RDF_BASE_NESTED = 'rdf_base_nested';
+
+/**
+ * The OTHER spaces of this instance with RDF on whose base is nested with `base`: one starts the other (never equal: that is a shared base,
+ * {@link otherHoldersOfRdfBase}). `/ld/` resolves an address to the space holding the longest base that starts it, so a base inside another's
+ * takes every address of the space it sits in, and a base that starts another's is taken from it. Told as {@link otherHoldersOfRdfBase} tells.
+ */
+export function nestedHoldersOfRdfBase(cfg: { spaces: readonly SpaceConfig[] }, spaceId: string, base: string, rights: TokenRights | null | undefined):
+  { holders: SpaceConfig[]; named: string[] } {
+  const holders = cfg.spaces.filter(s => {
+    const theirs = s.meta?.rdf?.base;
+    return s.id !== spaceId && s.meta?.rdf?.enabled === true && typeof theirs === 'string' && theirs !== '' && theirs !== base
+      && (theirs.startsWith(base) || base.startsWith(theirs));
+  });
+  return { holders, named: namedToCaller(holders, rights) };
 }
 
 /**
  * The refusal of a SAVE that would give a space an address another space holds (`409 rdf_base_shared`, bundle-269 slice F), or `undefined`.
  * `after` is the setting the write leaves (the settled one; a networked rebase, the base it proposes). Asked of what the write MOVES: a space
  * already on that base with RDF on (a pair a peer's round made, which the exports refuse) is not blocked from a write that leaves it as it is.
- * What arrives from a peer never asks this: it moves no stored base.
+ * What arrives from a peer never asks this: it moves no stored base. A base nested with another space's (one starts the other) is refused
+ * with its own code, `rdf_base_nested` ({@link nestedHoldersOfRdfBase}).
  */
 export function sharedRdfBaseRefusal(cfg: { spaces: readonly SpaceConfig[] }, spaceId: string, stored: RdfSetting | undefined,
   after: { enabled?: boolean; base?: string } | undefined, rights: TokenRights | null | undefined):
-  { status: typeof RDF_BASE_STANDS_STATUS; code: typeof RDF_BASE_SHARED; error: string } | undefined {
+  { status: typeof RDF_BASE_STANDS_STATUS; code: typeof RDF_BASE_SHARED | typeof RDF_BASE_NESTED; error: string } | undefined {
   const base = after?.base;
   if (after?.enabled !== true || !base) return undefined;
   if (stored?.enabled === true && stored.base === base) return undefined;
   const { holders, named } = otherHoldersOfRdfBase(cfg, spaceId, base, rights);
-  if (holders.length === 0) return undefined;
+  if (holders.length === 0) {
+    const nested = nestedHoldersOfRdfBase(cfg, spaceId, base, rights);
+    if (nested.holders.length === 0) return undefined;
+    return {
+      status: RDF_BASE_STANDS_STATUS, code: RDF_BASE_NESTED,
+      error: `the RDF base ${peerText(base, { max: SHARED_BASE_SHOWN })} starts, or is started by, the base of another space of this instance with RDF on, so the addresses of one `
+        + `would be read as the other's and it is not saved: send a base that neither starts nor is started by another space's${nested.named.length > 0 ? ` (nested with ${nested.named.map(id => `'${peerText(id, { max: NAME_QUOTED })}'`).join(', ')})` : ''}`,
+    };
+  }
   return {
     status: RDF_BASE_STANDS_STATUS, code: RDF_BASE_SHARED,
     error: `the RDF base ${peerText(base, { max: SHARED_BASE_SHOWN })} is held with RDF on by another space of this instance, so it would give one address two meanings `

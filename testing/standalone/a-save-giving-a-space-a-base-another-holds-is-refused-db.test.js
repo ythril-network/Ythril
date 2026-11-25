@@ -9,6 +9,9 @@
  * - A different base passes; a space re-saving its own base passes; a space with RDF off holding the same stored base does not count (as
  *   the exports judge it); a pair that already exists does not refuse a write that leaves the base and the switch as they are.
  * - The other space is named only to a caller who may read its schema (the no-trace rule the exports keep).
+ * - A base that STARTS another space's base, or is started by it (`<pub>/ld/` and `<pub>/ld/held/inner/` against `<pub>/ld/held/`), is refused
+ *   `409 rdf_base_nested` on every door, whichever way round: `/ld/` resolves an address to the space holding the longest base that starts
+ *   it, so a nested base would take every address of the space it sits in (bundle-271, Q-758, review of S3 finding 3). A sibling base passes.
  *
  * Run: node --test testing/standalone/a-save-giving-a-space-a-base-another-holds-is-refused-db.test.js (server build and the test MongoDB)
  */
@@ -99,6 +102,34 @@ describe('a save giving a space a base another space holds is refused', { skip }
         assert.equal(rdfOf(MOVER).baseEpoch, 1);
       });
 
+      it('a base that starts the base of another space, or is started by it, is 409 rdf_base_nested and stores nothing', async () => {
+        inst.reset();
+        const inside = await inst.doors[door](TARGET, { rdf: { enabled: true, base: `${base('held')}inner/` } });
+        assert.equal(inside.status, 409, inside.text.slice(0, 300));
+        assert.match(said(inside), /rdf_base_nested/, 'a base inside the base of another space has its own code');
+        assert.doesNotMatch(said(inside), /rdf_base_shared/);
+        assert.match(said(inside), new RegExp(HOLDER), 'an administrator is told which space it overlaps');
+        assert.equal(rdfOf(TARGET), undefined, 'nothing was stored');
+        inst.reset();
+        const around = await inst.doors[door](TARGET, { rdf: { enabled: true, base: 'https://shared.example.org/ld/' } });
+        assert.equal(around.status, 409, around.text.slice(0, 300));
+        assert.match(said(around), /rdf_base_nested/, 'a base that starts the base of another space');
+        assert.equal(rdfOf(TARGET), undefined, 'nothing was stored');
+        inst.reset();
+        const moved = await inst.doors[door](MOVER, { rdf: { enabled: true, base: `${base('held')}x/`, rebase: true } });
+        assert.equal(moved.status, 409, moved.text.slice(0, 300));
+        assert.match(said(moved), /rdf_base_nested/);
+        assert.deepEqual(rdfOf(MOVER), on(base('mover')), 'the base and its epoch are as they were');
+        inst.reset();
+        const untold = await inst.doors[door](TARGET, { rdf: { enabled: true, base: `${base('held')}inner/` } }, callerOf(TARGET));
+        assert.equal(untold.status, 409, untold.text.slice(0, 300));
+        assert.match(said(untold), /rdf_base_nested/);
+        assert.doesNotMatch(said(untold), new RegExp(HOLDER), 'a space the caller cannot read leaves no trace');
+        inst.reset();
+        const sibling = await inst.doors[door](TARGET, { rdf: { enabled: true, base: base('held-two') } });
+        assert.equal(sibling.refused, false, `a base beside another's, neither starting the other, passes: ${sibling.text.slice(0, 300)}`);
+      });
+
       it('a space with RDF off holding the same stored base does not count, either way round', async () => {
         inst.reset();
         const taking = await inst.doors[door](TARGET, { rdf: { enabled: true, base: base('off') } });
@@ -157,6 +188,15 @@ describe('a save giving a space a base another space holds is refused', { skip }
         const answer = await inst.doors[door](anchor, { rdf: { enabled: true, base: base('held') } });
         assert.equal(answer.status, 409, answer.text.slice(0, 300));
         assert.match(said(answer), /rdf_base_shared/);
+        assert.equal(spaceHeld(`${anchor}-new`), false, 'no space was made');
+      });
+
+      it('a create with a base nested in the base of another space is 409 rdf_base_nested and leaves no space behind', async () => {
+        inst.reset();
+        const anchor = `${door}-nested`;
+        const answer = await inst.doors[door](anchor, { rdf: { enabled: true, base: `${base('held')}inner/` } });
+        assert.equal(answer.status, 409, answer.text.slice(0, 300));
+        assert.match(said(answer), /rdf_base_nested/);
         assert.equal(spaceHeld(`${anchor}-new`), false, 'no space was made');
       });
 
