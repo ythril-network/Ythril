@@ -33,7 +33,7 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { SPARQL_QUERY_MAX_BYTES } from '../../rdf/sparql-engine.js';
 import { SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_QUERY_TOO_LARGE, SPARQL_UPDATE_NOT_HERE } from '../../rdf/sparql-refusal.js';
 import {
-  answerSparql, prepareSparql, renderSparql, headerList, isSparqlRefusal, sparqlRefusalBody, CallerGone, SPARQL_NO_QUERY, SPARQL_UNSUPPORTED_MEDIA_TYPE, SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS,
+  answerSparql, prepareSparql, renderSparql, headerList, isSparqlRefusal, sparqlRefusalBody, CallerGone, SparqlEngineFailure, SPARQL_NO_QUERY, SPARQL_UNSUPPORTED_MEDIA_TYPE, SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS,
   type SparqlAnswerRefusal, type SparqlQueryInput, type PreparedSparql,
 } from '../../rdf/sparql-answer.js';
 
@@ -136,7 +136,12 @@ async function answer(req: Request, res: Response): Promise<void> {
   };
   try {
     const prepared = await prepareSparql(input);
-    if (isSparqlRefusal(prepared)) { sendRefusal(res, prepared); return; }
+    if (isSparqlRefusal(prepared)) {
+      // A refusal of the parameters is audited by the counts it knows (length, members, nothing read), with its code as the outcome.
+      if (prepared.auditChanges) req.auditChangesExplicit = prepared.auditChanges;
+      sendRefusal(res, prepared);
+      return;
+    }
     setLeftOutHeaders(res, prepared);
     if (req.method === 'HEAD') {
       res.status(SPARQL_ANSWERED).setHeader('Content-Type', prepared.contentType);
@@ -158,6 +163,8 @@ async function answer(req: Request, res: Response): Promise<void> {
   } catch (err) {
     // The caller went away: there is no one to answer, and the engine and the slot are already let go.
     if (err instanceof CallerGone) return;
+    // An engine failure is audited by the counts of the query it ended, with `engine_failed` as its outcome.
+    if (err instanceof SparqlEngineFailure) req.auditChangesExplicit = err.auditChanges;
     sendCaughtFailure(res, ROUTE, err);
   }
 }

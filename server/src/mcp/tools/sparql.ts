@@ -24,16 +24,18 @@ import { budgetSizeSchema } from './_page-budget-schema.js';
 import { applyBudget, budgetBoundBy, defaultBudgetChars, resolveBudget, ROW_PAGER, type ResolvedBudget, type BudgetOutcome } from '../../brain/result-budget.js';
 import { spillResultSet } from '../../brain/graph-spill.js';
 import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
-import { SPARQL_LIMIT_BOUNDS } from '../../config/sparql-limits.js';
+import { SPARQL_LIMIT_BOUNDS, SPARQL_LIMIT_DEFAULTS } from '../../config/sparql-limits.js';
+import { SPARQL_QUERY_MAX_BYTES } from '../../rdf/sparql-engine.js';
 import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
 import { createRdfWriter, RdfWriteError } from '../../rdf/serialize.js';
 import type { Quad } from '../../rdf/literals.js';
 import { unwritable, holdsTriple } from '../../rdf/graph-render.js';
 import {
-  answerSparql, prepareSparql, resultsJson, isSparqlRefusal, sparqlRefusalBody, SPARQL_ENDPOINT_CODES, SPARQL_MEMBERS_LEFT_OUT, SPARQL_FILE_TRIPLES_WITHHELD, type PreparedSparql, type SparqlAnswerRefusal, type SparqlQueryInput,
+  answerSparql, prepareSparql, resultsJson, isSparqlRefusal, sparqlRefusalBody, SparqlEngineFailure, SPARQL_ENDPOINT_CODES, SPARQL_MEMBERS_LEFT_OUT, SPARQL_FILE_TRIPLES_WITHHELD, type PreparedSparql, type SparqlAnswerRefusal, type SparqlQueryInput,
 } from '../../rdf/sparql-answer.js';
 
 const STRINGS = { type: 'array', items: { type: 'string' } } as const;
+const BYTES_PER_KIB = 1024;
 
 /** How many times this tool carries an answer's body: once (see `carriagesFor`, which holds the other tools to half for the second copy). */
 const SPARQL_CARRIAGES = 1;
@@ -112,8 +114,8 @@ export const sparql_queryTool: ToolHandler = {
     + '(`members_left_out`: view members with RDF off or unsettled names; `file_triples_withheld`: members whose file statements need '
     + '`files: read`).\n\n'
     + 'WHOLE OR REFUSED: an answer over `sparql.maxResults` rows (or the lower `limit` you send) is refused (413, `sparql_too_many_results`), '
-    + 'never cut short: use LIMIT and OFFSET in the query to page. A query that reads more than `sparql.maxRecordsRead` records or runs past '
-    + '`sparql.timeoutMs` is refused too. The size ceilings (`maxChars`, `maxBytes`, `maxTokens`) admit whole rows only; the rows they cut '
+    + 'never cut short: use LIMIT and OFFSET in the query to page. An answer that holds more than `sparql.maxResultBytes` bytes of values, a query that reads more than '
+    + '`sparql.maxRecordsRead` records and one that runs past `sparql.timeoutMs` are refused too. The size ceilings (`maxChars`, `maxBytes`, `maxTokens`) admit whole rows only; the rows they cut '
     + 'are kept for a day as a spill, read with `read_spill` (the answer\'s `remainder`).\n\n'
     + 'NOT HERE: SERVICE (federation), SPARQL Update and LOAD are refused; FROM and `default-graph-uri` naming a graph outside your members '
     + 'answer empty. Cost: one query runs at a time per token (503 `sparql_busy` otherwise). Needs `knowledge: read`. '
@@ -126,8 +128,8 @@ export const sparql_queryTool: ToolHandler = {
     type: 'object',
     properties: {
       space: s.requiredSpace,
-      query: { type: 'string', minLength: 1, description: 'The SPARQL 1.1 query text (at most 64 KiB). SELECT, ASK, CONSTRUCT or DESCRIBE; prefixes as the query declares them.' },
-      limit: { type: 'integer', minimum: 1, maximum: SPARQL_LIMIT_BOUNDS.maxResults.max, description: 'The most rows (or statements) the answer may hold, at most `sparql.maxResults` (default 10 000); an answer over it is refused, not cut. To cut, put LIMIT in the query.' },
+      query: { type: 'string', minLength: 1, description: `The SPARQL 1.1 query text (at most ${SPARQL_QUERY_MAX_BYTES / BYTES_PER_KIB} KiB). SELECT, ASK, CONSTRUCT or DESCRIBE; prefixes as the query declares them.` },
+      limit: { type: 'integer', minimum: 1, maximum: SPARQL_LIMIT_BOUNDS.maxResults.max, description: `The most rows (or statements) the answer may hold, at most \`sparql.maxResults\` (default ${SPARQL_LIMIT_DEFAULTS.maxResults}); an answer over it is refused, not cut. To cut, put LIMIT in the query.` },
       'default-graph-uri': { ...STRINGS, maxItems: MAX_SPACE_IDS, description: 'The SPARQL protocol\'s dataset: the member graphs that make up the default graph (replaces the query\'s FROM). A graph that is not one of your members holds nothing.' },
       'named-graph-uri': { ...STRINGS, maxItems: MAX_SPACE_IDS, description: 'The SPARQL protocol\'s dataset: the member graphs `GRAPH` may name (replaces FROM NAMED).' },
       ...budgetSizeSchema('row', ROW_PAGER),
@@ -148,8 +150,19 @@ export const sparql_queryTool: ToolHandler = {
       caller: ctx.callerRecord ?? { rights: ctx.rights ?? null }, callerKey: ctx.rateKey, fingerprintOf: schemaFingerprintOf,
     };
     const prepared = await prepareSparql(input);
-    if (isSparqlRefusal(prepared)) throw refused(prepared);
-    const answered = await answerSparql(input, prepared);
+    if (isSparqlRefusal(prepared)) {
+      // A refusal of the parameters is audited by the counts it knows (length, members, nothing read), with its code as the outcome.
+      if (prepared.auditChanges) ctx.recordAuditChanges?.(prepared.auditChanges);
+      throw refused(prepared);
+    }
+    let answered: Awaited<ReturnType<typeof answerSparql>>;
+    try {
+      answered = await answerSparql(input, prepared);
+    } catch (err) {
+      // An engine failure is audited by the counts of the query it ended, with `engine_failed` as its outcome.
+      if (err instanceof SparqlEngineFailure) ctx.recordAuditChanges?.(err.auditChanges);
+      throw err;
+    }
     // A refusal of the run is audited too, by the counts of the query it ended and its code as the outcome.
     if (isSparqlRefusal(answered)) {
       if (answered.auditChanges) ctx.recordAuditChanges?.(answered.auditChanges);

@@ -21,6 +21,10 @@
  *   definition the schema act writes for it (`rdf:type rdfs:Class`, `owl:ObjectProperty` for an edge label, and `rdfs:label` its name);
  * - `schema` (the ontology) and `schema/shape/<kind>/<type>` (a shape with its property shapes).
  *
+ * A predicate under the base is an address as well (lens round): a record with no type, and a file, write their properties as fragments of the
+ * kind's own document (`<vocab>file#owner`), so `vocab/file` answers each property the records use, `rdf:type rdf:Property` and `rdfs:label`
+ * (the schema act's `usedPropertiesDefinition`), read with schema read and, for the usage probe, knowledge read.
+ *
  * A type no record uses has no address an export writes: `vocab/<kind>/<type>` of it answers 404, as does an undeclared type that is used
  * when the token reads the schema but not the records.
  *
@@ -103,7 +107,8 @@ describe('every address an export writes dereferences', { skip }, () => {
       const schema = await f.d.restGet(readerKey, `/api/spaces/${encodeURIComponent(space)}/schema-rdf`, { Accept: 'text/turtle' });
       assert.equal(schema.status, 200, `schema export of ${space}: ${schema.text.slice(0, 200)}`);
       for (const q of [...records, ...await parseRdf('turtle', schema.text)]) {
-        for (const t of [q.subject, q.object]) {
+        // A predicate under the base is an address too: a property of an untyped kind is a fragment of the kind's own document (`vocab/file#owner`).
+        for (const t of [q.subject, q.predicate, q.object]) {
           if (!underBase(t)) continue;
           const path = pathOf(t.value);
           if (!isNamespace(path) && !expected.has(path)) expected.set(path, new Set());
@@ -143,6 +148,25 @@ describe('every address an export writes dereferences', { skip }, () => {
     }
   });
 
+  it('the document of an untyped kind answers its properties, each rdf:type rdf:Property with its label (vocab/file, vocab/entity)', async () => {
+    const { paths } = await missingOf('vocab');
+    const untyped = paths.filter(p => /\/vocab\/(file|entity|fact|chrono)$/.test(p));
+    assert.ok(untyped.includes(`/ld/${A}/vocab/file`), `the exports write no property of an untyped kind in ${A}: ${paths.join(', ')}`);
+    for (const path of untyped) {
+      const r = await f.d.restGet(readerKey, path, { Accept: 'application/n-quads' });
+      assert.equal(r.status, 200, `${path}: ${r.status} ${r.text.slice(0, 200)}`);
+      const got = (await parseRdf('nquads', r.text)).map(tripleText);
+      const properties = got.filter(t => t.includes(`<${RDF_TYPE}> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property>`));
+      assert.ok(properties.length > 0, `${path} answers no rdf:Property: ${r.text.slice(0, 300)}`);
+      for (const t of properties) {
+        const subject = t.slice(1, t.indexOf('>'));
+        assert.ok(subject.startsWith(`${PUBLIC}${path}#`), `${path} answers a property that is no fragment of it: ${subject}`);
+        const name = decodeURIComponent(subject.slice(subject.indexOf('#') + 1));
+        assert.ok(got.includes(`<${subject}> <${RDFS_LABEL}> "${name}"^^<http://www.w3.org/2001/XMLSchema#string>`), `${subject} has no label ${name}`);
+      }
+    }
+  });
+
   it('the ontology and every shape answer what the schema export writes about them', async () => {
     const { paths, missing } = await missingOf('schema-graph');
     assert.ok(paths.includes(`/ld/${A}/schema`) && paths.some(p => p.startsWith(`/ld/${A}/schema/shape/`)), `no ontology or shape address: ${paths.join(', ')}`);
@@ -150,7 +174,8 @@ describe('every address an export writes dereferences', { skip }, () => {
   });
 
   it('a type no record uses, or one read without the records, answers 404', async () => {
-    for (const path of [`/ld/${A}/vocab/entity/Nobody`, `/ld/${A}/vocab/edge/nobody`, `/ld/${B}/vocab/fact/nothing`]) {
+    // The namespace prefix of a kind (`vocab/file/`, trailing slash) is no address, and a kind with no property in use answers 404 too.
+    for (const path of [`/ld/${A}/vocab/entity/Nobody`, `/ld/${A}/vocab/edge/nobody`, `/ld/${B}/vocab/fact/nothing`, `/ld/${A}/vocab/file/`, `/ld/${B}/vocab/file`]) {
       const r = await f.d.restGet(readerKey, path, { Accept: 'application/n-quads' });
       assert.equal(r.status, 404, `${path}: ${r.status} ${r.text.slice(0, 200)}`);
     }

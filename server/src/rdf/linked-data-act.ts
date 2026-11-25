@@ -28,9 +28,11 @@ import { fromRdfJs, type RdfJsLike } from './rdf-js-terms.js';
 import type { RdfMember } from './rdf-members.js';
 import type { Quad } from './literals.js';
 import type { UsedType } from './schema-export-act.js';
+import { namesOf, resolveTermIri, type TermKind } from './term-iri.js';
 import type { RdfCaller } from './rdf-space-state.js';
+import { ByteMeter, termBytes } from './answer-size.js';
 import {
-  busyRefusal, sparqlRefusalOf, SPARQL_TOO_LARGE, SPARQL_TOO_MANY_RESULTS, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT,
+  busyRefusal, sparqlRefusalOf, SPARQL_TOO_LARGE, SPARQL_TOO_MANY_RESULTS, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT, SPARQL_ANSWER_TOO_LARGE,
 } from './sparql-refusal.js';
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
@@ -59,11 +61,13 @@ export function spaceOfAddress(address: string): string | null {
  * At most `limit` quads of a match that `keep` admits, and whether there were more of them; the stream is closed either way. A quad `keep`
  * refuses is neither counted nor answered, so the cap and the "more" are about the statements the answer would carry.
  */
-export async function takeStatements(stream: Readable, limit: number, keep: (q: RdfJsLike) => boolean = () => true): Promise<{ quads: RdfJsLike[]; more: boolean }> {
+export async function takeStatements(stream: Readable, limit: number, keep: (q: RdfJsLike) => boolean = () => true, meter?: ByteMeter): Promise<{ quads: RdfJsLike[]; more: boolean }> {
   const quads: RdfJsLike[] = [];
   for await (const q of stream as AsyncIterable<RdfJsLike>) {
     if (!keep(q)) continue;
     if (quads.length >= limit) return { quads, more: true };
+    // The bytes of what is kept, counted as it is read: the meter throws `sparql_answer_too_large` past `sparql.maxResultBytes`.
+    meter?.add(termBytes(q));
     quads.push(q);
   }
   return { quads, more: false };
@@ -125,13 +129,15 @@ export async function readStatements(input: StatementsInput): Promise<LdOutcome<
   const slot = takeSlot('sparql', input.callerKey);
   if (!slot) return busyOutcome();
   try {
-    const { timeoutMs, maxResults } = sparqlLimits(getConfig());
+    const { timeoutMs, maxResults, maxResultBytes } = sparqlLimits(getConfig());
     const source = createQuadSource({ members: [space], caller: input.caller, fingerprintOf: schemaFingerprintOf }, { deadline: Date.now() + timeoutMs, signal: input.signal });
+    // One meter for the whole answer, both halves: the bytes of every statement kept (`sparql.maxResultBytes`).
+    const meter = new ByteMeter(maxResultBytes);
     // The chrono entry's time nodes are its own statements: a fragment never travels, so they are answered at the entry's address.
     const subjects = kind === 'chrono' ? [address, `${address}#start`, `${address}#end`] : [address];
     const about: RdfJsLike[] = [];
     for (const s of subjects) {
-      const got = await takeStatements(source.match(DataFactory.namedNode(s), undefined, undefined, undefined), maxResults + 1 - about.length);
+      const got = await takeStatements(source.match(DataFactory.namedNode(s), undefined, undefined, undefined), maxResults + 1 - about.length, undefined, meter);
       about.push(...got.quads);
       if (about.length > maxResults) {
         return {
@@ -153,14 +159,14 @@ export async function readStatements(input: StatementsInput): Promise<LdOutcome<
         // A statement of the record's own (a self-reference) is answered in its own half: it is filtered before the cap counts, so an answer
         // that fits the cap is not called cut because of a statement it would not carry twice.
         const got = await takeStatements(source.match(undefined, undefined, DataFactory.namedNode(address), undefined), maxResults - about.length,
-          q => !own.has(q.subject!.value));
+          q => !own.has(q.subject!.value), meter);
         pointing = got.quads;
         truncated = got.more;
       } catch (err) {
-        // The pointing half stops at a bound of the read (the records read, the time) as it stops at the cap: what was read about the record is
-        // answered whole, and the answer says its inbound half was cut.
+        // The pointing half stops at a bound of the read (the records read, the time, the bytes) as it stops at the cap: what was read about
+        // the record is answered whole, and the answer says its inbound half was cut.
         const named = sparqlRefusalOf(err);
-        if (named?.code !== SPARQL_TOO_MUCH_READ && named?.code !== SPARQL_TIMEOUT) throw err;
+        if (named?.code !== SPARQL_TOO_MUCH_READ && named?.code !== SPARQL_TIMEOUT && named?.code !== SPARQL_ANSWER_TOO_LARGE) throw err;
         truncated = true;
       }
     }
@@ -185,6 +191,74 @@ export function undeclaredTypeOf(address: string, meta: RdfMember['meta']): Used
   const owner = term.owners[0];
   if (owner === undefined || owner.prop !== undefined || owner.type === null || owner.kind === 'file') return undefined;
   return { kind: owner.kind, type: owner.type };
+}
+
+/** The kinds whose records may have no type: their properties are fragments of the kind's own vocab document. */
+const UNTYPED_KINDS: ReadonlySet<string> = new Set(['entity', 'fact', 'chrono', 'file']);
+/** The most property names one document answers: a space whose records hold more is answered the first of them. */
+const PROPERTY_NAMES_MAX = 1_000;
+
+/**
+ * The kind a vocab address names when it is that kind's own document (`<vocab>file`, `<vocab>fact`): where the properties of a record with
+ * no type, and of a file, are fragments (`<vocab>file#owner`). Undefined for any other address.
+ */
+export function untypedKindOf(address: string, meta: RdfMember['meta']): TermKind | undefined {
+  // The reverse reader names no term by a bare kind document (the forward rule names none), so the address is compared to the vocab here: the
+  // kind's document is the vocab and the kind, nothing after (`vocab/file/`, a namespace, is no document).
+  const { vocab } = namesOf(meta);
+  if (!address.startsWith(vocab)) return undefined;
+  const kind = address.slice(vocab.length);
+  return UNTYPED_KINDS.has(kind) ? kind as TermKind : undefined;
+}
+
+/** The decoded name of a fragment (`iriFragment` percent-encodes), or undefined for a fragment that is no valid encoding. */
+function nameOfFragment(fragment: string): string | undefined {
+  try { return decodeURIComponent(fragment); } catch { return undefined; }
+}
+
+/** What the read of an untyped kind's property names needs. */
+export interface UsedPropertiesInput {
+  space: string;
+  meta: RdfMember['meta'];
+  address: string;
+  kind: TermKind;
+  caller: RdfCaller | undefined;
+  rights: TokenRights | null | undefined;
+  callerKey: string;
+  signal: AbortSignal;
+}
+
+/**
+ * The names of the properties the records of an untyped kind use: the predicates of the space's statements that are fragments of `address`
+ * (`<address>#<prop>`), read with one pass of the quad source in a slot of family `sparql` under the query bounds. Asked only of a caller who
+ * reads the records (`knowledge: read`): the vocab address is read with schema read, and it must not tell such a caller what the records hold.
+ */
+export async function usedPropertiesOf(input: UsedPropertiesInput): Promise<LdOutcome<{ names: string[] }>> {
+  if (!mayReadArea(input.rights, input.space, 'knowledge')) return { answer: 'read', names: [] };
+  const slot = takeSlot('sparql', input.callerKey);
+  if (!slot) return busyOutcome();
+  try {
+    const { timeoutMs } = sparqlLimits(getConfig());
+    const source = createQuadSource({ members: [input.space], caller: input.caller, fingerprintOf: schemaFingerprintOf }, { deadline: Date.now() + timeoutMs, signal: input.signal });
+    const names = new Set<string>();
+    const prefix = `${input.address}#`;
+    for await (const q of source.match(undefined, undefined, undefined, undefined) as AsyncIterable<RdfJsLike>) {
+      const predicate = q.predicate!.value;
+      if (!predicate.startsWith(prefix)) continue;
+      // A name counts when the forward rule gives the predicate back for it: no spelling the export does not write is a property here.
+      const name = nameOfFragment(predicate.slice(prefix.length));
+      if (name !== undefined && name !== '' && resolveTermIri(input.meta, input.kind, null, name) === predicate) names.add(name);
+      if (names.size >= PROPERTY_NAMES_MAX) break;
+    }
+    return { answer: 'read', names: [...names].sort() };
+  } catch (err) {
+    if (input.signal.aborted) return { answer: 'gone' };
+    const refusal = refusalOfError(err);
+    if (!refusal) throw err;
+    return { answer: 'refused', refusal };
+  } finally {
+    slot.release();
+  }
 }
 
 /** What the question whether a type is in use needs. */

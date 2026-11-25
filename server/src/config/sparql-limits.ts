@@ -32,14 +32,16 @@ export interface SparqlLimitsConfig {
     maxRecordsRead?: number;
     /** The most rows (or graph statements) one answer may hold; more is 413 `sparql_too_many_results`, never a cut-off answer. Default 10 000. */
     maxResults?: number;
+    /** The most bytes of values (every term of every row or statement) one answer may hold; more is 413 `sparql_answer_too_large`. Default 64 MiB. */
+    maxResultBytes?: number;
   };
 }
 
 /** The limits in effect, every key set. */
-export interface SparqlLimits { timeoutMs: number; maxRecordsRead: number; maxResults: number }
+export interface SparqlLimits { timeoutMs: number; maxRecordsRead: number; maxResults: number; maxResultBytes: number }
 
 /** The defaults; `maxRecordsRead` is the measured one (the module's docblock gives the measurement). */
-export const SPARQL_LIMIT_DEFAULTS: Readonly<SparqlLimits> = Object.freeze({ timeoutMs: 30_000, maxRecordsRead: 200_000, maxResults: 10_000 });
+export const SPARQL_LIMIT_DEFAULTS: Readonly<SparqlLimits> = Object.freeze({ timeoutMs: 30_000, maxRecordsRead: 200_000, maxResults: 10_000, maxResultBytes: 64 * 1024 * 1024 });
 
 /** The bounds each key is held to, inclusive. */
 const TIMEOUT_MS_MIN = 1_000;
@@ -47,10 +49,13 @@ const TIMEOUT_MS_MAX = 300_000;
 const RECORDS_READ_MIN = 1_000;
 const RECORDS_READ_MAX = 10_000_000;
 const RESULTS_MAX = 1_000_000;
+const RESULT_BYTES_MIN = 1024 * 1024;
+const RESULT_BYTES_MAX = 1024 * 1024 * 1024;
 export const SPARQL_LIMIT_BOUNDS: Readonly<Record<keyof SparqlLimits, { min: number; max: number }>> = Object.freeze({
   timeoutMs: { min: TIMEOUT_MS_MIN, max: TIMEOUT_MS_MAX },
   maxRecordsRead: { min: RECORDS_READ_MIN, max: RECORDS_READ_MAX },
   maxResults: { min: 1, max: RESULTS_MAX },
+  maxResultBytes: { min: RESULT_BYTES_MIN, max: RESULT_BYTES_MAX },
 });
 
 const KEYS = Object.keys(SPARQL_LIMIT_BOUNDS) as (keyof SparqlLimits)[];
@@ -86,5 +91,6 @@ export function sparqlLimits(cfg: SparqlLimitsConfig): SparqlLimits {
     timeoutMs: s.timeoutMs ?? SPARQL_LIMIT_DEFAULTS.timeoutMs,
     maxRecordsRead: s.maxRecordsRead ?? SPARQL_LIMIT_DEFAULTS.maxRecordsRead,
     maxResults: s.maxResults ?? SPARQL_LIMIT_DEFAULTS.maxResults,
+    maxResultBytes: s.maxResultBytes ?? SPARQL_LIMIT_DEFAULTS.maxResultBytes,
   };
 }

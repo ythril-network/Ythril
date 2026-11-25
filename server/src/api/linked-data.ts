@@ -58,12 +58,13 @@ import { chooseRdfFormat, RDF_MEDIA_TYPES, RDF_FORMAT_NOT_ACCEPTABLE } from '../
 import { rdfMembers, type RdfMember } from '../rdf/rdf-members.js';
 import { addressNames, recordOfAddress, shapeOfAddress } from '../rdf/term-reverse.js';
 import { exportReportIri, graphDescription } from '../rdf/export-act.js';
-import { rdfSchemaExportAct, type UsedType } from '../rdf/schema-export-act.js';
+import { rdfSchemaExportAct, type UsedType, type UsedProperties } from '../rdf/schema-export-act.js';
 import { renderGraph } from '../rdf/graph-render.js';
 import { SPARQL_GRAPH_FORMATS } from '../rdf/sparql-answer.js';
-import { readStatements, typeInUse, spaceOfAddress, undeclaredTypeOf, type LdRefusal, type LdStatementsKind } from '../rdf/linked-data-act.js';
-import { SPARQL_BUSY, SPARQL_TOO_MANY_RESULTS, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT, SPARQL_STORE_UNAVAILABLE } from '../rdf/sparql-refusal.js';
-import { RDF_NOT_ENABLED, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_BASE_CONFLICT, RDF_TERM_CLASH, RDF_UNWRITABLE, type RdfCaller } from '../rdf/rdf-space-state.js';
+import { readStatements, typeInUse, usedPropertiesOf, spaceOfAddress, undeclaredTypeOf, untypedKindOf, type LdRefusal, type LdStatementsKind } from '../rdf/linked-data-act.js';
+import { SPARQL_BUSY, SPARQL_TOO_MANY_RESULTS, SPARQL_ANSWER_TOO_LARGE, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT, SPARQL_STORE_UNAVAILABLE } from '../rdf/sparql-refusal.js';
+import { rdfSpaceState, RDF_NOT_ENABLED, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_BASE_CONFLICT, RDF_TERM_CLASH, RDF_UNWRITABLE, type RdfCaller } from '../rdf/rdf-space-state.js';
+import { getConfig } from '../config/loader.js';
 import { sendProblem } from './problem-body.js';
 
 /** An address no reader of this caller may read, of any kind: one code for all of them. */
@@ -80,7 +81,7 @@ export const LD_TRUNCATED_HEADER = 'X-Ythril-Truncated';
  */
 export const LD_CODES: readonly string[] = Object.freeze([
   LD_NOT_FOUND, RDF_FORMAT_NOT_ACCEPTABLE, RDF_NOT_ENABLED, RDF_BASE_CONFLICT, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_TERM_CLASH, RDF_UNWRITABLE,
-  SPARQL_TOO_MANY_RESULTS, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT, SPARQL_STORE_UNAVAILABLE, SPARQL_BUSY,
+  SPARQL_TOO_MANY_RESULTS, SPARQL_ANSWER_TOO_LARGE, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT, SPARQL_STORE_UNAVAILABLE, SPARQL_BUSY,
 ]);
 
 /** The record kinds `/ld/:spaceId/:kind/:id` answers; a file, an agent, a schema version and a term have routes of their own. */
@@ -171,6 +172,17 @@ function memberOf(req: Request, res: Response, space: string): RdfMember | null 
 }
 
 /**
+ * The space's settled RDF names for a schema address, read with the schema rung alone: the routes of the schema graph ask `schema: read`, so
+ * a token holding that and no records right reads them (a member read asks `knowledge: read` too, and would answer such a token 404).
+ */
+function schemaStateOf(req: Request, res: Response, space: string): { meta: RdfMember['meta'] } | null {
+  const state = rdfSpaceState(getConfig(), space, callerOf(req), schemaFingerprintOf);
+  if (state.ok) return state;
+  sendProblem(res, { status: state.status, title: 'Not readable as RDF', detail: state.error, code: state.code, ...(state.detail ? { extra: state.detail } : {}) });
+  return null;
+}
+
+/**
  * Answer a refusal of a read (a bound, the store, the deadline, a slot that is spent) as a problem body, with the wait a 503 tells, and log it:
  * the code and the status, never the address (a refusal at this door was a silent 4xx or 5xx; the operator reads these lines to see a bound hit).
  */
@@ -231,11 +243,12 @@ async function answerGraph(req: Request, res: Response): Promise<void> {
 async function answerSchema(req: Request, res: Response, kind: 'schema' | 'vocab' | 'ontology' | 'shape'): Promise<void> {
   const { address, space } = RESOLVED.get(req)!;
   res.setHeader('Cache-Control', 'no-store');
-  const member = memberOf(req, res, space);
+  const member = schemaStateOf(req, res, space);
   if (!member) return;
   const token = req.authToken as { rights?: TokenRights | null } | undefined;
   let version: { fingerprint: string; typeSchemas: Record<string, unknown>; rules: Record<string, unknown> } | undefined;
   let used: UsedType | undefined;
+  let usedProperties: UsedProperties | undefined;
   if (kind === 'ontology') {
     const read = recordOfAddress(address, addressNames(member.meta));
     if (read.answer !== 'other' || read.what !== 'ontology') { sendNotFound(res); return; }
@@ -243,6 +256,14 @@ async function answerSchema(req: Request, res: Response, kind: 'schema' | 'vocab
     const read = shapeOfAddress(address, addressNames(member.meta));
     if (read.answer !== 'shape' || read.of !== 'space') { sendNotFound(res); return; }
   } else if (kind === 'vocab') {
+    const untyped = untypedKindOf(address, member.meta);
+    if (untyped !== undefined) {
+      // The document of an untyped kind (`vocab/file`): the properties its records use, each `rdf:type rdf:Property` with its label.
+      const found = await usedPropertiesOf({ space, meta: member.meta, address, kind: untyped, caller: callerOf(req), rights: token?.rights, callerKey: slotCallerKey(req), signal: abortWhenClientGoes(res) });
+      if (found.answer === 'gone') return;
+      if (found.answer === 'refused') { sendLdRefusal(res, found.refusal); return; }
+      if (found.answer === 'read' && found.names.length > 0) usedProperties = { kind: untyped, names: found.names };
+    }
     const undeclared = undeclaredTypeOf(address, member.meta);
     if (undeclared !== undefined) {
       const inUse = await typeInUse({ space, address, used: undeclared, caller: callerOf(req), rights: token?.rights, callerKey: slotCallerKey(req), signal: abortWhenClientGoes(res) });
@@ -263,7 +284,7 @@ async function answerSchema(req: Request, res: Response, kind: 'schema' | 'vocab
   }
   const outcome = rdfSchemaExportAct({
     spaceId: space, accept: req.headers['accept'], caller: callerOf(req), fingerprintOf: schemaFingerprintOf, formats: SPARQL_GRAPH_FORMATS,
-    ...(version ? { version } : { term: address }), ...(used ? { used } : {}),
+    ...(version ? { version } : { term: address }), ...(used ? { used } : {}), ...(usedProperties ? { usedProperties } : {}),
   });
   if (outcome.status !== EXPORT_OK) {
     sendProblem(res, { status: outcome.status, title: 'Not answered', detail: outcome.error, code: outcome.code, ...(outcome.detail ? { extra: outcome.detail } : {}) });
