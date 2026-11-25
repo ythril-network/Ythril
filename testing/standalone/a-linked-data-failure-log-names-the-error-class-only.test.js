@@ -56,4 +56,18 @@ describe('the Linked Data door logs the class of a failure, not its message', ()
     assert.deepEqual(logsOfAnErrorText(src), [], `${FILE} logs an error's message: log its class (err.constructor.name) instead`);
     assert.match(stripComments(src), /log\.error\([^;]*\.(?:constructor\.name|name)\b/, 'the catch of answered() logs the error class');
   });
+
+  it('every bound or slot refusal the door sends is logged by its code and status, never by the address (lens-3 O1)', () => {
+    const code = stripComments(readFileSync(join(process.cwd(), FILE), 'utf8'));
+    const at = code.indexOf('function sendLdRefusal(');
+    assert.ok(at > 0, 'the door has no sendLdRefusal: the one place a refusal of a read is answered');
+    const body = code.slice(at, code.indexOf('\n}\n', at));
+    const warn = /log\.warn\(([^;]*)\);/.exec(body);
+    assert.ok(warn, 'sendLdRefusal writes no log line: a refusal at the Linked Data door is silent');
+    assert.match(warn[1], /r\.code/, 'the line does not name the code');
+    assert.match(warn[1], /r\.status/, 'the line does not name the status');
+    assert.doesNotMatch(warn[1], /address|originalUrl|req\b|path/i, 'the line names the address asked for');
+    // Every refusal of the act's outcome reaches the one sender: no `sendProblem` answers an outcome's refusal by itself.
+    assert.ok(/sendLdRefusal\(res, outcome\.refusal\)/.test(code) && /sendLdRefusal\(res, inUse\.refusal\)/.test(code), 'a refusal of a read is answered outside sendLdRefusal');
+  });
 });

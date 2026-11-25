@@ -85,8 +85,12 @@ export const RDF_READ_FIELDS: Readonly<Record<RdfRecordKind, readonly string[]>>
   file: Object.freeze(['_id', 'path', 'description', 'tags', 'properties', 'createdAt', 'updatedAt', 'sizeBytes', 'sha256', 'parentFileId', 'deletedAt', 'feedMarker']),
 });
 
-/** The kinds that carry an author, so an agent's statements, and the ones that carry the common fields (dates, keywords, description). */
-const AUTHORED: readonly RdfRecordKind[] = Object.freeze(['entity', 'fact', 'chrono', 'edge']);
+/** Every kind a member's statements come from, in walk order: the one list the export's walk and the quad source's candidates are derived from. */
+export const RDF_RECORD_KINDS: readonly RdfRecordKind[] = Object.freeze(['entity', 'fact', 'chrono', 'edge', 'link', 'file']);
+/** The kinds that carry an author, so an agent's statements (the knowledge kinds). */
+export const AUTHORED_RDF_KINDS: readonly RdfRecordKind[] = Object.freeze(['entity', 'fact', 'chrono', 'edge']);
+const AUTHORED = AUTHORED_RDF_KINDS;
+/** The kinds that carry the common fields (dates, keywords, description). */
 const COMMON: readonly RdfRecordKind[] = Object.freeze(['entity', 'fact', 'chrono', 'edge', 'file']);
 const std = (prefix: StandardPrefix, local: string): string => stdIri(prefix, local).value;
 

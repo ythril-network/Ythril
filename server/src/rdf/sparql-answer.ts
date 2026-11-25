@@ -24,19 +24,19 @@ import { z } from 'zod';
 import { getConfig } from '../config/loader.js';
 import { queryInt } from '../brain/result-budget.js';
 import { sparqlLimits, SPARQL_LIMIT_BOUNDS } from '../config/sparql-limits.js';
-import { takeSlot, SLOT_FAMILIES } from '../util/slots.js';
+import { takeSlot } from '../util/slots.js';
 import { log, peerText, NAME_QUOTED, refusalOfParse } from '../util/log.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 import { preferredByAccept } from '../http/accept-weigh.js';
-import { EXPORT_CONFLICT } from '../export/export-statuses.js';
 import { checkSparqlAlgebra, runSparql, type SparqlAlgebra, type SparqlResult } from './sparql-engine.js';
 import {
-  SPARQL_REFUSAL_CODES, SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_UNAVAILABLE, SPARQL_BUSY, SPARQL_TOO_MANY_RESULTS, sparqlRefusalOf,
+  SPARQL_REFUSAL_CODES, SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_TOO_MANY_RESULTS, busyRefusal, sparqlRefusalOf,
 } from './sparql-refusal.js';
+import { renderGraph, unwritable, type RenderedAnswer } from './graph-render.js';
 import { createQuadSource } from './quad-source.js';
 import { rdfMembers } from './rdf-members.js';
-import { fromRdfJs } from './rdf-js-terms.js';
-import { createRdfWriter, rdfVersionOf, RdfWriteError, type RdfFormat } from './serialize.js';
+import { fromRdfJs, type RdfJsLike } from './rdf-js-terms.js';
+import type { RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentType, RDF_FORMAT_NOT_ACCEPTABLE } from './export-format.js';
 import type { Quad } from './literals.js';
 import { RDF_NOT_ENABLED, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_UNWRITABLE, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
@@ -205,7 +205,7 @@ function texts(v: unknown): string[] | null {
 const refusal = (status: number, code: string, error: string, extra: Partial<SparqlAnswerRefusal> = {}): SparqlAnswerRefusal => ({ status, code, error, ...extra });
 
 /** Log one refusal: its code and the member count, never the query. */
-function said(r: SparqlAnswerRefusal, members: number): SparqlAnswerRefusal {
+function refusalLogged(r: SparqlAnswerRefusal, members: number): SparqlAnswerRefusal {
   log.warn(`SPARQL query refused (${peerText(r.code, { max: NAME_QUOTED })}, status ${r.status}) over ${members} member(s)`);
   return r;
 }
@@ -243,11 +243,11 @@ export async function prepareSparql(input: SparqlQueryInput): Promise<PreparedSp
   });
   if (!parsed.success) {
     const code = PARAM_CODES[String(refusalOfParse(parsed.error).issues[0]?.path[0] ?? 'query')] ?? SPARQL_NO_QUERY;
-    return said(refusal(SPARQL_BAD_REQUEST, code, PARAM_WORDS[code] ?? limitWords), n);
+    return refusalLogged(refusal(SPARQL_BAD_REQUEST, code, PARAM_WORDS[code] ?? limitWords), n);
   }
   const { query: q, limit } = parsed.data;
-  if (q === undefined) return said(refusal(SPARQL_BAD_REQUEST, SPARQL_NO_QUERY, PARAM_WORDS[SPARQL_NO_QUERY]!), n);
-  if (limit !== undefined && limit > maxResults) return said(refusal(SPARQL_BAD_REQUEST, SPARQL_BAD_LIMIT, limitWords), n);
+  if (q === undefined) return refusalLogged(refusal(SPARQL_BAD_REQUEST, SPARQL_NO_QUERY, PARAM_WORDS[SPARQL_NO_QUERY]!), n);
+  if (limit !== undefined && limit > maxResults) return refusalLogged(refusal(SPARQL_BAD_REQUEST, SPARQL_BAD_LIMIT, limitWords), n);
   const bound = limit ?? maxResults;
   const defaults = parsed.data['default-graph-uri'] ?? [];
   const named = parsed.data['named-graph-uri'] ?? [];
@@ -256,7 +256,7 @@ export async function prepareSparql(input: SparqlQueryInput): Promise<PreparedSp
   });
   if ('refusal' in checked) {
     const r = checked.refusal;
-    return said(refusal(r.status, r.code, r.error, { ...(r.line !== undefined ? { line: r.line } : {}), ...(r.column !== undefined ? { column: r.column } : {}) }), n);
+    return refusalLogged(refusal(r.status, r.code, r.error, { ...(r.line !== undefined ? { line: r.line } : {}), ...(r.column !== undefined ? { column: r.column } : {}) }), n);
   }
   const { form, vars } = formOf(checked.algebra);
   const graph = form === 'construct' || form === 'describe';
@@ -265,13 +265,13 @@ export async function prepareSparql(input: SparqlQueryInput): Promise<PreparedSp
   let contentType: string;
   if (graph) {
     const choice = chooseRdfFormat({ accept: input.accept, members: 1, offered: SPARQL_GRAPH_FORMATS });
-    if (!choice.ok) return said(refusal(choice.status, choice.code, choice.error, { detail: { formats: choice.formats } }), n);
+    if (!choice.ok) return refusalLogged(refusal(choice.status, choice.code, choice.error, { detail: { formats: choice.formats } }), n);
     graphFormat = choice.format;
     contentType = rdfContentType(choice.format, undefined);
   } else {
     const pick = preferredByAccept(input.accept, SPARQL_RESULT_TYPES);
     if (pick.kind === 'none') {
-      return said(refusal(SPARQL_NOT_ACCEPTABLE_STATUS, SPARQL_NOT_ACCEPTABLE, `Accept names none of the formats a ${form.toUpperCase()} answers in: ${SPARQL_RESULT_TYPES.join(', ')}`), n);
+      return refusalLogged(refusal(SPARQL_NOT_ACCEPTABLE_STATUS, SPARQL_NOT_ACCEPTABLE, `Accept names none of the formats a ${form.toUpperCase()} answers in: ${SPARQL_RESULT_TYPES.join(', ')}`), n);
     }
     resultType = pick.kind === 'chosen' ? pick.mediaType : JSON_TYPE;
     contentType = resultType === 'application/json' ? JSON_TYPE : resultType;
@@ -279,7 +279,7 @@ export async function prepareSparql(input: SparqlQueryInput): Promise<PreparedSp
   const scope = rdfMembers(input.spaces, input.caller, input.fingerprintOf);
   const first = scope.leftOut[0];
   if (!input.view && first && scope.members.length === 0) {
-    return said(refusal(first.status, first.code, first.error, first.detail ? { detail: first.detail } : {}), n);
+    return refusalLogged(refusal(first.status, first.code, first.error, first.detail ? { detail: first.detail } : {}), n);
   }
   return {
     algebra: checked.algebra, form, vars, length: Buffer.byteLength(q, 'utf8'), bound,
@@ -290,11 +290,11 @@ export async function prepareSparql(input: SparqlQueryInput): Promise<PreparedSp
 }
 
 /** An RDF/JS term as SPARQL results JSON writes it. */
-function jsonTerm(t: { termType: string; value: string; language?: string; datatype?: { value: string }; subject?: unknown; predicate?: unknown; object?: unknown }): JsonTerm {
+function jsonTerm(t: RdfJsLike): JsonTerm {
   switch (t.termType) {
     case 'NamedNode': return { type: 'uri', value: t.value };
     case 'BlankNode': return { type: 'bnode', value: t.value };
-    case 'Quad': return { type: 'triple', value: { subject: jsonTerm(t.subject as never), predicate: jsonTerm(t.predicate as never), object: jsonTerm(t.object as never) } };
+    case 'Quad': return { type: 'triple', value: { subject: jsonTerm(t.subject!), predicate: jsonTerm(t.predicate!), object: jsonTerm(t.object!) } };
     default: {
       if (t.language) return { type: 'literal', value: t.value, 'xml:lang': t.language };
       const dt = t.datatype?.value;
@@ -308,13 +308,11 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
   const n = input.spaces.length;
   let source: ReturnType<typeof createQuadSource> | null = null;
   /** Every refusal of the run is logged and carries the audit changes of the query it ended: the counts so far, no row answered, its code. */
-  const refuseRun = (r: SparqlAnswerRefusal): SparqlAnswerRefusal => said({ ...r, auditChanges: auditChangesOf(p, source?.recordsRead() ?? 0, 0, r.code) }, n);
+  const refuseRun = (r: SparqlAnswerRefusal): SparqlAnswerRefusal => refusalLogged({ ...r, auditChanges: auditChangesOf(p, source?.recordsRead() ?? 0, 0, r.code) }, n);
   const slot = takeSlot('sparql', input.callerKey);
   if (!slot) {
-    const { retryAfterSeconds, instance, perCaller } = SLOT_FAMILIES.sparql;
-    return refuseRun(refusal(SPARQL_UNAVAILABLE, SPARQL_BUSY,
-      `A query is already running for this caller, or as many as the instance runs at once (${instance}, ${perCaller} per caller): try again when it ends`,
-      { retryAfterSeconds }));
+    const { status, code, error, retryAfterSeconds } = busyRefusal('sparql');
+    return refuseRun(refusal(status, code, error, { retryAfterSeconds }));
   }
   let result: SparqlResult | null = null;
   let onAbort: (() => void) | null = null;
@@ -332,30 +330,30 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
       if (input.signal?.aborted) onAbort(); else input.signal?.addEventListener('abort', onAbort, { once: true });
     });
     gone.catch(() => { /* raced below */ });
-    const taken = await Promise.race([running.rows(p.bound + 1), gone]);
+    const tooMany = (): SparqlAnswerRefusal => refuseRun(refusal(SPARQL_TOO_LARGE, SPARQL_TOO_MANY_RESULTS,
+      `The answer holds more than ${p.bound} ${p.form === 'select' ? 'rows' : 'statements'} (sparql.maxResults, or the limit you sent), so none of it is answered: narrow the query or add LIMIT`));
     let collected: SparqlCollected;
     let rows: number;
-    if (typeof taken === 'boolean') {
-      collected = { form: 'ask', boolean: taken };
+    if (running.kind === 'boolean') {
+      collected = { form: 'ask', boolean: await Promise.race([running.rows(), gone]) };
       rows = 1;
-    } else {
-      if (taken.length > p.bound) {
-        return refuseRun(refusal(SPARQL_TOO_LARGE, SPARQL_TOO_MANY_RESULTS,
-          `The answer holds more than ${p.bound} ${p.form === 'select' ? 'rows' : 'statements'} (sparql.maxResults, or the limit you sent), so none of it is answered: narrow the query or add LIMIT`));
-      }
+    } else if (running.kind === 'bindings') {
+      const taken = await Promise.race([running.rows(p.bound + 1), gone]);
+      if (taken.length > p.bound) return tooMany();
       rows = taken.length;
-      if (p.form === 'select') {
-        const vars = p.vars.length > 0 ? p.vars : [...new Set((taken as Array<Record<string, unknown>>).flatMap(r => Object.keys(r)))];
-        collected = { form: 'select', vars, rows: (taken as Array<Record<string, never>>).map(r => Object.fromEntries(Object.entries(r).map(([k, t]) => [k, jsonTerm(t)]))) };
-      } else {
-        const quads: Quad[] = [];
-        try {
-          for (const q of taken) quads.push(fromRdfJs(q as never));
-        } catch {
-          return refuseRun(unwritable());
-        }
-        collected = { form: p.form === 'describe' ? 'describe' : 'construct', quads };
+      const vars = p.vars.length > 0 ? p.vars : [...new Set(taken.flatMap(r => Object.keys(r)))];
+      collected = { form: 'select', vars, rows: taken.map(r => Object.fromEntries(Object.entries(r).map(([k, t]) => [k, jsonTerm(t)]))) };
+    } else {
+      const taken = await Promise.race([running.rows(p.bound + 1), gone]);
+      if (taken.length > p.bound) return tooMany();
+      rows = taken.length;
+      const quads: Quad[] = [];
+      try {
+        for (const q of taken) quads.push(fromRdfJs(q));
+      } catch {
+        return refuseRun(unwritable());
       }
+      collected = { form: p.form === 'describe' ? 'describe' : 'construct', quads };
     }
     const recordsRead = made.recordsRead();
     return { prepared: p, collected, rows, recordsRead, auditChanges: auditChangesOf(p, recordsRead, rows, SPARQL_OUTCOME_ANSWERED) };
@@ -395,13 +393,6 @@ export class SparqlEngineFailure extends Error {
 export class CallerGone extends Error {
   constructor() { super('The caller went away before the answer was collected'); this.name = 'CallerGone'; }
 }
-
-/** The refusal of an answer holding a term no document can carry; it names no part of the term (the term may be the query's text). */
-export const unwritable = (): SparqlAnswerRefusal => refusal(EXPORT_CONFLICT, RDF_UNWRITABLE,
-  'The answer holds a term no document of this format can carry (an IRI with a character an IRI cannot hold, or a triple term in JSON-LD): ask for another format, or construct other terms');
-
-/** A rendered answer: its Content-Type and its bytes. */
-export interface RenderedAnswer { contentType: string; body: string }
 
 /** Write a collected answer in the negotiated format (`p.resultType` or `p.graphFormat`). */
 export function renderSparql(p: PreparedSparql, c: SparqlCollected): RenderedAnswer | SparqlAnswerRefusal {
@@ -461,20 +452,16 @@ function tsvOf(vars: string[], rows: JsonRow[]): string {
   return `${lines.join('\n')}\n`;
 }
 
-/** Does a statement hold a triple term (only an object can)? */
-export const holdsTriple = (q: Quad): boolean => q.object.kind === 'triple';
+/** Is `v` a refusal of this act (a status and a code), as `prepareSparql` and `answerSparql` answer one? The one check both doors make. */
+export const isSparqlRefusal = (v: unknown): v is SparqlAnswerRefusal =>
+  typeof (v as SparqlAnswerRefusal | null)?.code === 'string' && typeof (v as SparqlAnswerRefusal).status === 'number';
 
-/** A graph answer by the export's writer: RDF 1.2 (announced) only when a statement holds a triple term. */
-export function renderGraph(format: RdfFormat, quads: readonly Quad[]): RenderedAnswer | SparqlAnswerRefusal {
-  const edgeDetails = quads.some(holdsTriple) ? 'rdf12' : 'reification';
-  try {
-    const writer = createRdfWriter(format, { edgeDetails });
-    const body = writer.open() + writer.write({ quads }) + writer.close();
-    return { contentType: rdfContentType(format, rdfVersionOf(format, edgeDetails)), body };
-  } catch (err) {
-    if (err instanceof RdfWriteError) return unwritable();
-    throw err;
-  }
+/** The `{ error, code, ... }` body a refusal is answered with, on the wire of either door: a parse error's position, the wait of a 503, the detail. */
+export function sparqlRefusalBody(r: SparqlAnswerRefusal): Record<string, unknown> {
+  return {
+    error: r.error, code: r.code, ...(r.line !== undefined ? { line: r.line } : {}), ...(r.column !== undefined ? { column: r.column } : {}),
+    ...(r.retryAfterSeconds !== undefined ? { retryAfterSeconds: r.retryAfterSeconds } : {}), ...(r.detail ?? {}),
+  };
 }
 
 /** The member ids a door names in a header: percent-encoded (a header value is Latin-1), joined. */

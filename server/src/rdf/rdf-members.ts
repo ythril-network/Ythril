@@ -20,7 +20,7 @@ import { getConfig } from '../config/loader.js';
 import { mayReadArea } from '../auth/reachable-spaces.js';
 import { LIVE_FILE_ROW, NOT_A_FEED_MARKER } from '../files/live-file-row.js';
 import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
-import type { RdfRecordKind } from './record-triples.js';
+import { RDF_RECORD_KINDS, type RdfRecordKind } from './record-triples.js';
 import { rdfSpaceState, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
 import type { EXPORT_CONFLICT } from '../export/export-statuses.js';
 import type { BrainCollection } from '../config/types-knowledge.js';
@@ -69,11 +69,14 @@ export function rdfMembers(spaces: readonly string[], caller: RdfCaller | undefi
   return { members, leftOut };
 }
 
-/** The kinds a member's records are read in, in walk order, each with its collection. */
-export const RDF_KIND_COLLECTIONS: ReadonlyArray<{ readonly kind: RdfRecordKind; readonly collection: BrainCollection }> = Object.freeze([
-  { kind: 'entity', collection: 'entities' }, { kind: 'fact', collection: 'facts' }, { kind: 'chrono', collection: 'chrono' },
-  { kind: 'edge', collection: 'edges' }, { kind: 'link', collection: 'links' }, { kind: 'file', collection: 'files' },
-] as const);
+/** The collection each kind lives in: keyed by kind, so a kind the mapper adds is a compile error here until it names its collection. */
+const COLLECTION_OF: Readonly<Record<RdfRecordKind, BrainCollection>> = Object.freeze({
+  entity: 'entities', fact: 'facts', chrono: 'chrono', edge: 'edges', link: 'links', file: 'files',
+});
+
+/** The kinds a member's records are read in, in walk order (the mapper's `RDF_RECORD_KINDS`), each with its collection. */
+export const RDF_KIND_COLLECTIONS: ReadonlyArray<{ readonly kind: RdfRecordKind; readonly collection: BrainCollection }> = Object.freeze(
+  RDF_RECORD_KINDS.map(kind => Object.freeze({ kind, collection: COLLECTION_OF[kind] })));
 
 /** The collection the records of `kind` live in. */
 export function rdfKindCollection(kind: RdfRecordKind): BrainCollection {

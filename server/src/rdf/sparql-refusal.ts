@@ -10,6 +10,8 @@
  * - **The query in a log or a body.** No refusal here carries the query's text; a parse error names only its line and column.
  */
 
+import { SLOT_FAMILIES, type SlotFamilyName } from '../util/slots.js';
+
 export const SPARQL_QUERY_TOO_LARGE = 'sparql_query_too_large';
 export const SPARQL_MALFORMED = 'sparql_malformed';
 export const SPARQL_FEDERATION_REFUSED = 'sparql_federation_refused';
@@ -34,8 +36,11 @@ export const SPARQL_UNAVAILABLE = 503;
 /** How deep a refusal is looked for in the causes an engine wrapped it in. */
 const CAUSE_DEPTH_MAX = 8;
 
-/** The wait a query ended by its deadline or a store that did not answer is told to keep before trying again, in seconds. */
-export const SPARQL_RETRY_AFTER_SECONDS = 5;
+/**
+ * The wait a query ended by its deadline, a store that did not answer or a slot that is spent is told to keep before trying again, in
+ * seconds: the slot family's own (`util/slots.ts`), the one constant every SPARQL read's 503 says.
+ */
+export const SPARQL_RETRY_AFTER_SECONDS: number = SLOT_FAMILIES.sparql.retryAfterSeconds;
 
 /** A SPARQL read refused or ended by a bound: its HTTP status, its code, and the words a caller reads. */
 export class SparqlRefusal extends Error {
@@ -47,11 +52,6 @@ export class SparqlRefusal extends Error {
   ) {
     super(message);
     this.name = 'SparqlRefusal';
-  }
-
-  /** The refusal as the `{ error, code }` body a door answers. */
-  body(): { error: string; code: string; retryAfterSeconds?: number } {
-    return { error: this.message, code: this.code, ...(this.retryAfterSeconds !== undefined ? { retryAfterSeconds: this.retryAfterSeconds } : {}) };
   }
 }
 
@@ -68,6 +68,18 @@ export function sparqlRefusalOf(err: unknown): SparqlRefusal | null {
 /** The deadline passed: unavailable, try again. */
 export const timeoutRefusal = (): SparqlRefusal => new SparqlRefusal(SPARQL_UNAVAILABLE, SPARQL_TIMEOUT,
   'The query did not finish inside the server\'s time bound (sparql.timeoutMs), so nothing of it is answered: narrow it or try again', SPARQL_RETRY_AFTER_SECONDS);
+
+/**
+ * The refusal of a read whose slot is spent (`503 sparql_busy`, with the family's wait): the one sentence the query endpoint and the Linked Data
+ * door both answer. A plain object, for a door that answers a refusal it did not throw.
+ */
+export function busyRefusal(family: SlotFamilyName): { status: number; code: string; error: string; retryAfterSeconds: number } {
+  const { retryAfterSeconds, instance, perCaller } = SLOT_FAMILIES[family];
+  return {
+    status: SPARQL_UNAVAILABLE, code: SPARQL_BUSY, retryAfterSeconds,
+    error: `A read is already running for this caller, or as many as the instance runs at once (${instance}, ${perCaller} per caller): try again when it ends`,
+  };
+}
 
 /** The read cap passed: too large. */
 export const tooMuchReadRefusal = (cap: number): SparqlRefusal => new SparqlRefusal(SPARQL_TOO_LARGE, SPARQL_TOO_MUCH_READ,

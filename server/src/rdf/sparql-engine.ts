@@ -26,6 +26,7 @@ import { Readable } from 'node:stream';
 import { QueryEngine } from '@comunica/query-sparql-rdfjs';
 import { DataFactory } from 'n3';
 import { MAX_PATTERN_LENGTH, hasReDoSRisk } from '../util/redos.js';
+import type { RdfJsLike } from './rdf-js-terms.js';
 import {
   SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_FEDERATION_REFUSED, SPARQL_MALFORMED, SPARQL_PATTERN_REFUSED, SPARQL_QUERY_TOO_LARGE, SPARQL_UPDATE_NOT_HERE, SparqlRefusal, sparqlRefusalOf,
   timeoutRefusal,
@@ -176,19 +177,17 @@ export async function checkSparqlAlgebra(text: string, dataset: SparqlProtocolDa
 }
 
 /** A row of a SELECT answer: each bound variable's term, by name. */
-export type SparqlRow = Record<string, { termType: string; value: string }>;
+export type SparqlRow = Record<string, RdfJsLike>;
 
-/** A query's answer: its kind, and the ways to take it. */
-export interface SparqlResult {
-  kind: 'bindings' | 'boolean' | 'quads';
-  /**
-   * The answer collected: a SELECT's rows, an ASK's boolean, a CONSTRUCT's or DESCRIBE's quads. With `limit`, at most that many rows or
-   * quads are read and the engine is stopped (a door asks for one more than it answers, to know there were more).
-   */
-  rows(limit?: number): Promise<SparqlRow[] | boolean | unknown[]>;
-  /** Stop the engine and release its reads. */
-  destroy(): void;
-}
+/**
+ * A query's answer, typed by its kind (so a door narrows by `kind` and never casts): a SELECT's rows, an ASK's boolean, a CONSTRUCT's or
+ * DESCRIBE's quads. With `limit`, at most that many rows or quads are read and the engine is stopped (a door asks for one more than it
+ * answers, to know there were more). `destroy` stops the engine and releases its reads.
+ */
+export type SparqlResult =
+  | { kind: 'bindings'; rows(limit?: number): Promise<SparqlRow[]>; destroy(): void }
+  | { kind: 'boolean'; rows(): Promise<boolean>; destroy(): void }
+  | { kind: 'quads'; rows(limit?: number): Promise<RdfJsLike[]>; destroy(): void };
 
 /** What the engine streams: an asynciterator, ended by `destroy`. */
 interface EngineStream {
@@ -274,41 +273,49 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
     stream.on('end', () => settle(() => resolve(out)));
   });
 
-  const kind = oneRow ? 'boolean' : raw.resultType === 'bindings' ? 'bindings' : raw.resultType === 'boolean' ? 'boolean' : raw.resultType === 'quads' ? 'quads' : null;
-  if (kind === null) { finish(); throw new SparqlRefusal(SPARQL_BAD_REQUEST,SPARQL_UPDATE_NOT_HERE, 'This endpoint answers queries only'); }
-  return {
-    kind,
-    async rows(limit = Infinity) {
-      try {
-        if (oneRow) {
-          if (raw.resultType !== 'bindings') throw new Error('The engine answered an ASK that is no stream of rows');
-          return (await collect(await raw.execute() as unknown as EngineStream, 1, () => true)).length > 0;
-        }
-        if (raw.resultType === 'boolean') {
-          // Not reached: an ASK runs as one row above. Kept so an engine form that is boolean and no ASK is not answered as rows.
-          return await raw.execute();
-        }
-        if (raw.resultType === 'bindings') {
-          const stream = await raw.execute();
-          return await collect(stream as unknown as EngineStream, limit, (item) => {
-            const row: SparqlRow = {};
-            for (const [variable, term] of item as Iterable<[{ value: string }, { termType: string; value: string }]>) row[variable.value] = term;
-            return row;
-          });
-        }
-        if (raw.resultType === 'quads') {
-          const stream = await raw.execute();
-          return await collect(stream as unknown as EngineStream, limit, (item) => item);
-        }
-        return [];
-      } catch (err) {
-        throw refusalOf(err, source);
-      } finally {
-        finish();
-      }
-    },
-    destroy() { end(new Error('The query was stopped')); finish(); },
+  /** `read` as the one reading of the result: a failure is the query's refusal, and the deadline's timer and the abort's listener are let go. */
+  const guarded = <A extends unknown[], T>(read: (...args: A) => Promise<T>) => async (...args: A): Promise<T> => {
+    try {
+      return await read(...args);
+    } catch (err) {
+      throw refusalOf(err, source);
+    } finally {
+      finish();
+    }
   };
+  const destroy = (): void => { end(new Error('The query was stopped')); finish(); };
+
+  if (oneRow) {
+    return {
+      kind: 'boolean', destroy,
+      rows: guarded(async () => {
+        if (raw.resultType !== 'bindings') throw new Error('The engine answered an ASK that is no stream of rows');
+        return (await collect(await raw.execute() as unknown as EngineStream, 1, () => true)).length > 0;
+      }),
+    };
+  }
+  if (raw.resultType === 'bindings') {
+    const bindings = raw;
+    return {
+      kind: 'bindings', destroy,
+      rows: guarded(async (limit = Infinity) => collect(await bindings.execute() as unknown as EngineStream, limit, (item): SparqlRow => {
+        const row: SparqlRow = {};
+        for (const [variable, term] of item as Iterable<[{ value: string }, RdfJsLike]>) row[variable.value] = term;
+        return row;
+      })),
+    };
+  }
+  if (raw.resultType === 'quads') {
+    const quads = raw;
+    return { kind: 'quads', destroy, rows: guarded(async (limit = Infinity) => collect(await quads.execute() as unknown as EngineStream, limit, (item) => item as RdfJsLike)) };
+  }
+  if (raw.resultType === 'boolean') {
+    // Not reached: an ASK runs as one row above. Kept so an engine form that is boolean and no ASK is not answered as rows.
+    const boolean = raw;
+    return { kind: 'boolean', destroy, rows: guarded(async () => boolean.execute()) };
+  }
+  finish();
+  throw new SparqlRefusal(SPARQL_BAD_REQUEST, SPARQL_UPDATE_NOT_HERE, 'This endpoint answers queries only');
 }
 
 /**
