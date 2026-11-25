@@ -63,6 +63,12 @@ export function validateSparqlLimits(cfg: SparqlLimitsConfig): void {
     throw new Error(`config.json: sparql must be an object of SPARQL bounds (got ${JSON.stringify(block)})`);
   }
   const values = block as Record<string, unknown>;
+  // A key the block does not know (a typo, a bound of another version) would read as no limit set: it is refused, named.
+  for (const key of Object.keys(values)) {
+    if (!(KEYS as string[]).includes(key)) {
+      throw new Error(`config.json: sparql has an unknown key ${JSON.stringify(key.slice(0, 64))}; its keys are ${KEYS.join(', ')}`);
+    }
+  }
   for (const key of KEYS) {
     if (!Object.hasOwn(values, key)) continue;
     const v = values[key];
