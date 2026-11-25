@@ -229,6 +229,10 @@ export const ROUTE_RULES: RouteRule[] = [
   // text. The POST only carries the text. MCP `sparql_query` records the same act (`MCP_ACT_OPERATIONS`).
   { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/sparql$/,             operation: 'brain.sparql_query', spaceGroup: 1, writtenWhenCutOff: true },
   { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/sparql$/,             operation: 'brain.sparql_query', spaceGroup: 1, writtenWhenCutOff: true },
+  // Q-758: a Linked Data address read, a read like the record reads it is the twin of. No space group: the space is the one whose BASE holds
+  // the address (a renamed space keeps its old segment), which the door resolved and handed over as `authorisedSpaces`; the record's id is
+  // `entryId`, and `changes` holds counts only.
+  { method: 'GET',    pattern: /^\/ld\/[^/]+\/.+$/,                                   operation: 'ld.read', read: true },
   // Q-753: an RDF import is one row per request with its counts (never a value of the file), through `req.auditChangesExplicit`; MCP
   // `import_rdf` records the same operation. Its status is a read.
   { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/import\/rdf$/,        operation: 'rdf.import', spaceGroup: 1 },
@@ -494,8 +498,8 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
     // Every prefix test below reads the path as the rule table does (`routeSpelling`: any casing, no trailing slash), never as typed:
     // Express answers `/API/...` and `/x/`, and a test on the typed spelling skipped the row for a request that was answered.
     const spelled = routeSpelling(fullPath);
-    // Skip paths that are not API calls or are audit-log reads themselves
-    if (!spelled.startsWith('/api/') && !spelled.startsWith('/mcp')) return;
+    // Skip paths that are not API calls or are audit-log reads themselves. A Linked Data address (`/ld/`, Q-758) reads a space as the API does.
+    if (!spelled.startsWith('/api/') && !spelled.startsWith('/mcp') && !spelled.startsWith('/ld/')) return;
     // Reading the log must not write to the log — one entry per page of every scroll is noise that would
     // eventually crowd out the record it is describing.
     //

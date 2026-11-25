@@ -10,7 +10,8 @@
  *   `complete true`.
  * - `GET /api/spaces/:id/schema-rdf` answers shapes that the export conforms to (rdf-validate-shacl), found at the version address the
  *   export's description graph names (`sh:shapesGraph`).
- * - A record address under `/ld/` answers a 404 problem body, never the app.
+ * - A record address under `/ld/` sends a browser to the app (`303`, no token asked) and, read by a machine with a token, answers a 404
+ *   problem body: the space's base is an `example.org` address, not the instance's default base, and only the default base resolves.
  *
  * What it needs up: the integration stack (`npm run test:up`), with instance A built from this checkout. Unrun by the slice that wrote it;
  * the bundle's Full run in CI runs it.
@@ -132,8 +133,11 @@ describe('an RDF export round-trips through a live instance', () => {
     assert.equal(report.conforms, true, JSON.stringify(report.results.map(x => [x.focusNode?.value, x.path?.value])));
   });
 
-  it('a record address is a name: a 404 problem body, never the app', async () => {
-    const r = await fetch(`${INSTANCES.a}/ld/${SPACE}/entity/x`, { headers: { Accept: 'text/html' } });
+  it('a record address sends a browser to the app, and under a base that is not the default one answers a 404 problem body', async () => {
+    const page = await fetch(`${INSTANCES.a}/ld/${SPACE}/entity/x`, { headers: { Accept: 'text/html' }, redirect: 'manual' });
+    assert.equal(page.status, 303);
+    assert.equal(page.headers.get('location'), `/brain?space=${SPACE}&tab=entities`);
+    const r = await fetch(`${INSTANCES.a}/ld/${SPACE}/entity/x`, { headers: { Accept: 'text/turtle', Authorization: `Bearer ${token}` }, redirect: 'manual' });
     assert.equal(r.status, 404);
     assert.match(String(r.headers.get('content-type')), /^application\/problem\+json/);
   });

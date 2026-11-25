@@ -22,7 +22,7 @@ import { spaceSchemaVersionsRouter } from './api/spaces-schema-versions.js';
 import { spaceSchemaConvertRouter } from './api/spaces-schema-convert.js';
 import { spaceUnconvertedRouter } from './api/spaces-unconverted.js';
 import { spaceSchemaRdfRouter, SCHEMA_RDF_PATH } from './api/spaces-schema-rdf.js';
-import { linkedDataPlaceholderRouter } from './api/linked-data-placeholder.js';
+import { linkedDataRouter } from './api/linked-data.js';
 import { fileStoreRouter } from './api/files.js';
 import { toolsRouter } from './api/tools.js';
 import { conflictsRouter } from './api/conflicts.js';
@@ -579,8 +579,9 @@ export function createApp() {
     res.status(404).json({ error: 'Not found' });
   });
 
-  // Q-750: an RDF record address is a name, not a page: a problem body, never the app shell.
-  app.use('/ld', linkedDataPlaceholderRouter);
+  // Q-750, Q-758: an RDF address answers its statements (a browser is sent to the app), anything else under /ld/ a problem body, never the
+  // app shell. Outside /api, so the router carries its own limiter, authentication and rung on every route (`api/linked-data.ts`).
+  app.use('/ld', linkedDataRouter);
 
   // ── Angular SPA — static assets ──────────────────────────────────────────
   // Serve the compiled Angular app. All non-API routes fall through to
