@@ -144,7 +144,7 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/ld/:spaceId/file/*path', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
   { route: '/ld/:spaceId/agent/:id', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
   // S3b: the base root, the graph the records export describes, read like the export.
-  { route: '/ld/:spaceId/', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
+  { route: '/ld/:spaceId', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
   // Q-753: an RDF document into the space as ordinary writes, `save_bulk`'s rung; a dry run and the status answer which ids are stored and
   // which values break the schema, so they ask the same rung (amendment A10).
   { route: '/api/brain/spaces/:spaceId/import/rdf', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
