@@ -456,12 +456,14 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
       const knowing = await d.mint('vp-sparql-knowledge', { [QA]: d.row({ knowledge: 'read' }), [OPS]: d.row({ knowledge: 'read' }) });
       await mustCreate(owner.key, 'sparqlv', [QA, OPS]);
       await mustCreate(knowing.key, 'sparqlk', [QA, OPS]);
-      const query = 'SELECT ?g ?s WHERE { GRAPH ?g { ?s ?p ?o } }';
+      // One row per subject and graph; the MCP answer is asked with a ceiling above it, so its default budget cuts nothing compared.
+      const query = 'SELECT DISTINCT ?g ?s WHERE { GRAPH ?g { ?s ?p ?o } }';
+      const WHOLE = 1_000_000;
       const rest = (key, view) => d.rest(key, 'GET', `/api/brain/spaces/${encodeURIComponent(view)}/sparql?query=${encodeURIComponent(query)}`);
       const answerRows = (body) => (body?.results?.bindings ?? []).map(b => `${b.g.value} ${b.s.value}`).sort();
       const mcpBody = (a) => { try { return JSON.parse(a.text.split('\n')[0] || '{}'); } catch { return {}; } };
       const r1 = await rest(owner.key, '@sparqlv');
-      const m = await d.mcp(owner.key, 'sparql_query', { space: '@sparqlv', query });
+      const m = await d.mcp(owner.key, 'sparql_query', { space: '@sparqlv', query, maxChars: WHOLE });
       const r2 = await rest(owner.key, '@sparqlv');
       assert.equal(r1.status, 200, `REST: ${fmt(r1)}`);
       assert.deepEqual(answerRows(r1.body), answerRows(r2.body), 'the REST answer moved between the two sides of the sandwich');
@@ -470,7 +472,7 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
       assert.deepEqual(graphs, [base(OPS), base(QA)].sort(), 'each member is its own named graph');
       assert.ok(answerRows(r1.body).some(t => t.includes('/file/vp/plan.txt')), 'the owner with files: read is not answered the file statement');
       const k = await rest(knowing.key, '@sparqlk');
-      const km = await d.mcp(knowing.key, 'sparql_query', { space: '@sparqlk', query });
+      const km = await d.mcp(knowing.key, 'sparql_query', { space: '@sparqlk', query, maxChars: WHOLE });
       assert.equal(k.status, 200, `REST knowledge-only: ${fmt(k)}`);
       assert.deepEqual(answerRows(k.body).filter(t => t.includes('/file/')), [], 'REST: a file statement reached an owner without files: read');
       assert.deepEqual(answerRows(mcpBody(km)).filter(t => t.includes('/file/')), [], 'MCP: a file statement reached an owner without files: read');
