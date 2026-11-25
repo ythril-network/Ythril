@@ -48,6 +48,7 @@ test('a whole-record query that answers more than Oxigraph on every differing ru
 test('a whole-record query that answers fewer rows than Oxigraph on a run is rows-differ: added statements do not explain it', () => {
   const r = judge({ Q11: ok(11, [11, 11]) }, { Q11: ok(14, [14, 9]) });
   assert.equal(r.queries.Q11.reason, 'rows-differ');
+  assert.equal(r.valid, false, 'an unexplained mismatch makes the run invalid');
 });
 
 test('any other mismatch is rows-differ, with the counts and the first differing run', () => {
@@ -65,6 +66,7 @@ test('a mismatch on a query that names a not-held predicate and reads a whole re
   const t = { ...T, Q12: { text: `PREFIX dc: <${DC}>\nSELECT ?v WHERE { %X% dc:publisher ?v . %X% ?p ?o }`, form: 'SELECT' } };
   const r = judge({ Q12: ok(9) }, { Q12: ok(4) }, { templates: t });
   assert.equal(r.queries.Q12.reason, 'data-not-held');
+  assert.equal(r.valid, true, 'a named reason keeps the run valid');
 });
 
 test('a not-held predicate explains fewer rows only: Ythril answering more is rows-differ', () => {
