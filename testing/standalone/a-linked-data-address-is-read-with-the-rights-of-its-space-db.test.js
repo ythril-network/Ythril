@@ -22,7 +22,10 @@
  * ## Seen red
  *
  * On c647bd24f every address answers the 404 placeholder: no `200`, no `303`, no `401`. Mutations: the rights asked of the space the URL
- * segment names (rule 3: the renamed space is 404, the segment's own reader is 200); the file route without the files predicate (rule 1).
+ * segment names (rule 3: the renamed space is 404, the segment's own reader is 200). The files predicate of a file's address is held twice:
+ * by the quad source (`findsOf` in `rdf/quad-source.ts`, which `a-sparql-answer-withholds-what-the-caller-cannot-read-db` takes out alone and
+ * sees red) and by the door's own check (`!member.files` in `api/linked-data.ts`, a second line of defence). Taking out either one alone
+ * leaves rule 1 here green, as it should; taking out both makes the knowledge-only token read the file (rule 1 red).
  *
  * Run: a Mongo the harness accepts, npm run build:server, then
  *      node --test testing/standalone/a-linked-data-address-is-read-with-the-rights-of-its-space-db.test.js

@@ -214,7 +214,9 @@ async function answerStatements(req: Request, res: Response, kind: LdKind): Prom
   const id = kind === 'agent'
     ? (read.answer === 'other' && read.what === 'agent' ? read.name : undefined)
     : (read.answer === 'record' && read.kind === kind ? read.id : undefined);
-  // A file's statements are the caller's only with `files: read`, as on the export: without it the file is not there for them.
+  // A file's statements are the caller's only with `files: read`, as on the export: without it the file is not there for them. The quad source
+  // withholds a file's statements from a member read without it (`findsOf`), so this check is a second line of defence: the answer would be 404
+  // for want of statements anyway, and it keeps that true if the source's predicate ever moves.
   if (id === undefined || (kind === 'file' && !member.files)) { sendNotFound(res); return; }
 
   const callerKey = (req.authToken as { id?: string } | undefined)?.id ?? req.ip ?? '';
