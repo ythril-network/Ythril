@@ -68,8 +68,11 @@ function slowSource(size = Infinity, extra = {}) {
         objectMode: true,
         read() {
           if (i >= size) { this.push(null); return; }
+          // Held, never unref'd: the engine's own deadline timer is unref'd (the server's sockets keep its process alive), so a wait on this
+          // source is the only thing that keeps a test process alive. Node 22 (CI's) ends a process whose pending promise only unref'd timers
+          // could settle ("Promise resolution is still pending but the event loop has already resolved"); Node 24 held it, so only CI saw it.
+          // The timer is cleared by the stream's destroy, and `after` destroys every stream a case left open.
           timer = setTimeout(() => { state.delivered++; this.push(quad(namedNode(`${G.value}s/${i++}`), PRED, literal(String(i)), G)); }, ROW_EVERY_MS);
-          timer.unref();
         },
         destroy(err, callback) { if (timer) clearTimeout(timer); state.open.delete(stream); callback(err); },
       });
@@ -208,6 +211,17 @@ describe('a SPARQL query ends with its deadline and its caller, whatever its for
     );
     assert.ok(got.error, `the query answered for a caller that had already gone: ${JSON.stringify(got).slice(0, 200)}`);
     assert.equal(source.state.matches, 0, 'the source was read for a caller that had already gone');
+  });
+
+  it('a source stream that closes with no end and no error leaves no query pending: the read answers, with its deadline as the backstop', async () => {
+    const base = slowSource();
+    // The first row is handed over, then the stream is destroyed with no error: it emits `close` and never `end`.
+    const source = { ...base, match: (...args) => { const stream = base.match(...args); stream.once('data', () => stream.destroy()); return stream; } };
+    const result = await run('SELECT ?s WHERE { ?s ?p ?o }', source, { deadline: Date.now() + DEADLINE_MS });
+    const got = await answerOf(result);
+    assert.ok(!got.pending, `the read never answered, a stream closed with no end under it: ${JSON.stringify(got)}`);
+    if (got.error) assert.equal(got.error.code, 'sparql_timeout', String(got.error.message));
+    assert.ok(await readClosed(source), `a stream is left open: ${source.state.open.size} open`);
   });
 
   it('raised no unhandled rejection and no uncaught exception', async () => { await faults.quiet(); });
