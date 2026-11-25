@@ -123,7 +123,7 @@ const EXEMPT = {
   ]),
   // ── a fork edge ending at a record is a reference to it, and the delete and the cascade count and remove it (design section 7)
   ...reasoned('a fork edge ending at the record is a reference to it: the delete guard and the cascade preview count it and the cascade removes it', [
-    'brain/entity-delete-guard.ts:endsOfEdges', 'brain/entities.ts:findEntityReferences', 'brain/forks.ts:referencesTo',
+    'brain/entity-delete-guard.ts:endsOfEdges', 'brain/entities.ts:referencesToEach', 'brain/forks.ts:referencesTo',
   ]),
   // ── Q-305: the settle after an entity removal reads what still names the removed entity, a fork edge included
   ...reasoned('a fork edge written here that still names the removed entity is a reference to a gone record, taken back with the rest (delete) or found so the relink moves it (merge)', [

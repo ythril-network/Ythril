@@ -15,7 +15,8 @@
  *
  * On the base (afa73cd5a) the group has no delete op: `writeStage` writes a delete plan as a converge, so the entity is stamped, not removed,
  * and the referenced delete is answered as written. Mutations, each restored: the guard call removed from the group (the referenced cases go
- * red); the guard run without the session (the reference-and-entity case goes red: the committed edge still blocks).
+ * red); the guard run without the session (the reference-and-entity case goes red: the committed edge still blocks); entities deleted before
+ * edges (the tombstone-order case goes red).
  *
  * Run: node --test testing/standalone/a-write-group-delete-is-judged-by-the-delete-guard-db.test.js (a Mongo the harness accepts; `npm run build` in server/)
  */

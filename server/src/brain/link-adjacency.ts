@@ -38,6 +38,7 @@
  *
  * Nothing here changes what is stored, what is embedded, or what crosses a sync.
  */
+import type { ClientSession } from 'mongodb';
 import { col, asFilter } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
 import { distinctStringsOf } from '../db/distinct-strings.js';
@@ -329,12 +330,27 @@ export interface LinkEnd { from: string; fromKind: RefKind; to: string; toKind: 
  */
 export async function linksPointingAt(
   spaceId: string, ids: readonly string[], limit?: number,
+  /** A write group's transaction (`Q-963`): the delete guard reads the rows the group itself wrote or removed. */
+  session?: ClientSession,
 ): Promise<LinkEnd[]> {
   const cursor = col<LinkDoc>(spaceCollection(spaceId, 'links'))
     .find(asFilter<LinkDoc>({ to: { $in: [...ids] } }),
-          { projection: { from: 1, fromKind: 1, to: 1, toKind: 1 } });
+          { projection: { from: 1, fromKind: 1, to: 1, toKind: 1 }, ...(session ? { session } : {}) });
   if (limit !== undefined) cursor.limit(limit);
   return await cursor.toArray() as LinkEnd[];
+}
+
+/**
+ * The link rows records of `fromKind` among `ids` START, by id and version: what removing those records takes with them, each row's
+ * tombstone carrying its seq. Read in `session` (a write group's, `Q-963`) and bounded by `limit`, the most rows the owners may hold.
+ */
+export async function linkRowsStartingFrom(
+  spaceId: string, ids: readonly string[], fromKind: RefKind, limit: number, session?: ClientSession,
+): Promise<Array<Pick<LinkDoc, '_id' | 'seq'>>> {
+  if (ids.length === 0) return [];
+  return await col<LinkDoc>(spaceCollection(spaceId, 'links'))
+    .find(asFilter<LinkDoc>({ spaceId, from: { $in: [...ids] }, fromKind }), { projection: { _id: 1, seq: 1 }, ...(session ? { session } : {}) })
+    .limit(limit).toArray() as Array<Pick<LinkDoc, '_id' | 'seq'>>;
 }
 
 /** Every link row STARTING from any of `ids` — the mirror, on the `{from, fromKind, …}` index. */
@@ -515,12 +531,14 @@ export async function docsFromCollection<T extends { _id: string }>(
    * an index pre-filter rather than a collection scan.
    */
   extra?: Record<string, unknown>,
+  /** A write group's transaction (`Q-963`): the delete guard reads the records the group itself wrote or removed. */
+  session?: ClientSession,
 ): Promise<T[]> {
   if (ids.length === 0) return [];
   const scope = LINK_CLASSES.find(c => c.collection === collection)?.scope;
   // The scope and the narrowing are ANDed, never spread together: a narrowing naming a scope key would have
   // replaced the scope (the chunk exclusion) rather than narrowed it.
   return await readRowsById<T>(`${spaceId}_${collection}`, ids, projection ?? projectionForCollection(collection),
-    { filter: [scope, extra] });
+    { filter: [scope, extra], ...(session ? { session } : {}) });
 }
 

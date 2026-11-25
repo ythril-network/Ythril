@@ -20,8 +20,8 @@
  *
  * On the base (afa73cd5a) a delete plan is written as a converge: the record is stamped, not removed, so the landing cases fail; `planDelete`
  * does not exist; a delete counts one operation. Mutations, each restored: the short-count check in `removeInSession` removed (the stale case
- * goes red: a tombstone for the live row lands); deletes written after inserts (the swap goes red on the guard's duplicate key); the removal
- * tail not run by the group (the concurrent edge stays).
+ * goes red: a tombstone for the live row lands); the removal tail not run by the group (the concurrent edge stays). The swap is red on the
+ * base, where the delete is no removal and the insert meets the guard's unique index.
  *
  * Run: node --test testing/standalone/a-write-group-delete-lands-whole-or-aborts-db.test.js (a Mongo the harness accepts; `npm run build` in server/)
  */

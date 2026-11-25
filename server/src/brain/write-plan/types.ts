@@ -55,27 +55,28 @@ export interface PlannedLinks {
  * One decided write.
  *
  * `insert` carries the whole document; `converge` the `$set`/`$unset` that bring an existing record to what the
- * write says. Neither carries `seq` — see the module docblock.
+ * write says; `delete` (`planDelete`, `Q-963`) only the version the record was planned against (`expectSeq`), and is written by a write
+ * group alone (`commitWriteGroup`), never by `commitPlans`. None carries `seq` — see the module docblock.
  */
 export interface WritePlan {
   readonly kind: PlanKind;
   /** The space the plan was decided against. The commit refuses a plan for another space. */
   readonly spaceId: string;
-  /** The record's identity: minted by the planner on insert (ID IS ID), the stored one on converge. */
+  /** The record's identity: minted by the planner on insert (ID IS ID), the stored one on converge and delete. */
   readonly id: string;
-  readonly op: 'insert' | 'converge';
+  readonly op: 'insert' | 'converge' | 'delete';
   /** insert: the document as it will be stored, `seq` aside. */
   readonly doc?: Record<string, unknown>;
   /** converge: the fields to set (`seq` aside) and to unset. */
   readonly set?: Record<string, unknown>;
   readonly unset?: Record<string, unknown>;
   /**
-   * converge: the seq the record had when this plan was decided. The update lands only if it still does, so a
+   * converge and delete: the seq the record had when this plan was decided. The update or the removal lands only if it still does, so a
    * write that raced in between is detected rather than overwritten — and the commit re-plans against it.
    * `null` for a stored record that has no seq at all.
    */
   readonly expectSeq?: number | null;
-  /** The record as it will stand once written, `seq` aside — what a single-record door answers with. */
+  /** The record as it will stand once written, `seq` aside — what a single-record door answers with. A delete: the record as it was read. */
   readonly result: Record<string, unknown>;
   /** Queue an embed job once the record lands. False when suppressed, or when the planner embedded inline. */
   readonly enqueue: boolean;

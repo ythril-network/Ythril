@@ -76,6 +76,7 @@ export async function commitPlans(
     if (p.spaceId !== spaceId) {
       throw new Error(`commitPlans: a plan decided for space '${p.spaceId}' was handed to a commit for '${spaceId}'`);
     }
+    if (p.op === 'delete') throw new Error(`commitPlans: the ${p.kind} '${p.id}' is planned as a delete, which only a write group commits`);
   }
   const outcomes = new Array<CommitOutcome | undefined>(plans.length);
   const landed: number[] = [];
@@ -144,6 +145,9 @@ export async function writeStage(
   spaceId: string, kind: PlanKind, plans: readonly WritePlan[], opts: { session?: ClientSession } = {},
 ): Promise<StageWrite> {
   const { session } = opts;
+  // A delete is not a write of a document: written here it would be a converge of nothing that stamps the record it meant to remove.
+  const deleted = plans.find(p => p.op === 'delete');
+  if (deleted) throw new Error(`writeStage: the ${kind} '${deleted.id}' is planned as a delete, which only a write group's removal writes`);
   const coll = col<{ _id: string; seq?: number }>(spaceCollection(spaceId, PLAN_KINDS[kind].collection));
   // Versions first, then the position block and the write under its hold (`withLandingStamp`): a version needs no hold, a position does.
   const rows = await versionsForRows(spaceId, plans.map(p => p.id), { parts: [PLAN_KINDS[kind].collection], ...(session ? { session } : {}) });
@@ -528,7 +532,8 @@ export interface AfterCommitEffects {
 
 /** One effect that did not complete after its records landed: what it was, how many records it was for, and why. */
 export interface FailedEffect {
-  readonly effect: 'edge-take-back' | 'link-take-back' | 'embed';
+  /** `removal`: a write group's deleted records' tail (`afterRemovalCommitted`: embed jobs, forks, the kind's cascade and take-back). */
+  readonly effect: 'edge-take-back' | 'link-take-back' | 'embed' | 'removal';
   readonly count: number;
   readonly error: unknown;
 }

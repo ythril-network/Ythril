@@ -195,8 +195,9 @@ describe('every deletion the server makes on its own is audited by the act that 
   it('derives the sinks from the delete table with a floor, and the record deleters among them', () => {
     assert.ok(sinks.length >= 3, `only ${sinks.length} sinks derived: ${sinks.join(', ')}`);
     // The merge's absorbed entity is a direct delete of a literal family; `removeRecords` hands removeWithTombstones the kind's family
-    // (a call site of the parametric deleter), and the link reconcile hands it 'links' and is therefore not among them.
-    for (const k of ['server/src/brain/merge.ts:relinkAndAbsorb', 'server/src/brain/record-removal.ts:removeChunk']) {
+    // (a call site of the parametric deleter; since Q-963 from `removeInSession`, which `removeChunk` and a write group share), and the
+    // link reconcile hands it 'links' and is therefore not among them.
+    for (const k of ['server/src/brain/merge.ts:relinkAndAbsorb', 'server/src/brain/record-removal.ts:removeInSession']) {
       assert.ok(sinks.includes(k), `${k} is not derived as a sink: the sink derivation stopped reading the record deleters (${sinks.join(', ')})`);
     }
     assert.ok(!sinks.includes('server/src/brain/tombstones.ts:removeWithTombstones'), 'the parametric deleter is a sink in itself: every link reconcile would be a record deletion');

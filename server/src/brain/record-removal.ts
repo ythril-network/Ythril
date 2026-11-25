@@ -28,6 +28,7 @@
  * A record already removed by somebody else is simply not in the answer; a failure part-way leaves the chunks before it removed and the rest untouched,
  * so a re-run continues. The TTL sweep deletes through the per-kind deleters, so it inherits all of this and needs nothing of its own.
  */
+import type { ClientSession } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { andPredicates } from '../db/and-predicates.js';
@@ -98,21 +99,67 @@ export async function removeRecords(
     const { removed, forks } = await removeChunk(spaceId, kind, chunk, opts.filter);
     if (removed.size === 0) continue;
     for (const id of removed) gone.add(id);
-    try {
-      await retireEmbedJobs(spaceId, kind, [...removed]);
-    } catch (err) {
-      log.warn(`${kind} removal: ${removed.size} ${kind}(s) were deleted in '${peerText(spaceId)}' but their embed jobs were not retired: ${peerText(err)}`);
-    }
-    try {
-      if (forks.length > 0) await settleRemovedForks(spaceId, kind, forks);
-      await AFTER_REMOVAL[kind](spaceId, [...removed], actor, began);
-    } finally {
-      // The records are gone and their tombstones are written, whatever the cascade after them did: the event a subscriber mirrors the graph by is sent either way,
-      // and a failed cascade still fails the call (the throw leaves through here).
-      if (actor) for (const _id of removed) emitWebhookEvent({ event: `${kind}.deleted`, spaceId, entry: { _id }, ...actor });
-    }
+    await afterRemovalCommitted(spaceId, kind, [...removed], forks, actor, began);
   }
   return gone;
+}
+
+/**
+ * What a removal owes once it COMMITTED, never inside it — the one tail of every record removal, `removeRecords`' per chunk and a write group's
+ * per kind (`Q-963`, vet-2 S7): one batched `retireEmbedJobs` (a failure is said, never undone), what the removed forks leave
+ * (`settleRemovedForks`), the kind's own cascade ({@link AFTER_REMOVAL}, its straggler take-back bounded by `began`, the position the removal
+ * began at) and one `<kind>.deleted` per removed record when an `actor` is given. The cascade is thrown, as it always was; the events go out
+ * either way (see the module docblock).
+ */
+export async function afterRemovalCommitted(
+  spaceId: string, kind: RemovableKind, removed: readonly string[], forks: readonly string[], actor: WebhookActor | undefined, began: number,
+): Promise<void> {
+  if (removed.length === 0) return;
+  try {
+    await retireEmbedJobs(spaceId, kind, [...removed]);
+  } catch (err) {
+    log.warn(`${kind} removal: ${removed.length} ${kind}(s) were deleted in '${peerText(spaceId)}' but their embed jobs were not retired: ${peerText(err)}`);
+  }
+  try {
+    if (forks.length > 0) await settleRemovedForks(spaceId, kind, forks);
+    await AFTER_REMOVAL[kind](spaceId, [...removed], actor, began);
+  } finally {
+    // The records are gone and their tombstones are written, whatever the cascade after them did: the event a subscriber mirrors the graph by is sent either way,
+    // and a failed cascade still fails the call (the throw leaves through here).
+    if (actor) for (const _id of removed) emitWebhookEvent({ event: `${kind}.deleted`, spaceId, entry: { _id }, ...actor });
+  }
+}
+
+/** A record removal inside a transaction matched fewer rows than it named: one changed or went since its version was read. */
+export class StaleRemoval extends Error {
+  constructor(readonly kind: RemovableKind, readonly ids: readonly string[], readonly removed: number) {
+    super(`a ${kind} removal named ${ids.length} record(s) at the versions it read and removed ${removed}: one changed or went meanwhile`);
+    this.name = 'StaleRemoval';
+  }
+}
+
+/** One record to remove inside a transaction: its id and the version it was read at (`null`: the stored row carries none). */
+export interface RemovalAt { readonly _id: string; readonly seq: number | null | undefined }
+
+/**
+ * Remove `rows` (records of `kind`) inside the caller's transaction (`session`): their unresolved versions (`removeForksOf`, each behind a
+ * tombstone), one delete, and the tombstones, each carrying the version it buries. Asked by `removeChunk` and by a write group (`Q-963`).
+ *
+ * **Each row is removed only at the version given** (`{_id, seq}`, ANDed with `narrowedTo`), and a short count throws {@link StaleRemoval}: a
+ * record changed since its version was read is not removed, and the transaction that would carry its tombstone aborts, so no peer is told to
+ * delete a row that is still live (design-r2 R9). Returns the forks removed, for {@link afterRemovalCommitted} once the transaction committed.
+ */
+export async function removeInSession(
+  spaceId: string, kind: RemovableKind, rows: readonly RemovalAt[], session: ClientSession, narrowedTo?: Record<string, unknown>,
+): Promise<{ forks: string[] }> {
+  if (rows.length === 0) return { forks: [] };
+  // The records' unresolved versions go with them, each behind a tombstone issued here, in this transaction (Q-624 §7).
+  const forks = await removeForksOf(spaceId, kind, rows.map(r => r._id), { session });
+  const atVersion = { $or: rows.map(r => ({ _id: r._id, seq: r.seq ?? null })) };
+  const removed = await removeWithTombstones(spaceId, TOMBSTONE_COLLECTION[kind],
+    rows.map(r => ({ _id: r._id, type: kind, originalSeq: r.seq ?? undefined })), { session, filter: andPredicates({ spaceId }, narrowedTo, atVersion)! });
+  if (removed < rows.length) throw new StaleRemoval(kind, rows.map(r => r._id), removed);
+  return { forks };
 }
 
 /** One chunk: its stored seqs, the forks, the delete and the tombstones, in ONE held transaction (see the module docblock). */
@@ -125,10 +172,7 @@ async function removeChunk(
   return inHeldTransaction(spaceId, `${kind}.remove`, async (session) => {
     const stored = await readStoredById<{ _id: string; seq?: number }>(collName, ids, { seq: 1 }, { session, filter });
     if (stored.size === 0) return { removed: new Set<string>(), forks: [] };
-    // The records' unresolved versions go with them, each behind a tombstone issued here, in this transaction (Q-624 §7).
-    const forks = await removeForksOf(spaceId, kind, [...stored.keys()], { session });
-    await removeWithTombstones(spaceId, family,
-      [...stored.values()].map(r => ({ _id: r._id, type: kind, originalSeq: r.seq })), { session, filter });
+    const { forks } = await removeInSession(spaceId, kind, [...stored.values()].map(r => ({ _id: r._id, seq: r.seq })), session, narrowedTo);
     return { removed: new Set(stored.keys()), forks };
   }, {
     // A commit whose answer was lost may have landed: it did when none of the chunk's records is stored any more.

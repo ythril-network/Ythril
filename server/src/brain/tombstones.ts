@@ -159,19 +159,24 @@ function familiesOf(tombs: readonly IssuedTombstone[]): BrainCollection[] {
  * form ran every delete and THEN the tombstones as separate writes, so a tombstone the store refused left rows gone here that every peer still held, and
  * the next pull brought them back. The transaction is inside, not the callers' to remember: the link reconcile, the file-link remover and the
  * fork remover reach it without one. A failure part-way leaves the chunks before it removed, each with its tombstones, and the rest untouched.
+ *
+ * **Returns how many rows the delete removed** (`deletedCount`, summed). Given a `session` the tombstones are written for every row named, whatever
+ * the count: a caller in a transaction whose `filter` pins each row's version (`removeInSession`) compares the count with what it named and
+ * aborts on a short one, so the tombstone of a row that changed meanwhile, and is still live, never leaves the transaction (design-r2 R9).
  */
 export async function removeWithTombstones(
   spaceId: string, part: SpacePart, tombs: readonly IssuedTombstone[],
   { session, filter, versions: given }: { session?: ClientSession; filter?: Record<string, unknown>; versions?: readonly VersionAllocation[] } = {},
-): Promise<void> {
-  if (tombs.length === 0) return;
+): Promise<number> {
+  if (tombs.length === 0) return 0;
   const versions = given ?? await stampTombstones(spaceId, tombs, session ? { session } : {});
+  let removed = 0;
   await admitSpaceWrite(spaceId, familiesOf(tombs), async () => {
     const coll = col<{ _id: string }>(spaceCollection(spaceId, part));
-    const deleteRows = (chunk: readonly IssuedTombstone[], s?: ClientSession) =>
-      coll.deleteMany(asFilter<{ _id: string }>(andPredicates({ _id: { $in: chunk.map(t => t._id) } }, filter) as never), s ? { session: s } : {});
+    const deleteRows = async (chunk: readonly IssuedTombstone[], s?: ClientSession): Promise<number> =>
+      (await coll.deleteMany(asFilter<{ _id: string }>(andPredicates({ _id: { $in: chunk.map(t => t._id) } }, filter) as never), s ? { session: s } : {})).deletedCount;
     if (session) {
-      for (const chunk of inChunks(tombs, ROWS_PER_BULK_COMMAND)) await deleteRows(chunk, session);
+      for (const chunk of inChunks(tombs, ROWS_PER_BULK_COMMAND)) removed += await deleteRows(chunk, session);
       await writeTombstones(spaceId, tombs, versions, session);
       return;
     }
@@ -179,13 +184,16 @@ export async function removeWithTombstones(
     for (const chunk of inChunks(tombs, ROWS_PER_BULK_COMMAND)) {
       const chunkVersions = versions.slice(at, at + chunk.length);
       at += chunk.length;
-      await inHeldTransaction(spaceId, `${part}.remove`, async (s) => {
-        await deleteRows(chunk, s);
+      // The count of the run that committed: a re-run after a transient failure counts again from nothing.
+      removed += await inHeldTransaction(spaceId, `${part}.remove`, async (s) => {
+        const n = await deleteRows(chunk, s);
         await writeTombstones(spaceId, chunk, chunkVersions, s);
+        return n;
       }, {
         // A commit whose answer was lost may have landed: it did when none of the chunk's rows is stored any more (under the filter that narrowed the delete).
         landed: async () => (await readStoredById(spaceCollection(spaceId, part), chunk.map(t => t._id), { _id: 1 }, filter ? { filter } : {})).size === 0,
       });
     }
   });
+  return removed;
 }

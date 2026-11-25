@@ -138,7 +138,9 @@ describe('the MCP entity delete carries the REST route’s referential guard', (
     // The third argument is the record KIND, added in 4.0 so a memory or chrono entry can be the target too.
     // Matched loosely on the two that matter: pinning the exact argument list is a check on a signature
     // rather than on the guard doing its job, and it went red on the change that widened it.
-    assert.match(guard, /findEntityReferences\(spaceId, entityId/, 'the guard does not look for references');
+    // Since Q-963 the scan is batched (`referencesToEach`, one `$in` read for every record a write group deletes); the one-record guard answers from it.
+    assert.match(guard, /referencesToEach\(spaceId, ids/, 'the guard does not look for references');
+    assert.match(guard, /deleteBlockersOfEach\(spaceId, \[entityId\]/, 'the one-record guard is not the batched one');
     assert.match(guard, /b\.type !== 'face'/, 'the face exemption is nowhere');
   });
 
