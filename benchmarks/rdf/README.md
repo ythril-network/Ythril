@@ -6,6 +6,10 @@ a triple cache rests on numbers. Q-759.
 
 - **Data**: BSBM Tools v0.2, generated at 1 000, 5 000 and 20 000 products **without forward chaining**, then
   turned into one Ythril-loadable variant that both engines load (see [The dataset variant](#the-dataset-variant)).
+  Ythril runs only the sizes its import takes: 1 000, and the largest product count whose generated data stays under
+  the import's 200 types per kind (found by `typecap-search.mjs`, 4 641 products with 135 types; at 4 642 the
+  hierarchy grows to 263). 5 000 and 20 000 are Oxigraph-only: Ythril refuses them (`schema_rdf_refused`, 200 types
+  per kind; 20 000 would also exceed the 1 GiB import body bound).
 - **Queries**: the 11 Explore queries, Q1-Q5 and Q7-Q12. BSBM removed Q6 from the mix, so the "12" in the
   ticket is 11. Their text is read from the pinned archive, never retyped here.
 - **Parameters**: chosen by BSBM's own test driver under its seed. Run `k` of a query uses parameter set `k`
@@ -26,8 +30,8 @@ exists (`DOCKER_BOOKING`, else `~/.claude/hooks/docker-booking.js`).
 | 1. Generate | `node benchmarks/rdf/generate.mjs --sizes 1000` | `<work>/data/1000/{dataset.nt,variant.nt,td_data/,manifest.json,params.json}`: the raw generator output, the variant both engines load, and the manifest with both digests |
 | 2a. Oxigraph | `node benchmarks/rdf/load.mjs oxigraph-up --size 1000` | a store loaded by `oxigraph load` from `variant.nt`, served on loopback; `<work>/state/oxigraph-1000.json` with the load time and the variant's sha256 |
 | 2b. Ythril | `node benchmarks/rdf/load.mjs ythril-up --ythril-image <image>` then `node benchmarks/rdf/load.mjs ythril --size 1000 --import-query "schema=generate&from=data&inferMinSupport=1"` | a scratch instance with its own database, a strict space with RDF on, `variant.nt` sent through the RDF import door; `<work>/state/ythril-1000.json` with the load time, or the refusal, its code and its reason counts |
-| 3. Run | `node benchmarks/rdf/run.mjs --engine oxigraph --size 1000` (and `--engine ythril`) | `<results>/<UTC stamp>-<engine>-<size>.json` and a markdown table on stdout; refused unless the store was loaded from the variant in the manifest |
-| 4. Compare | `node benchmarks/rdf/compare.mjs <oxigraph record> <ythril record>` | a side-by-side markdown table (median and p95 per query, Ythril over Oxigraph) marking every query more than 10x slower on the median; refused unless both records name one size, one variant and one variant sha256 |
+| 3. Run | `node benchmarks/rdf/run.mjs --engine oxigraph --size 1000`, then `--engine ythril --against <the oxigraph record>` | `<results>/<UTC stamp>-<engine>-<size>.json` and a markdown table on stdout; refused unless the store was loaded from the variant in the manifest. A Ythril run first maps every parameter address to the record Ythril minted (see [Binding the parameters](#binding-the-parameters)) and is judged against the Oxigraph record |
+| 4. Compare | `node benchmarks/rdf/compare.mjs <oxigraph record> <ythril record> [--show-invalid]` | a side-by-side markdown table (median and p95 per query, Ythril over Oxigraph, rows on both sides) marking every query more than 10x slower on the median; refused unless both records name one size, one variant and one variant sha256, and refused for a record that is not valid unless `--show-invalid` (the table then opens with an `INVALID` line) |
 | 5. Clean up | `node benchmarks/rdf/load.mjs oxigraph-down --size 1000` and `node benchmarks/rdf/load.mjs ythril-down` | no container, volume or network left |
 
 `--results <dir>` on `run.mjs` names the results folder (default `<work>/results/`). The committed
@@ -45,17 +49,46 @@ that is a commit hash is recorded as the commit under test; `--ythril-commit <sh
 `run.mjs --engine ythril` calls `POST /api/brain/spaces/:spaceId/sparql` with `Content-Type:
 application/sparql-query`, `Accept: application/sparql-results+json` (`text/turtle` for Q9, a DESCRIBE, and Q12, a
 CONSTRUCT: the endpoint answers a graph as Turtle, N-Quads or JSON-LD, never N-Triples; Oxigraph is asked for
-`application/n-triples`) and the scratch instance's Bearer token. A Turtle answer has no cheap triple count, so
-its `rows` is `null` and `bytes` is the size of the first measured answer. Where the endpoint does not exist the answer is
-`404` and the record holds that code per query; the run does not stop.
+`application/n-triples`) and the scratch instance's Bearer token. A graph answer is counted by parsing it with `n3`
+(distinct statements, both engines, `answer-rows.mjs`); an answer that does not parse is that query's error. Where
+the endpoint does not exist the answer is `404` and the record holds that code per query; the run does not stop.
+`n3` comes with the server workspace (`npm ci` at the repository root).
+
+### Binding the parameters
+
+The BSBM parameters name the generator's addresses (`.../dataFromProducer6/Product272`); the RDF import mints a new
+address per record (`<base>entity/<uuid>`) and keeps the original nowhere, so the first Ythril run asked about
+records that did not exist and answered 0 rows. The variant therefore ends with one statement per subject,
+`<s> rdfs:seeAlso "<s>"` (the address as a plain string; an IRI object would be read as a link and answer the minted
+address back). After the load, `run.mjs --engine ythril` asks the endpoint for the records carrying the parameter
+addresses (one query per class: Product, ProductFeature, Review, Offer; product types are classes and keep their own
+address), maps every parameter and prints how many it mapped. An address that maps to nothing stops the run; it is
+never recorded as a 0-row answer. Oxigraph keeps the generator's addresses.
+
+### Valid runs
+
+Run `k` of a query asks both engines the same question, so a query whose row count differs on any run means one
+engine answered something else. A Ythril record is `valid: false` when any query's count differs from the Oxigraph
+record's on any run (a query that errored has no count and differs); `invalidQueries` names each, and `compare.mjs`
+refuses such a record unless `--show-invalid`. The Oxigraph record is the reference and is valid.
+
+### Sizes over the import body bound
+
+A variant over the door's 1 GiB body bound (`rdf_bound_exceeded`) is imported as subject-complete chunks in order
+(`chunk.mjs`, `load.mjs ythril`): every statement of a subject in one chunk, a subject never before an end it points
+at, each chunk under 768 MiB, the count recorded as `loadChunks`. No size the benchmark runs needs it, and a later
+chunk names an earlier chunk's record by the generator's address, which the import does not keep, so an edge across
+chunks is expected to be refused as an unknown end: the chunker has not been exercised against the door.
 
 ## The result record
 
 One JSON file per run (design R10): `outcome` (`ok`, `partial`, `failed`), `engine`, `size`, `ythrilCommit`,
 `oxigraphDigest`, `bsbmSeed` (generator and driver), `dataset` (`variant`, triples and sha256 of the variant both
 engines load), `loadMs` or `loadRefusal`,
-`warmups`, `runs`, and per query `median`, `p95`, `min`, `max`, `n`, `rows` (rows or triples of the first measured
-answer, to compare engines' answers), `errors` and the first `error` (`code`, `status`, `message`). The last key is
+`valid` (and `invalidQueries` when false), `mappedParameters` and `loadChunks` for a Ythril run,
+`warmups`, `runs`, and per query `median`, `p95`, `min`, `max`, `n`, `rows` (rows or statements of the first measured
+answer), `rowsPerRun` (the count of every run, by parameter set), `errors` and the first `error` (`code`, `status`,
+`message`). The last key is
 `end: "END-OF-RECORD"`. A file is never overwritten: a second write to the same name is an error.
 
 ## Reading a refused Ythril load
@@ -85,17 +118,36 @@ open idea awaiting the owner, I-41):
   the one in the data's subclass hierarchy stays (`ProductTypeN`, not the vocabulary class `bsbm:Product`), else
   the first stated. The `rdfs:subClassOf` statements are all kept.
 - **No language tags.** `"x"@en` becomes `"x"`, the same lexical form as a plain string.
+- **The address statement.** Every subject that is an IRI ends the file with `<s> rdfs:seeAlso "<s>"` (see
+  [Binding the parameters](#binding-the-parameters)), in order of first appearance.
 - Nothing else changes: every other line leaves byte for byte, and the output has no stamp, so its sha256 is the
-  same on every run. The result record names the variant (`ythril-loadable-1`) and that sha256.
+  same on every run. The result record names the variant (`ythril-loadable-2`) and that sha256.
 
 Consequences for the queries, the same for both engines: Q8 filters `langMatches(lang(?text), "EN")`, so on the
 variant it answers no rows; and Q1 and Q4, which match `rdf:type` against a product type, find only the products
 of exactly that type, since nothing is forward-chained.
 
+## What Ythril does not answer like Oxigraph (measured on the 1 000-product run, 2026-11-25)
+
+With the parameters bound, Q1, Q3, Q4, Q5, Q7 and Q8 answer Oxigraph's row counts on every run. The others differ, for
+reasons in the data model and not in the harness, so their records are `valid: false` and name them:
+
+- **Statements the import does not hold** (`notTaken: not-inferred`): a literal with a custom datatype
+  (`bsbm:price`, `"7956.65"^^bsbm:USD`), an IRI object that is no subject of the file (`bsbm:offerWebpage`,
+  `foaf:homepage`, `bsbm:country`), `dc:publisher` and `rdfs:subClassOf`. Q2 needs `dc:publisher`, Q10 `dc:publisher`,
+  `bsbm:country` and `bsbm:price`, Q12 `bsbm:price`, `bsbm:offerWebpage` and `foaf:homepage`: all answer 0 rows on Ythril.
+- **Statements Ythril adds to every record** (`rdf:type ythril:Entity`, `dcterms:created`, `dcterms:modified`,
+  `dcterms:conformsTo`, `prov:wasAttributedTo`, and the name as `rdfs:label` for an unlabelled subject): Q9 (DESCRIBE of
+  a reviewer) and Q11 (every property of an offer) count them, so they answer more rows than Oxigraph.
+
+A variant rule that makes the data representable (or a decision that these two queries are not comparable) is for
+the owner of the benchmark; until one exists the tables of a Ythril run open with `INVALID`.
+
 ## Tests
 
-`stats`, `params`, `queries`, `result-record`, `prepare`, `compare` and `ythril` (the refusal wording) have
-`node:test` files next to them. Run them in a container, not on the host:
+`stats`, `params`, `queries`, `result-record`, `prepare`, `compare`, `ythril` (the refusal wording), `ythril-params`,
+`chunk`, `answer-rows`, `validity` and `typecap` have `node:test` files next to them. Run them in a container, not on
+the host, with `node_modules` of an `npm ci` (for `n3`) at the root of what is mounted:
 
 ```text
 docker run --rm -v <checkout>:/w:ro -w /w node:24 sh -c 'node --test benchmarks/rdf/*.test.mjs'
@@ -106,9 +158,10 @@ docker run --rm -v <checkout>:/w:ro -w /w node:24 sh -c 'node --test benchmarks/
 | File | What it is |
 |---|---|
 | `pin.json` | URLs, hashes, image digests, seeds, sizes |
-| `generate.mjs` | download and verify BSBM Tools, generate datasets (no forward chaining), make the variant, capture the driver's parameters |
+| `generate.mjs` | download and verify BSBM Tools, generate datasets (no forward chaining), make the variant (again when its rules changed), capture the driver's parameters |
+| `typecap-search.mjs` | the largest product count under the import's type cap, from the generator's output |
 | `load.mjs` | `oxigraph-up/down`, `ythril-up/down`, `ythril` |
-| `run.mjs` | runs the queries, writes the record and the table |
-| `compare.mjs` | two records side by side, the queries more than 10x slower marked |
+| `run.mjs` | runs the queries, maps Ythril's parameters, judges validity, writes the record and the table |
+| `compare.mjs` | two records side by side, the queries more than 10x slower marked, invalid records refused |
 | `env.mjs`, `oxigraph.mjs`, `ythril.mjs`, `unzip.mjs` | plumbing: booked docker, the two engines, a zip reader |
-| `stats.mjs`, `params.mjs`, `queries.mjs`, `result-record.mjs`, `prepare.mjs` | the pure parts, each with a test |
+| `stats.mjs`, `params.mjs`, `queries.mjs`, `result-record.mjs`, `prepare.mjs`, `ythril-params.mjs`, `chunk.mjs`, `answer-rows.mjs`, `validity.mjs`, `typecap.mjs` | the pure parts, each with a test |

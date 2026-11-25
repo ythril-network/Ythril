@@ -20,13 +20,14 @@
  * Datasets, downloads and parameters live under the work folder, never in the repository.
  */
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { fetchPinned, readPinnedDataset } from '../dataset-pin.mjs';
 import { dockerAsync, dockerOk, parseArgs, pinnedImage, workDir, PIN, PIN_PATH, TOOLS_SUBDIR } from './env.mjs';
 import { extractParams } from './params.mjs';
-import { prepareFile } from './prepare.mjs';
+import { VARIANT, prepareFile } from './prepare.mjs';
 import { loadTemplates } from './queries.mjs';
 import { unzip } from './unzip.mjs';
 
@@ -42,7 +43,7 @@ async function fileDigest(path) {
   return { sha256: h.digest('hex'), bytes, triples: lines };
 }
 
-async function ensureTools(work) {
+export async function ensureTools(work) {
   const zip = join(work, PIN.datasets.bsbmtools.cachePath);
   if (existsSync(zip)) {
     readPinnedDataset(work, PIN_PATH, 'bsbmtools'); // throws when the cached bytes are not the pinned ones
@@ -56,7 +57,7 @@ async function ensureTools(work) {
 }
 
 /** The raw generator output, WITHOUT forward chaining (no `-fc`): each product states its own types only. */
-function generateDataset(work, tools, size) {
+export function generateDataset(work, tools, size) {
   const out = join(work, 'data', String(size));
   if (existsSync(join(out, 'dataset.nt'))) return out; // renamed into place last, so it is only there whole
   const partial = `${out}.partial`;
@@ -71,7 +72,13 @@ function generateDataset(work, tools, size) {
   // The generator reads its word lists one byte at a time: from a bind mount that took minutes, so the work
   // happens on the container's own disk and the result is copied out once.
   dockerOk(['run', '--rm', '-m', '4g', '-v', `${tools}:/bsbm:ro`, '-v', `${partial}:/out`, pinnedImage('temurin'), 'sh', '-c', script], { mem: 4 });
-  renameSync(partial, out);
+  // Windows may hold the fresh folder for a moment (a scanner, the container's mount): a refused rename is tried again.
+  for (let attempt = 1; ; attempt++) {
+    try { renameSync(partial, out); break; } catch (err) {
+      if (attempt >= 10 || !['EPERM', 'EBUSY', 'EACCES'].includes(err.code)) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);
+    }
+  }
   return out;
 }
 
@@ -129,8 +136,10 @@ async function main() {
     if (!PIN.sizes.includes(size) && !flags['any-size']) throw new Error(`size ${size} is not one of ${PIN.sizes.join(', ')}; --any-size allows it`);
     const out = generateDataset(work, tools, size);
     const manifestPath = join(out, 'manifest.json');
-    if (!existsSync(manifestPath)) {
-      const raw = await fileDigest(join(out, 'dataset.nt'));
+    // A variant made by an older rule set is made again from the raw file (the raw bytes are what the generator wrote).
+    const previous = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null;
+    if (previous?.variant?.name !== VARIANT) {
+      const raw = previous?.raw ?? await fileDigest(join(out, 'dataset.nt'));
       const v = prepareFile(join(out, 'dataset.nt'), join(out, 'variant.nt'));
       const { variant: name, sha256, bytes, triples, ...changes } = v;
       writeFileSync(manifestPath, `${JSON.stringify({
@@ -147,4 +156,6 @@ async function main() {
   }
 }
 
-main().catch((err) => { console.error(err.message); process.exitCode = 1; });
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => { console.error(err.message); process.exitCode = 1; });
+}

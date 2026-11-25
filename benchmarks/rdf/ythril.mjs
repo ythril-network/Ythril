@@ -120,6 +120,21 @@ export async function loadInto(state, spaceId, file, params = {}) {
 }
 
 /**
+ * Imports several subject-complete files in order (see chunk.mjs), timing them together. Stops at the first refusal
+ * and answers it; a finished load answers the sum of the times and the number of files in `chunks`.
+ */
+export async function loadChunks(state, spaceId, files, params = {}) {
+  let loadMs = 0;
+  let last = null;
+  for (const file of files) {
+    last = await loadInto(state, spaceId, file, params);
+    loadMs += last.loadMs;
+    if (!last.ok) return { ...last, loadMs, chunks: files.length };
+  }
+  return { ...last, loadMs, chunks: files.length };
+}
+
+/**
  * The code and message a refused import is recorded with. A refusal polled to its end answers `200` with a report
  * whose status is `refused`: it is `rdf_import_refused`, and its message is the reason codes with their counts
  * (never the report's text, which names statements). Any other refusal keeps the code and message it came with.

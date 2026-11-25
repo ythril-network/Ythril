@@ -12,6 +12,12 @@
  *   2. No language tags. Ythril refuses `language-tagged-literal`, and language tags on values are an open idea
  *      awaiting the owner (I-41). `"x"@en` becomes `"x"`, the same lexical form as a plain string.
  *
+ *   3. The address statement. The import mints a new address per record and keeps the generator's nowhere, but the
+ *      BSBM parameters name generator addresses. Every subject that is an `<iri>` gets one closing statement
+ *      `<s> rdfs:seeAlso "<s>"`, the address as a PLAIN STRING (an address object would be read as a link to the
+ *      record itself and answer the minted address back). Both engines load it, so the data stays the same on both
+ *      sides; the Ythril run asks for the record carrying each parameter's address and uses the minted one.
+ *
  * Nothing else changes.
  *
  * ## What this prevents
@@ -30,7 +36,10 @@ import { closeSync, openSync, readSync, renameSync, writeSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
 /** Names this transform's output; the result record carries it beside the sha256. Raise it when a rule changes. */
-export const VARIANT = 'ythril-loadable-1';
+export const VARIANT = 'ythril-loadable-2';
+
+/** The property that carries a subject's generator address as a string (rule 3). */
+export const ADDRESS_PREDICATE = 'http://www.w3.org/2000/01/rdf-schema#seeAlso';
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const SUBCLASS_OF = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
@@ -42,6 +51,19 @@ const SUBCLASS_LINE = new RegExp(`^(<[^>]*>) <${SUBCLASS_OF}> (<[^>]*>)\\s*\\.\\
 // text inside a literal, a typed literal and an IRI never match.
 const LANG_TAIL = /"@[A-Za-z]+(?:-[A-Za-z0-9]+)*(\s*\.\s*)$/;
 const COMMENT_LINE = /^\s*#/;
+
+/** The address statement of a subject given as `<iri>`: the IRI between the brackets, escaped as an N-Triples string. */
+function addressLine(subject) {
+  const iri = subject.slice(1, -1).replace(/[\\"]/g, (c) => `\\${c}`);
+  return `${subject} <${ADDRESS_PREDICATE}> "${iri}" .\n`;
+}
+
+/** The subject of a statement line when it is an `<iri>`, else null (a blank node, a comment, a blank line). */
+function iriSubject(line) {
+  if (line.charCodeAt(0) !== 60) return null;
+  const end = line.indexOf('>');
+  return end < 0 ? null : line.slice(0, end + 1);
+}
 
 /** Yields `{ line, terminated }` for a text; `terminated` is whether a `\n` followed the line. */
 function* linesOfText(text) {
@@ -58,7 +80,7 @@ function* linesOfText(text) {
 }
 
 /** The same, over a file read in chunks (latin1), so a file larger than memory is read line by line. */
-function* linesOfFile(path, chunkBytes) {
+export function* linesOfFile(path, chunkBytes) {
   const fd = openSync(path, 'r');
   try {
     const buf = Buffer.allocUnsafe(chunkBytes);
@@ -176,16 +198,24 @@ export function prepareText(text) {
   const { kept, tied } = decide(scan);
   const count = newCount();
   const out = [];
+  const subjects = new Set();
   let inputTriples = 0;
   let triples = 0;
+  let endsInNewline = true;
   for (const { line, terminated } of linesOfText(text)) {
     if (isTriple(line)) inputTriples++;
     const written = rewrite(line, kept, count);
     if (written === null) continue;
-    if (isTriple(written)) triples++;
+    if (isTriple(written)) { triples++; const s = iriSubject(written); if (s !== null) subjects.add(s); }
     out.push(terminated ? `${written}\n` : written);
+    endsInNewline = terminated;
   }
-  return { text: out.join(''), stats: { inputTriples, triples, multiTypedSubjects: kept.size, tiedSubjects: tied, ...count } };
+  if (subjects.size > 0 && !endsInNewline) out.push('\n');
+  for (const s of subjects) out.push(addressLine(s));
+  return {
+    text: out.join(''),
+    stats: { inputTriples, triples: triples + subjects.size, multiTypedSubjects: kept.size, tiedSubjects: tied, addressStatements: subjects.size, ...count },
+  };
 }
 
 /**
@@ -206,6 +236,8 @@ export function prepareFile(src, dst, { chunkBytes = 1 << 22 } = {}) {
   let bytes = 0;
   let inputTriples = 0;
   let triples = 0;
+  const subjects = new Set();
+  let endsInNewline = true;
   let pending = [];
   let pendingSize = 0;
   const flush = () => {
@@ -222,8 +254,16 @@ export function prepareFile(src, dst, { chunkBytes = 1 << 22 } = {}) {
       if (isTriple(line)) inputTriples++;
       const written = rewrite(line, kept, count);
       if (written === null) continue;
-      if (isTriple(written)) triples++;
+      if (isTriple(written)) { triples++; const s = iriSubject(written); if (s !== null) subjects.add(s); }
       const piece = terminated ? `${written}\n` : written;
+      pending.push(piece);
+      pendingSize += piece.length;
+      endsInNewline = terminated;
+      if (pendingSize >= 1 << 20) flush();
+    }
+    if (subjects.size > 0 && !endsInNewline) { pending.push('\n'); pendingSize++; }
+    for (const s of subjects) {
+      const piece = addressLine(s);
       pending.push(piece);
       pendingSize += piece.length;
       if (pendingSize >= 1 << 20) flush();
@@ -234,7 +274,7 @@ export function prepareFile(src, dst, { chunkBytes = 1 << 22 } = {}) {
   }
   renameSync(partial, dst);
   return {
-    variant: VARIANT, sha256: hash.digest('hex'), bytes, triples, inputTriples,
-    multiTypedSubjects: kept.size, tiedSubjects: tied, ...count,
+    variant: VARIANT, sha256: hash.digest('hex'), bytes, triples: triples + subjects.size, inputTriples,
+    multiTypedSubjects: kept.size, tiedSubjects: tied, addressStatements: subjects.size, ...count,
   };
 }

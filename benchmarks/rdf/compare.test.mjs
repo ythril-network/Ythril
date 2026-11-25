@@ -13,7 +13,7 @@ function record(engine, queries, over = {}) {
   return {
     outcome: 'ok', engine, size: 1000, ythrilCommit: '2bfffd806', oxigraphDigest: 'sha256:aa',
     dataset: { variant: 'ythril-loadable-1', triples: 370911, sha256: SHA },
-    loadMs: engine === 'oxigraph' ? 900 : 20000, queries, ...over,
+    loadMs: engine === 'oxigraph' ? 900 : 20000, valid: true, queries, ...over,
   };
 }
 
@@ -110,4 +110,39 @@ test('the header carries the size, the variant with its sha256 and both load tim
   assert.match(ok, /Ythril loaded in 20000 ms/);
   const refused = renderComparison(ox, record('ythril', { Q1: q(3) }, { loadMs: null, loadRefusal: { status: 200, code: 'rdf_import_refused', message: 'reasons: plan_refused 5' } }));
   assert.match(refused, /Ythril load refused: rdf_import_refused/);
+});
+
+const invalidYthril = (queries = { Q1: q(3), Q5: q(3) }) => record('ythril', queries, {
+  valid: false, invalidQueries: [{ query: 'Q1', oxigraph: 10, ythril: 0 }, { query: 'Q5', oxigraph: 1, ythril: null }],
+});
+
+test('a record that is not valid is refused, naming the differing queries, unless the caller asks to see it', () => {
+  const ox = record('oxigraph', { Q1: q(2), Q5: q(2) });
+  assert.throws(() => compareRecords(ox, invalidYthril()), (err) => /invalid/i.test(err.message) && /Q1/.test(err.message) && /Q5/.test(err.message));
+  assert.throws(() => renderComparison(ox, invalidYthril()), /invalid/i);
+  assert.doesNotThrow(() => compareRecords(ox, invalidYthril(), { showInvalid: true }));
+});
+
+test('an invalid record shown on request carries the INVALID header, with the queries and both counts', () => {
+  const ox = record('oxigraph', { Q1: q(2), Q5: q(2) });
+  const text = renderComparison(ox, invalidYthril(), { showInvalid: true });
+  assert.match(text.split('\n')[0], /^INVALID/);
+  assert.match(text, /Q1 \(Oxigraph 10 rows, Ythril 0\)/);
+  assert.match(text, /Q5 \(Oxigraph 1 rows?, Ythril no answer\)/);
+  assert.doesNotMatch(renderComparison(ox, record('ythril', { Q1: q(3), Q5: q(3) })), /INVALID/);
+});
+
+test('a record that was never judged is refused as well: it cannot be told from a valid one', () => {
+  const ox = record('oxigraph', { Q1: q(2) });
+  const { valid: _v, ...unjudged } = record('ythril', { Q1: q(3) });
+  assert.throws(() => compareRecords(ox, unjudged), /not been judged|valid/i);
+  assert.throws(() => compareRecords({ ...ox, valid: undefined }, record('ythril', { Q1: q(3) })), /valid/i);
+});
+
+test('the table shows the rows each engine answered, beside the times', () => {
+  const ox = record('oxigraph', { Q1: { ...q(2), rows: 10 } });
+  const yt = record('ythril', { Q1: { ...q(3), rows: 10 } });
+  const line = renderComparison(ox, yt).split('\n').find((l) => l.startsWith('| Q1 '));
+  assert.match(line, /\| 10 \| 10 \|/);
+  assert.match(renderComparison(ox, yt), /Oxigraph rows \| Ythril rows/);
 });

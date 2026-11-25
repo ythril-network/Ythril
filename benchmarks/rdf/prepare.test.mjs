@@ -17,7 +17,13 @@ const cls = (n) => `<http://ex.test/c/${n}>`;
 const subj = (n) => `<http://ex.test/s/${n}>`;
 const type = (s, c) => `${subj(s)} ${RDF_TYPE} ${cls(c)} .`;
 const sub = (a, b) => `${cls(a)} ${SUB} ${cls(b)} .`;
-const run = (lines) => prepareText(`${lines.join('\n')}\n`).text.split('\n').slice(0, -1);
+const SEE_ALSO = '<http://www.w3.org/2000/01/rdf-schema#seeAlso>';
+/** The statement that keeps a subject's generator address as a plain string (what the Ythril run maps parameters by). */
+const addr = (iri) => `${iri} ${SEE_ALSO} "${iri.slice(1, -1)}" .`;
+const isAddr = (l) => l.includes(SEE_ALSO);
+const runAll = (lines) => prepareText(`${lines.join('\n')}\n`).text.split('\n').slice(0, -1);
+/** The rewritten statements only: the address block the variant ends with is judged by its own cases. */
+const run = (lines) => runAll(lines).filter((l) => !isAddr(l));
 const typesOf = (out, s) => out.filter((l) => l.startsWith(`${subj(s)} ${RDF_TYPE} `));
 
 test('a subject with three rdf:type statements keeps only the most specific one, wherever it is stated', () => {
@@ -98,7 +104,39 @@ test('every other line passes through byte for byte: comments, blanks, CRLF, byt
     Buffer.from(`${subj(2)} <http://ex.test/p> "  padded  " .   `, 'latin1'),
   ]);
   const out = Buffer.from(prepareText(bytes.toString('latin1')).text, 'latin1');
-  assert.ok(out.equals(bytes), 'the output bytes differ from the input bytes');
+  // Only the address block is added, on a line of its own after the unterminated last line.
+  const expected = Buffer.concat([bytes, Buffer.from(`\n${addr(subj(1))}\n${addr(subj(2))}\n`, 'latin1')]);
+  assert.ok(out.equals(expected), 'the output bytes differ from the input bytes plus the address block');
+});
+
+test('every subject that is an address keeps it: one rdfs:seeAlso statement with the address as a plain string, after all other statements', () => {
+  const p = '<http://ex.test/p>';
+  const out = runAll([
+    `${subj(1)} ${p} "one" .`, `${subj(2)} ${p} ${subj(1)} .`, `${subj(1)} ${p} "again" .`,
+    `_:b0 ${p} "blank" .`, `${subj(3)} ${p} <http://ex.test/only-an-object> .`,
+  ]);
+  assert.deepEqual(out.filter(isAddr), [addr(subj(1)), addr(subj(2)), addr(subj(3))], 'one per subject, in the order they first appear, none for a blank node or an object');
+  assert.deepEqual(out.slice(0, 5).filter(isAddr), [], 'the block follows every other statement');
+  assert.equal(out.length, 5 + 3);
+  assert.ok(out.filter(isAddr).every((l) => l.endsWith('" .')), 'the object is a literal: an address object would be read as the record itself');
+});
+
+test('the address string is the subject\'s address, escaped as N-Triples, so a quote or backslash cannot end the string early', () => {
+  const odd = '<http://ex.test/a"b\\c>';
+  const out = runAll([`${odd} <http://ex.test/p> "x" .`]);
+  assert.deepEqual(out.filter(isAddr), [`${odd} ${SEE_ALSO} "http://ex.test/a\\"b\\\\c" .`]);
+});
+
+test('a text with no subject that is an address gains nothing, and one ending in a newline gains no blank line', () => {
+  assert.equal(prepareText('').text, '');
+  assert.equal(prepareText('_:a <http://ex.test/p> "x" .\n').text, '_:a <http://ex.test/p> "x" .\n');
+  const text = prepareText(`${subj(1)} <http://ex.test/p> "x" .\n`).text;
+  assert.equal(text, `${subj(1)} <http://ex.test/p> "x" .\n${addr(subj(1))}\n`);
+});
+
+test('the variant is named for its rules: the second adds the address statements', () => {
+  assert.equal(VARIANT, 'ythril-loadable-2');
+  assert.equal(prepareText(`${subj(1)} <http://ex.test/p> "x" .\n`).stats.addressStatements, 1);
 });
 
 test('the output is stable: two runs over one file give the same bytes, the same sha256 and the same counts', () => {
@@ -112,9 +150,11 @@ test('the output is stable: two runs over one file give the same bytes, the same
     assert.equal(readFileSync(join(dir, 'one.nt')).toString('latin1'), readFileSync(join(dir, 'two.nt')).toString('latin1'));
     assert.equal(one.sha256, createHash('sha256').update(readFileSync(join(dir, 'one.nt'))).digest('hex'), 'the reported sha256 is not the file\'s');
     assert.equal(one.bytes, readFileSync(join(dir, 'one.nt')).length);
-    assert.deepEqual(readFileSync(join(dir, 'one.nt'), 'latin1').split('\n').slice(0, -1), [sub(2, 1), type('a', 2), `${subj('a')} <http://ex.test/p> "t" .`, type('b', 1)]);
-    // 5 statements in, 4 out: one type dropped, one literal re-tagged, one subject decided.
-    assert.deepEqual([one.inputTriples, one.triples, one.droppedTypeStatements, one.retaggedLiterals, one.multiTypedSubjects], [5, 4, 1, 1, 1]);
+    assert.deepEqual(readFileSync(join(dir, 'one.nt'), 'latin1').split('\n').slice(0, -1), [
+      sub(2, 1), type('a', 2), `${subj('a')} <http://ex.test/p> "t" .`, type('b', 1), addr(cls(2)), addr(subj('a')), addr(subj('b')),
+    ]);
+    // 5 statements in, 4 rewritten and 3 addresses out: one type dropped, one literal re-tagged, one subject decided.
+    assert.deepEqual([one.inputTriples, one.triples, one.droppedTypeStatements, one.retaggedLiterals, one.multiTypedSubjects, one.addressStatements], [5, 7, 1, 1, 1, 3]);
     assert.equal(one.variant, VARIANT);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -135,14 +175,15 @@ test('the file reader and the text transform agree on a file read in small chunk
   }
 });
 
-test('a file with nothing to change comes out identical, bytes that are not UTF-8 included', () => {
+test('a file with nothing to change comes out identical but for the address block, bytes that are not UTF-8 included', () => {
   const dir = mkdtempSync(join(tmpdir(), 'b271-prepare-'));
   try {
     const bytes = Buffer.concat([Buffer.from(`${type('a', 1)}\r\n${subj(1)} <http://ex.test/p> "caf`, 'latin1'), Buffer.from([0xe9, 0xff]), Buffer.from('" .\n# last', 'latin1')]);
     writeFileSync(join(dir, 'in.nt'), bytes);
     const r = prepareFile(join(dir, 'in.nt'), join(dir, 'out.nt'), { chunkBytes: 11 });
-    assert.ok(readFileSync(join(dir, 'out.nt')).equals(bytes), 'the output bytes differ from the input bytes');
-    assert.equal(r.sha256, createHash('sha256').update(bytes).digest('hex'));
+    const expected = Buffer.concat([bytes, Buffer.from(`\n${addr(subj('a'))}\n${addr(subj(1))}\n`, 'latin1')]);
+    assert.ok(readFileSync(join(dir, 'out.nt')).equals(expected), 'the output bytes differ from the input bytes plus the address block');
+    assert.equal(r.sha256, createHash('sha256').update(expected).digest('hex'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
