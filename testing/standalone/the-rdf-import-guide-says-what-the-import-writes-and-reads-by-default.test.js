@@ -38,7 +38,7 @@ function importSection() {
 }
 
 describe('the RDF import section says what the import writes and reads by default', () => {
-  it('names every reason code the report builder owns, as a recorded reason', () => {
+  it('names every reason code the report builder owns, as a coded reason', () => {
     const source = read('server/src/rdf/import-report.ts');
     // A code may be spelled with hyphens (Q-759: `missing-required-field`, `end-refused`); a pattern of underscores alone read past them, so a
     // planner refusal's code could reach callers with no line of the guide to say what it means.
