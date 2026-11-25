@@ -262,6 +262,8 @@ export interface ImportRefusal extends DryRefusal {
   readonly seededId?: string;
   /** The required field the record lacks, when that is what refused it. */
   readonly missingField?: string;
+  /** Set with `missingField` when the record was to take its address's local name and the address gives none ({@link RecordOp.addressGivesNoName}). */
+  readonly addressGivesNoName?: true;
   /** The ids of the ends the space does not hold, when strict linkage refused the edge or link for them. */
   readonly missingEnds?: readonly string[];
 }
@@ -298,6 +300,7 @@ function causesOf(spaceId: string, ops: readonly RecordOp[], items: readonly Dry
     return {
       ...refusal, ...(seededId !== undefined ? { seededId } : {}), ...(missingField !== null ? { missingField } : {}),
       ...(ends.length > 0 ? { missingEnds: ends } : {}),
+      ...(missingField !== null && op.addressGivesNoName ? { addressGivesNoName: true as const } : {}),
     };
   });
 }

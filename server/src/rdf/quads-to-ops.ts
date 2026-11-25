@@ -68,6 +68,11 @@ interface OpBase {
   correlation: string;
   /** The graph the quads came from, `null` for the default graph. */
   graph: string | null;
+  /**
+   * A new entity or chrono entry the file gives no name: its subject states no `rdfs:label` and its address's local name is blank or holds a
+   * control character, so no default name was taken. The report names that cause (`address-gives-no-name`) for the required-field refusal.
+   */
+  addressGivesNoName?: true;
 }
 export type RecordOp =
   | (OpBase & { kind: 'entity'; fields: EntityFields })
@@ -549,14 +554,21 @@ const RDFS_LABEL = std('rdfs', 'label');
  * A new entity or chrono entry whose subject states no `rdfs:label` is named by its address's local name (Q-759): the schema reader's own
  * rule for a term without a label (`localPart`), so a schema-less file of typed addresses lands in a strict space and is not refused 30 000
  * records at a time for a name it never meant to give. A subject that states a label keeps whatever the label's reading answered (a
- * refused label stays refused), a blank node has no address to name it by, and a converge keeps the stored name.
+ * refused label stays refused), a blank node has no address to name it by, and a converge keeps the stored name (the caller asks only for a
+ * new record).
+ *
+ * The name is the local name trimmed. A local name that is empty after trimming, or holds a control character (`%0A`, `%00`), is no name:
+ * nothing is set and `false` is answered, so the caller marks the record and the report names the address as the cause. `true` otherwise,
+ * also when the subject is not one this names (no name field, a label stated, a blank node).
  */
-function nameByAddress(kind: OpKind, subject: Subject, data: readonly Quad[], fields: Record<string, unknown>): void {
+function nameByAddress(kind: OpKind, subject: Subject, data: readonly Quad[], fields: Record<string, unknown>): boolean {
   const field = NAME_FIELD[kind];
-  if (field === undefined || fields[field] !== undefined || subject.term.kind !== 'iri') return;
-  if (data.some(q => q.predicate.value === RDFS_LABEL)) return;
-  const local = localPart(subject.term.value);
-  if (local !== '') fields[field] = local;
+  if (field === undefined || fields[field] !== undefined || subject.term.kind !== 'iri') return true;
+  if (data.some(q => q.predicate.value === RDFS_LABEL)) return true;
+  const local = localPart(subject.term.value).trim();
+  if (local === '' || /\p{Cc}/u.test(local)) return false;
+  fields[field] = local;
+  return true;
 }
 
 /** The operation of a record: insert under the minted id, or converge onto the stored one with every unstated field as stored. */
@@ -749,9 +761,10 @@ function translate(L: Ledger, group: readonly Quad[], key: string, graph: string
   const ownRef = (op: RecordOp): End => ({ ref: { kind, id: op.id } });
   // The record's id is known before its relations are read: a converge's stored id, or the id minted for its address.
   const probe = finish(kind, subject, graph, { fields: {}, properties: {}, tags: [] }, {}, ctx);
-  if (probe.op === 'insert') nameByAddress(kind, subject, data, read.fields);
+  const nameless = probe.op === 'insert' && !nameByAddress(kind, subject, data, read.fields);
   const rel = relations(L, ownRef(probe), kind, graph, edgeQuads, linkQuads, ctx);
-  return [finish(kind, subject, graph, read, rel.links, ctx), ...rel.ops];
+  const op = finish(kind, subject, graph, read, rel.links, ctx);
+  return [nameless ? { ...op, addressGivesNoName: true } : op, ...rel.ops];
 }
 
 /**

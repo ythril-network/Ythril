@@ -43,7 +43,7 @@ describe('the RDF import section says what the import writes and reads by defaul
     // A code may be spelled with hyphens (Q-759: `missing-required-field`, `end-refused`); a pattern of underscores alone read past them, so a
     // planner refusal's code could reach callers with no line of the guide to say what it means.
     const codes = [...source.matchAll(/^export const [A-Z_]+ = '([a-z][a-z_-]*)';$/gm)].map(m => m[1]);
-    for (const c of ['stored_record_gone', 'links_not_written', 'plan_refused', 'missing-required-field', 'end-refused', 'stored-link-dangling']) {
+    for (const c of ['stored_record_gone', 'links_not_written', 'plan_refused', 'missing-required-field', 'end-refused', 'stored-link-dangling', 'address-gives-no-name']) {
       assert.ok(codes.includes(c), `${c} is among the constants found: ${codes.join(', ')}`);
     }
     const section = importSection();
