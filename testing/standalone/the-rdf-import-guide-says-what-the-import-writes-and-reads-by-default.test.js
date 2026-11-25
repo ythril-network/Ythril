@@ -10,7 +10,8 @@
  * ## What it holds
  *
  * - Every reason code the import's report builder spells as its own constant (`export const <NAME> = '<code>'` in `rdf/import-report.ts`, derived from the
- *   source, never a list here) is named in the import section as a `recorded` reason.
+ *   source, never a list here) is named in the import section as a reason (`coded \`<code>\``), a hyphenated code too (Q-759: the planner refusals'
+ *   `missing-required-field` and `end-refused` were read past by a pattern of underscores alone).
  * - The kinds are written in `IMPORT_OP_ORDER`'s order (read from the source), and the section says that order.
  * - The parameters table says TriG, N-Quads and JSON-LD default `sourceBase` to the file's one data graph and Turtle to none, and the section says when the
  *   default applies; the section says an unchanged record is not written and is counted in `unchanged`; the status table says the base check is also made
@@ -39,8 +40,12 @@ function importSection() {
 describe('the RDF import section says what the import writes and reads by default', () => {
   it('names every reason code the report builder owns, as a recorded reason', () => {
     const source = read('server/src/rdf/import-report.ts');
-    const codes = [...source.matchAll(/^export const [A-Z_]+ = '([a-z_]+)';$/gm)].map(m => m[1]);
-    assert.ok(codes.includes('stored_record_gone') && codes.includes('links_not_written'), `the constants found: ${codes.join(', ')}`);
+    // A code may be spelled with hyphens (Q-759: `missing-required-field`, `end-refused`); a pattern of underscores alone read past them, so a
+    // planner refusal's code could reach callers with no line of the guide to say what it means.
+    const codes = [...source.matchAll(/^export const [A-Z_]+ = '([a-z][a-z_-]*)';$/gm)].map(m => m[1]);
+    for (const c of ['stored_record_gone', 'links_not_written', 'plan_refused', 'missing-required-field', 'end-refused']) {
+      assert.ok(codes.includes(c), `${c} is among the constants found: ${codes.join(', ')}`);
+    }
     const section = importSection();
     for (const code of codes) assert.ok(section.includes(`coded \`${code}\``), `the section names the reason \`${code}\``);
   });
