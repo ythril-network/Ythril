@@ -232,7 +232,7 @@ export const ROUTE_RULES: RouteRule[] = [
   // Q-758: a Linked Data address read, a read like the record reads it is the twin of. No space group: the space is the one whose BASE holds
   // the address (a renamed space keeps its old segment), which the door resolved and handed over as `authorisedSpaces`; the record's id is
   // `entryId`, and `changes` holds counts only.
-  { method: 'GET',    pattern: /^\/ld\/[^/]+\/.+$/,                                   operation: 'ld.read', read: true },
+  { method: 'GET',    pattern: /^\/ld\/[^/]+(\/.*)?$/,                                operation: 'ld.read', read: true },
   // Q-753: an RDF import is one row per request with its counts (never a value of the file), through `req.auditChangesExplicit`; MCP
   // `import_rdf` records the same operation. Its status is a read.
   { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/import\/rdf$/,        operation: 'rdf.import', spaceGroup: 1 },

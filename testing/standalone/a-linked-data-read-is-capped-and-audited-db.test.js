@@ -14,7 +14,8 @@
  * ## Seen red
  *
  * On c647bd24f the address answers the 404 placeholder and no `/ld/` request is audited. Mutations: the inbound half read on past the cap
- * (rule 1: more statements than the cap, no header); the address written into `changes` (rule 2).
+ * (rule 1: more statements than the cap, no header); the address written into `changes` (rule 2). On d78b20280 (lens-1 P1, lens-2) a read of
+ * the base root `/ld/<space>/` was audited nowhere: the rule demanded a segment after the space.
  *
  * Run: a Mongo the harness accepts, npm run build:server, then
  *      node --test testing/standalone/a-linked-data-read-is-capped-and-audited-db.test.js
@@ -117,6 +118,17 @@ describe('a linked data read is capped and audited', { skip }, () => {
     assert.equal(rows.length, 1, `rows of ld.read: ${rows.map(x => `${x.method} ${x.status}`).join(', ')}`);
     assert.equal(rows[0].spaceId, RENAMED, `the row names the segment ('${OLD}') or no space, not the space that holds the base`);
     assert.equal(rows[0].entryId, 'r1');
+  });
+
+  it('a read of the base root (the graph itself, no record) is one ld.read row naming the space (lens-1 P1)', async () => {
+    await d.loader.mutateConfig(cfg => { cfg.audit = { ...(cfg.audit ?? {}), logReads: true }; });
+    const before_ = (await auditRowsOf(d.door.mongo, { operation: 'ld.read' })).length;
+    const r = await d.restGet(key, `/ld/${S}/`, { Accept: 'text/turtle' });
+    assert.equal(r.status, 200, fmt(r));
+    const rows = (await auditRowsOf(d.door.mongo, { operation: 'ld.read' })).slice(before_);
+    assert.equal(rows.length, 1, `the base root read is not audited as ld.read: rows ${rows.map(x => `${x.method} ${x.status}`).join(', ')}`);
+    assert.equal(rows[0].spaceId, S);
+    assert.ok((rows[0].changes ?? []).some(c => c.field === 'kind' && c.to === 'graph'), `the row names the kind graph: ${JSON.stringify(rows[0].changes)}`);
   });
 
   it('a self-reference is no inbound statement: an answer that fits the cap is whole and says nothing was cut', async () => {
