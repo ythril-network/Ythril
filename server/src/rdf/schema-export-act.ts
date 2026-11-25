@@ -30,7 +30,7 @@ import type { Quad, Term } from './literals.js';
 import { createRdfWriter, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
 import {
-  rdfSpaceState, holderOfAddress, RDF_BASE_SHARED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
+  rdfSpaceState, holderOfAddress, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
 } from './rdf-space-state.js';
 
 /** The formats the schema export offers. */
@@ -38,7 +38,7 @@ export const RDF_SCHEMA_FORMATS: readonly RdfFormat[] = Object.freeze(['turtle',
 /** The parameters both doors take (the REST `Accept` header beside them). */
 export const RdfSchemaParams = z.object({ format: z.enum(['turtle', 'jsonld']).optional() });
 /** Every refusal code the schema export answers. */
-export const RDF_SCHEMA_REFUSAL_CODES: readonly string[] = Object.freeze([RDF_BAD_FORMAT, 'rdf_format_not_acceptable', 'rdf_not_enabled', 'rdf_base_conflict', RDF_BASE_SHARED, 'rdf_term_clash', RDF_UNWRITABLE]);
+export const RDF_SCHEMA_REFUSAL_CODES: readonly string[] = Object.freeze([RDF_BAD_FORMAT, 'rdf_format_not_acceptable', 'rdf_not_enabled', 'rdf_base_conflict', RDF_BASE_SHARED, RDF_BASE_NESTED, 'rdf_term_clash', RDF_UNWRITABLE]);
 
 /** What the schema export says about itself. */
 export interface RdfSchemaSummary {

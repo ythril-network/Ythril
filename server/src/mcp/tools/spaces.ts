@@ -550,8 +550,8 @@ export const schema_updateTool: ToolHandler = {
           + 'write that omits `base` or `vocab` keeps it, a different `base` or `vocab` is refused with `rdf_base_frozen`. `rebase: true` with a new base changes it on purpose, '
           + 'which changes every address the space gave out: on a space in no network at once; on a shared space it opens a `space_rebase` '
           + 'vote counted like a deletion and lands at the vote\'s deadline (send it alone; one at a time: while one is held, another is '
-          + 'refused with `rdf_rebase_pending`). A base another space of this instance already holds with RDF on is refused with `409 rdf_base_shared` '
-          + 'and nothing is saved (also for a rebase onto it): send another base. Same as `meta.rdf` on `PATCH /api/spaces/:id`; '
+          + 'refused with `rdf_rebase_pending`). A base another space of this instance already holds with RDF on is refused with `409 rdf_base_shared`, and so is a base that starts '
+          + 'another such space\'s base or is started by it (`409 rdf_base_nested`); nothing is saved (also for a rebase onto it): send another base. Same as `meta.rdf` on `PATCH /api/spaces/:id`; '
           + 'needs the schema `admin` rung.',
         properties: {
           enabled: { type: 'boolean', description: 'Switch the space\'s RDF names on or off; off keeps the base for when it is switched on again.' },
@@ -635,7 +635,7 @@ export const save_spaceTool: ToolHandler = {
     + 'unless you pass meta saying otherwise — with no typeSchemas defined yet that accepts every type, so it does '
     + 'not block an empty space. A personal view is not made here: use `view_create`. '
     + 'Set `faceDescriptorDims` HERE if you are bringing your own recogniser: it can be changed later with `update_space`, but ONLY while the space has never held a face descriptor, so getting it right at creation is the reliable path. Refusals match POST /api/spaces exactly, including 422 for a $ref to a schema-library entry that '
-    + 'does not exist, 409 when the id is taken and 409 `rdf_base_shared` when `meta.rdf` gives the space a base another space already holds with RDF on (no space is made), and 503 (`structuredContent.code: space_still_being_removed`, `retryable: true`) when the id is that of a space deleted a moment ago whose '
+    + 'does not exist, 409 when the id is taken and 409 `rdf_base_shared` (or `rdf_base_nested`, a base that starts the base of another RDF space or is started by it) when `meta.rdf` gives the space a base another space already holds with RDF on (no space is made), and 503 (`structuredContent.code: space_still_being_removed`, `retryable: true`) when the id is that of a space deleted a moment ago whose '
     + 'search-index drop is still running: nothing was written, call again in a few seconds.',
   mutating: true,
   createsSpaces: true,

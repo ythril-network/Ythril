@@ -12,7 +12,8 @@
  * - **One address, two meanings.** A base another space of this instance holds too is `409 rdf_base_shared` (the other space named only to
  *   a caller who may read its schema): `<base>schema` would name two ontologies (bundle-269 drive, finding 10). The save doors refuse to make
  *   such a pair (slice F, by the same comparison, `otherHoldersOfRdfBase`); a pair that already exists (a peer's round, a stored config) is
- *   refused here.
+ *   refused here. A base that starts another space's, or is started by it, is `409 rdf_base_nested` the same way (`/ld/` gives an address to the
+ *   space with the longest base that starts it, so the inner base shadows the outer space's addresses).
  * - **A refusal that blames the wrong holder.** A stored address no document can carry (the base, the vocab, an explicit `iri`, a library
  *   namespace) is `409 rdf_unwritable` naming what holds it, before any record is read (drive, finding 9).
  * - **A second spelling of the space's names.** The meta handed back is the resolved one (`inlineResolvableRefs`), which the record form and
@@ -21,7 +22,7 @@
 import type { SpaceMeta } from '@ythril-network/schema';
 import type { Config, SpaceConfig } from '../config/types.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { rdfBaseConflictOf, otherHoldersOfRdfBase, RDF_BASE_SHARED } from '../spaces/rdf-settle.js';
+import { rdfBaseConflictOf, otherHoldersOfRdfBase, nestedHoldersOfRdfBase, RDF_BASE_SHARED, RDF_BASE_NESTED } from '../spaces/rdf-settle.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
 import { isWritableIri } from '@ythril-network/schema/internal';
 import { prefixesFor, termClashes } from './term-iri.js';
@@ -70,13 +71,13 @@ export interface RdfCaller { id?: string; admin?: boolean; rights?: TokenRights 
 
 // `RDF_BASE_SHARED` (the code of a space whose base another space of this instance holds too) is the save doors' code as well: it lives with
 // the one comparison in `spaces/rdf-settle.ts` and is re-exported here for the exports.
-export { RDF_BASE_SHARED };
+export { RDF_BASE_SHARED, RDF_BASE_NESTED };
 
 export type RdfSpaceState =
   | { ok: true; meta: SpaceMeta; fingerprint: string }
   | {
     ok: false; status: typeof EXPORT_CONFLICT;
-    code: typeof RDF_NOT_ENABLED | typeof RDF_BASE_CONFLICT | typeof RDF_BASE_SHARED | typeof RDF_TERM_CLASH | typeof RDF_UNWRITABLE;
+    code: typeof RDF_NOT_ENABLED | typeof RDF_BASE_CONFLICT | typeof RDF_BASE_SHARED | typeof RDF_BASE_NESTED | typeof RDF_TERM_CLASH | typeof RDF_UNWRITABLE;
     error: string; detail?: Record<string, unknown>;
   };
 
@@ -161,6 +162,18 @@ export function rdfSpaceState(cfg: Config, spaceId: string, caller: RdfCaller | 
       error: `Space '${peerText(spaceId, { max: NAME_QUOTED })}' holds the RDF base ${peerText(rdf.base, { max: UNWRITABLE_SHOWN })}, which another space of this `
         + `instance holds too, so its addresses are not its own and nothing is exported. An administrator gives one of them another base `
         + `(PATCH /api/spaces/:id with rdf.rebase).${sharing.named.length > 0 ? ` Holding it too: ${sharing.named.map(id => `'${peerText(id, { max: NAME_QUOTED })}'`).join(', ')}.` : ''}`,
+    };
+  }
+  // A base that starts another space's (or is started by it) is no better settled: `/ld/` gives an address to the space holding the longest
+  // base that starts it, so the inner base shadows the addresses of the outer space it sits in. The save doors refuse to make such a pair
+  // (`rdf_base_nested`); one a peer's round or an older build left is refused here, as a shared base is (lens-2 I2).
+  const nesting = nestedHoldersOfRdfBase(cfg, spaceId, rdf.base, caller?.rights);
+  if (nesting.holders.length > 0) {
+    return {
+      ok: false, status: EXPORT_CONFLICT, code: RDF_BASE_NESTED,
+      error: `Space '${peerText(spaceId, { max: NAME_QUOTED })}' holds the RDF base ${peerText(rdf.base, { max: UNWRITABLE_SHOWN })}, which starts or is started by the base of `
+        + `another space of this instance, so the addresses of one are read as the other's and nothing is exported. An administrator gives one of them a base `
+        + `that neither starts nor is started by another space's (PATCH /api/spaces/:id with rdf.rebase).${nesting.named.length > 0 ? ` Nested with: ${nesting.named.map(id => `'${peerText(id, { max: NAME_QUOTED })}'`).join(', ')}.` : ''}`,
     };
   }
   const meta = inlineResolvableRefs(space.meta as SpaceMeta);

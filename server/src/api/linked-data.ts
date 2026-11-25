@@ -70,7 +70,7 @@ import {
   sparqlRefusalOf, SPARQL_BUSY, SPARQL_UNAVAILABLE, SPARQL_TOO_LARGE, SPARQL_TOO_MANY_RESULTS, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT,
   SPARQL_STORE_UNAVAILABLE,
 } from '../rdf/sparql-refusal.js';
-import { RDF_NOT_ENABLED, RDF_BASE_SHARED, RDF_BASE_CONFLICT, RDF_TERM_CLASH, RDF_UNWRITABLE, type RdfCaller } from '../rdf/rdf-space-state.js';
+import { RDF_NOT_ENABLED, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_BASE_CONFLICT, RDF_TERM_CLASH, RDF_UNWRITABLE, type RdfCaller } from '../rdf/rdf-space-state.js';
 import { sendProblem } from './problem-body.js';
 
 /** An address no reader of this caller may read, of any kind: one code for all of them. */
@@ -86,7 +86,7 @@ export const LD_TRUNCATED_HEADER = 'X-Ythril-Truncated';
  * the space), the bounds of a read and the slot. Listed in `docs/integration-guide/06f-exports.md` (`every-code-a-linked-data-address-answers-is-listed`).
  */
 export const LD_CODES: readonly string[] = Object.freeze([
-  LD_NOT_FOUND, RDF_FORMAT_NOT_ACCEPTABLE, RDF_NOT_ENABLED, RDF_BASE_CONFLICT, RDF_BASE_SHARED, RDF_TERM_CLASH, RDF_UNWRITABLE,
+  LD_NOT_FOUND, RDF_FORMAT_NOT_ACCEPTABLE, RDF_NOT_ENABLED, RDF_BASE_CONFLICT, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_TERM_CLASH, RDF_UNWRITABLE,
   SPARQL_TOO_MANY_RESULTS, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT, SPARQL_STORE_UNAVAILABLE, SPARQL_BUSY,
 ]);
 

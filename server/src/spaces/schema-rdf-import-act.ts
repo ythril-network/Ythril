@@ -99,7 +99,7 @@ export const SCHEMA_RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze(
   SCHEMA_RDF_BAD_PARAM, SCHEMA_RDF_RUNG, SCHEMA_RDF_NETWORKED, SCHEMA_RDF_NOT_EMPTY, SCHEMA_RDF_BUSY, SCHEMA_RDF_CHANGED, SCHEMA_RDF_REFUSED,
   RDF_TERM_CLASH, RDF_UNSUPPORTED_FORMAT, RDF_UNSUPPORTED_ENCODING, RDF_UPLOAD_STALLED, RDF_UPLOAD_TOO_SLOW, RDF_UPLOAD_COOLDOWN, RDF_BOUND_EXCEEDED,
   'rdf_malformed', 'rdf_relative_iri', 'rdf_remote_context', 'rdf_jsonld_not_streamable', 'rdf_gzip_invalid', 'rdf_unsupported', 'rdf_source_failed',
-  'rdf_not_enabled', 'rdf_base_conflict', 'rdf_base_shared', 'rdf_unwritable', SPACE_NOT_FOUND, 'space_being_rdf_imported',
+  'rdf_not_enabled', 'rdf_base_conflict', 'rdf_base_shared', 'rdf_base_nested', 'rdf_unwritable', SPACE_NOT_FOUND, 'space_being_rdf_imported',
 ]);
 
 // ── Parameters ────────────────────────────────────────────────────────────────────────────────────────────────

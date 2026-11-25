@@ -103,6 +103,7 @@ At most two exports run at once on the instance, one per token; another answers 
 | 409 | `rdf_not_enabled` | The space has RDF off |
 | 409 | `rdf_unwritable` | A stored address no RDF document can carry (an older value with a control character or an unpaired surrogate): the refusal names what holds it (the base or vocab of the RDF setting, a type or property, a library namespace), before any byte is sent |
 | 409 | `rdf_base_shared` | Another space of this instance holds the same base, so the addresses are not the space's own (`<base>schema` would name two ontologies): one of them needs another base. The other space is named only to a caller who may read its schema. The save doors refuse to make such a pair with the same code ([RDF names](#rdf-names-metardf-and-iri)); a pair that already exists is refused here |
+| 409 | `rdf_base_nested` | The space's base starts the base of another space of this instance, or is started by it, so the addresses of one would be read as the other's (an address under `<base>` belongs to the space with the longest base that starts it): one of them needs a base that neither starts nor is started by another's. The other space is named only to a caller who may read its schema. The save doors refuse to make such a pair with the same code; a pair that already exists is refused here |
 | 409 | `rdf_base_conflict` | A network the space is shared in contests its base. The network, member and offered base are named only to a caller who may read that network |
 | 429 | `rdf_export_busy` | Two exports run, or one of yours |
 | 503 | `rdf_export_incomplete` | The store did not answer a page |
@@ -197,7 +198,7 @@ Both doors need `knowledge: write`, for a dry run and the status too: they answe
 | 409 | `space_being_restored`, `space_being_rdf_imported` and the other `space_being_*` codes | Another act holds the space (a restore, a migration, a conversion, an import): the import is refused with that act's code before the file is read, as every write is; a dry run is not, unless it builds a schema |
 | 409 | `rdf_import_space_changed` | The space's RDF base or vocabulary changed while the file was being read, or after the import was registered and before its first window (a schema the network decided; the file is sorted by them); nothing was imported, send it again. Once the first window has landed nothing ends the import: it finishes by the base it began with |
 | 404 | `rdf_import_not_found` | The status door: no import of this space has that id, or its report is past seven days |
-| 409 | `rdf_base_conflict`, `rdf_base_shared`, `rdf_term_clash`, `rdf_unwritable` | The space's RDF names are not settled (a contested or shared base, a term clash, an address no document can carry), as for the exports |
+| 409 | `rdf_base_conflict`, `rdf_base_shared`, `rdf_base_nested`, `rdf_term_clash`, `rdf_unwritable` | The space's RDF names are not settled (a contested or shared base, a term clash, an address no document can carry), as for the exports |
 | 400 | `rdf_relative_iri`, `rdf_remote_context`, `rdf_gzip_invalid`, `rdf_unsupported`, `rdf_source_failed` | The reader's other refusals: a relative address with no base, a remote JSON-LD context, a gzip body that does not inflate, a construct the reader does not take, a source that failed while being read |
 | 410 | `rdf_import_files_lost` | The act's files are gone (an act answered after its files were removed) |
 | 422 | `rdf_import_state_unreadable` | The act's state can no longer be read |
@@ -217,7 +218,7 @@ curl -H "Authorization: Bearer $TOKEN" -H "Accept: application/ld+json" https://
 
 The ontology is `<base>schema` with `owl:versionIRI <base>schema/<fingerprint>`: the address each records export names as its shapes graph, so a consumer fetches the shapes here and validates the export with any SHACL validator. Everything the schema says about a type or a property reaches the export: descriptions as `sh:description` (and `rdfs:comment` on the space's own terms), names as `sh:name`, value rules as SHACL constraints, the rest as `ythril:` annotations; the space's purpose is the ontology's `rdfs:comment`. Every text is a plain literal with no language tag. A type or property mapped to an outside vocabulary (`schema:Person`) gets no statement of its own; the space's words about it sit on its shape. A library namespace no term of the space uses is not mentioned.
 
-MCP answers the document in its first text block and the summary (`ontology`, `version`, `fingerprint`, `leftOut`) in the second and in `structuredContent`. The export needs `schema: read`; a personal view has no schema and is answered as every schema door answers a view. It refuses `rdf_bad_format`, `rdf_format_not_acceptable`, `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_term_clash` and `rdf_unwritable` (409, naming the setting, type or property whose stored address cannot be written), the rights guard's 403 without `schema: read`, and is audited as `schema.rdf.export` when reads are logged. `HEAD` answers its headers after the same rights check, and is audited as the `GET` is, with `method: "HEAD"`.
+MCP answers the document in its first text block and the summary (`ontology`, `version`, `fingerprint`, `leftOut`) in the second and in `structuredContent`. The export needs `schema: read`; a personal view has no schema and is answered as every schema door answers a view. It refuses `rdf_bad_format`, `rdf_format_not_acceptable`, `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_base_nested`, `rdf_term_clash` and `rdf_unwritable` (409, naming the setting, type or property whose stored address cannot be written), the rights guard's 403 without `schema: read`, and is audited as `schema.rdf.export` when reads are logged. `HEAD` answers its headers after the same rights check, and is audited as the `GET` is, with `method: "HEAD"`.
 
 The shapes carry no `sh:message`: a SHACL validator words its own results, and the product's own words for a rule travel as `ythril:ruleMessage` on the ontology (a rule is a CEL expression, not a shape). To canonicalise the JSON-LD with RDF Dataset Canonicalization (RDFC-1.0, formerly URDNA2015), allow a work factor of 2 (`maxWorkFactor: 2` in `rdf-canonize`, which `jsonld` uses): the shapes repeat blank-node structures that look alike from property to property (the lists and helper shapes of a value rule), which the default factor of 1 refuses as a possible poison graph; with 2 a space's schema canonicalises in milliseconds.
 
@@ -257,7 +258,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" --
 | 429 | `rdf_import_upload_cooldown` | The same caller was refused `408` within the last minute: `Retry-After` says when to send again |
 | 403 | `schema_rdf_rung` | A file whose shapes give a type rules, below `schema: admin` (below `schema: write` the rights guard refuses first, in its own words) |
 | 404 | `space_not_found` | No such space |
-| 409 | `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_unwritable` | The space's RDF names are not settled |
+| 409 | `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_base_nested`, `rdf_unwritable` | The space's RDF names are not settled |
 | 409 | `schema_rdf_networked` | The space is in a network (the dry-run answer as `proposed`) |
 | 409 | `space_being_rdf_imported` | An RDF import holds the space (a dry run too) |
 | 409 | `schema_rdf_not_empty` | `generate` into a space with types |
@@ -301,7 +302,7 @@ Every refusal of the door itself is a problem body (`application/problem+json`, 
 |---|---|---|
 | 404 | `ld_not_found` | No space's base holds the address, the token has no read on that space, the record is not there, a file without `files: read`, or any other path under `/ld/`: one answer, byte for byte |
 | 406 | `rdf_format_not_acceptable` | `Accept` names none of the formats |
-| 409 | `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_term_clash`, `rdf_unwritable` | The space's RDF names are not settled, or a term no document of the format can carry |
+| 409 | `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_base_nested`, `rdf_term_clash`, `rdf_unwritable` | The space's RDF names are not settled, or a term no document of the format can carry |
 | 413 | `sparql_too_many_results` | The address has more statements of its own than `sparql.maxResults` |
 | 413 | `sparql_too_much_read` | Reading its own statements passed `sparql.maxRecordsRead` (an agent's are read over every record) |
 | 503 | `sparql_timeout`, `sparql_store_unavailable` | The read passed `sparql.timeoutMs`, or the store failed; `Retry-After` |
