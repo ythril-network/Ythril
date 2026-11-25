@@ -28,6 +28,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import { DataFactory } from 'n3';
+import { elapse } from '../_shared/sleep.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
 import { settleWithin } from './_write-faults.mjs';
@@ -187,7 +188,7 @@ describe('a SPARQL query ends with its deadline and its caller, whatever its for
   });
 
   it('a deadline that passes while the engine plans ends the query with 503 sparql_timeout and closes the stream it opened (lens-1 R1)', async () => {
-    const source = slowSource(5, { countQuads: async () => { await new Promise(r => setTimeout(r, DEADLINE_MS + SETTLE_MS)); return 5; } });
+    const source = slowSource(5, { countQuads: async () => { await elapse(DEADLINE_MS + SETTLE_MS, 'simulated latency: the engine plans for longer than the query\'s deadline'); return 5; } });
     const result = await run('SELECT ?s WHERE { ?s ?p ?o . ?o ?q ?r }', source, { deadline: Date.now() + DEADLINE_MS });
     const got = await answerOf(result);
     assert.equal(got.error?.code, 'sparql_timeout', JSON.stringify(got).slice(0, 200));
