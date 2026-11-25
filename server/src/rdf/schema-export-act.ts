@@ -59,8 +59,15 @@ export type RdfSchemaOutcome =
 /** A held schema version: its fingerprint and the schema it holds (`versionMetaOf`), built under the space's current RDF names. */
 export interface SchemaVersionInput { fingerprint: string; typeSchemas: Record<string, unknown>; rules: Record<string, unknown> }
 
-/** Does `subject` speak about the term at `term`: the term itself, or one of its properties (`<term>#<prop>`)? */
-const aboutTerm = (subject: string, term: string): boolean => subject === term || subject.startsWith(`${term}#`);
+/**
+ * Does `subject` speak about the term at `term`: the term itself, or one of its properties (`<term>#<prop>`)? An address's document is the
+ * part before its fragment (RFC 3986); a term's address is a document (a vocab holds no `#`), so its properties are the subjects whose
+ * document it is.
+ */
+function aboutTerm(subject: string, term: string): boolean {
+  const fragment = subject.indexOf('#');
+  return (fragment < 0 ? subject : subject.slice(0, fragment)) === term;
+}
 
 /** Export the schema of `spaceId`: the current one, or the held `version`; whole, or only the statements about `term`. */
 export function rdfSchemaExportAct(input: {

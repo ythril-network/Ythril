@@ -38,7 +38,6 @@ import { join } from 'node:path';
 const ROOT = process.cwd();
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
-
 /** Express runs a GET route for a HEAD (the body is left out), so a GET route answers both; every other route answers its own verb. */
 const methodsAnswered = (method) => (method === 'GET' ? ['GET', 'HEAD'] : [method]);
 

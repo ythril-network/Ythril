@@ -313,6 +313,14 @@ NOT_A_CAPABILITY.set('POST /api/tokens', NOT_A_CAPABILITY.get('/api/tokens/:id')
 NOT_A_CAPABILITY.set('POST /api/brain/spaces/:spaceId/sparql',
   'the SPARQL 1.1 Protocol\'s POST spelling of the query the GET row answers (sparql_query): the same act and parameters, the text in the body');
 
+/*
+ * Q-758: the Linked Data addresses. Each is the HTTP name of a resource an RDF client dereferences, and what it answers an MCP caller already
+ * reaches: a record's statements by `sparql_query` (`DESCRIBE <address>`), a space's records by `export_rdf`, a schema by `space_schema_rdf`.
+ * A tool per address would be a second door to those, keyed by a URL an agent never holds before it has the export.
+ */
+NOT_A_CAPABILITY.set('/ld', 'Linked Data addresses: the HTTP names an RDF client dereferences; an MCP caller reads the same statements through '
+  + 'sparql_query (DESCRIBE <address>), export_rdf and space_schema_rdf');
+
 /**
  * The generic tool door — the one route that answers EVERY tool.
  *

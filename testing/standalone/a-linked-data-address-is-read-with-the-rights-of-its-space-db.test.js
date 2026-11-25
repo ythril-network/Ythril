@@ -16,6 +16,9 @@
  *    `/brain?space=<segment>&tab=<the kind's tab>`, reading nothing; a machine read without a token answers `401`. Each answer says
  *    `Vary: Accept`.
  *
+ * The routes it drives: `GET /ld/:spaceId/:kind/:id`, `GET /ld/:spaceId/file/*path`, `GET /ld/:spaceId/agent/:id`,
+ * `GET /ld/:spaceId/schema/:fp` and `GET /ld/:spaceId/vocab/*path`.
+ *
  * ## Seen red
  *
  * On c647bd24f every address answers the 404 placeholder: no `200`, no `303`, no `401`. Mutations: the rights asked of the space the URL
@@ -94,6 +97,10 @@ describe('a linked data address is read with the rights of its space', { skip },
     assert.equal(record.status, 200, fmt(record));
     assert.match(String(record.headers.get('vary')), /accept/i, 'a machine read says Vary: Accept');
     assert.ok((await subjects(record)).has(`${baseAt(S)}entity/e1`), 'the record is the subject of its answer');
+    // The agent that wrote the record (the seeded rows' author) is read with knowledge read too.
+    const agent = await get(`/ld/${S}/agent/rdf-test-instance`, 'application/n-quads', keys.knowledgeOnly);
+    assert.equal(agent.status, 200, fmt(agent));
+    assert.ok((await subjects(agent)).has(`${baseAt(S)}agent/rdf-test-instance`), 'the agent is the subject of its answer');
 
     const file = await get(`/ld/${S}/file/${FILE_PATH}`, 'application/n-quads', keys.reader);
     assert.equal(file.status, 200, fmt(file));

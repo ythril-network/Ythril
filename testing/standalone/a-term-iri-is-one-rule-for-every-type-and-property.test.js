@@ -131,7 +131,9 @@ function handBuiltIriSites(file, text) {
     const at = `${file}:${i + 1}`;
     if (/^\s*export\s*\{[^}]*\}\s*from\s/.test(line)) return;
     if (/\biri(?:Segment|Fragment)\b/.test(line)) sites.push(`${at} uses an address encoder (only the resolver encodes a name)`);
-    if (/['"`][^'"`]*\/ld\//.test(line)) sites.push(`${at} writes the /ld/ path of a base (only the resolver does)`);
+    // An address is BUILT where `/ld/` is joined to a value: an interpolation or a `+` beside it. A route pattern (`'/ld/:spaceId/...'`), a
+    // path prefix test (`startsWith('/ld/')`) and a sentence naming the path build none (bundle-271, Q-758: the Linked Data door serves them).
+    if (/\}\/ld\/|\/ld\/[^'"`]*\$\{|['"`]\s*\+\s*['"`][^'"`]*\/ld\/|\/ld\/[^'"`]*['"`]\s*\+|\+\s*['"`]\/ld\//.test(line)) sites.push(`${at} writes the /ld/ path of a base (only the resolver does)`);
     if (file !== VOCABULARY && /\bYTHRIL_NS\s*\+|\$\{\s*YTHRIL_NS\s*\}/.test(line)) sites.push(`${at} concatenates onto YTHRIL_NS`);
     if (/\brdf\??\.(?:base|vocab)\s*\+|\$\{[^}]*\brdf\??\.(?:base|vocab)\s*\}/.test(line)) sites.push(`${at} concatenates onto a space's rdf base or vocab`);
     if (file.startsWith('server/src/rdf/') && /\bencodeURI(?:Component)?\s*\(/.test(line)) sites.push(`${at} carries a second encoder`);
@@ -150,6 +152,10 @@ describe('the source gate', () => {
       'const s = `${meta.rdf?.vocab}x`;',
     ].join('\n');
     assert.equal(handBuiltIriSites('server/src/api/planted.ts', planted).length, 6);
+    // Joined by `+` is built too; a route pattern, a prefix test and a sentence that names the path are not.
+    assert.equal(handBuiltIriSites('server/src/api/planted.ts', "const a = publicUrl + '/ld/' + id + '/';\nconst b = url + '/ld/x';").length, 2);
+    const named = "r.get('/ld/:spaceId/:kind/:id', h);\nif (p.startsWith('/ld/')) x();\nconst s = 'an address under <public url>/ld/<space>/ resolves';";
+    assert.deepEqual(handBuiltIriSites('server/src/api/planted.ts', named), [], 'a route, a prefix test or a sentence builds no address');
     assert.equal(handBuiltIriSites('server/src/rdf/planted.ts', 'const x = encodeURIComponent(id);').length, 1);
     assert.deepEqual(handBuiltIriSites(RESOLVER, planted), [], 'the resolver itself is the one builder');
   });

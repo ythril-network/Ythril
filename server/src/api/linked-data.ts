@@ -71,6 +71,7 @@ import { sendProblem } from './problem-body.js';
 export const LD_NOT_FOUND = 'ld_not_found';
 const NOT_FOUND = 404;
 const SEE_OTHER = 303;
+const INTERNAL_ERROR = 500;
 /** The header that names the half of an answer the cap cut. */
 export const LD_TRUNCATED_HEADER = 'X-Ythril-Truncated';
 
@@ -314,7 +315,7 @@ function answered(route: string, handle: (req: Request, res: Response) => Promis
   return (req: Request, res: Response): void => {
     handle(req, res).catch((err: unknown) => {
       log.error(`${route}: ${err instanceof Error ? err.message : String(err)}`);
-      if (!res.headersSent) sendProblem(res, { status: 500, title: 'Internal server error', detail: 'The address could not be read; the server log says why' });
+      if (!res.headersSent) sendProblem(res, { status: INTERNAL_ERROR, title: 'Internal server error', detail: 'The address could not be read; the server log says why' });
     });
   };
 }
