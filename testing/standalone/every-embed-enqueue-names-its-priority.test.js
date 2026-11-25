@@ -82,8 +82,8 @@ describe('every embed-job enqueue names its lane', () => {
     // queues through `embedArrivedFiles` (D3), and the single-record ingest enqueue had no caller and went (C10).
     assert.ok(CALLS.length >= 11,
       `found ${CALLS.length} call site(s) of ${DOORS.join('/')} in server/src; expected at least 11 — the scan is broken`);
-    // Both write commits queue through the one runner of what follows a write (`after-commit.ts`, Q-760).
-    assert.ok(CALLS.some(c => c.file === 'server/src/brain/write-plan/after-commit.ts' && c.door === 'enqueueWriteEmbedJobs'),
+    // Both write commits queue through the one runner of what follows a write (`runAfterCommit` in commit.ts, Q-760).
+    assert.ok(CALLS.some(c => c.file === 'server/src/brain/write-plan/commit.ts' && c.door === 'enqueueWriteEmbedJobs'),
       'the write commits no longer enqueue through enqueueWriteEmbedJobs — re-anchor this gate');
   });
 

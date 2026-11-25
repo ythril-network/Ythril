@@ -63,6 +63,8 @@ import { stripComments } from './_strip-comments.mjs';
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
 
 const COMMIT = 'server/src/brain/write-plan/commit.ts';
+/** The one runner of what follows a landed write (take-backs, embed jobs, duplicate rules), shared by both commits (Q-760). */
+const AFTER_COMMIT = `${COMMIT}:runAfterCommit`;
 
 /** The create/converge writers — the scope Design v3 item 1 sets, and the roots of the reach walk. */
 const CREATE_CONVERGE_WRITERS = [
@@ -213,10 +215,14 @@ describe('a create/converge write to a record collection lives in the commit', (
     // The sequence counter is excluded by what it is (`_record-writes.mjs`): allocating a seq is not a record write.
     const { seen, parent } = walkFrom(INDEX, CREATE_CONVERGE_WRITERS);
     for (const root of CREATE_CONVERGE_WRITERS) assert.ok(seen.has(root), `${root} is gone — re-anchor the scope`);
+    assert.ok(seen.has(AFTER_COMMIT), `${AFTER_COMMIT} is not reached from the create path — re-anchor the take-back exclusion`);
     const reached = [];
     for (const key of seen) {
       for (const s of WRITERS.byKey.get(key) ?? []) {
         if (!writesRecord(s) || s.file === COMMIT) continue;
+        // A take-back removes, through the one remover, a row the commit LANDED against an entity removed meanwhile: a delete after the
+        // write, never a create or a converge (`runAfterCommit`, Q-760). Only a site reached solely through it is excused.
+        if (pathTo(parent, key).includes(AFTER_COMMIT)) continue;
         reached.push(`${s.key}:${s.line} ${s.op} (${s.collection ?? s.why}) via ${pathTo(parent, key).map(k => k.split(':')[1]).join(' > ')}`);
       }
     }

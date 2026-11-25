@@ -43,8 +43,6 @@
  * retry until its deadline, holding every position-paged reader of the space: the ceilings refuse it before a session opens.
  */
 import type { ClientSession } from 'mongodb';
-import { readStoredById } from '../../db/read-by-id.js';
-import { spaceCollection } from '../../db/space-collection.js';
 import { operationBytes } from '../../db/one-command.js';
 import { StoreTimeout } from '../../db/write-timeout.js';
 import { carriesErrorLabel } from '../../db/store-condition.js';
@@ -52,13 +50,14 @@ import { isDuplicateKey } from '../../db/write-errors.js';
 import { inHeldTransaction } from '../held-transaction.js';
 import { linkIdFor } from '../link-id.js';
 import { admitSpaceWriteUnit, isSpaceNotWritable } from '../../spaces/space-write-gate.js';
-import { writeGroupAbortsTotal } from '../../metrics/registry.js';
+import { writeGroupAbortsTotal } from '../../metrics/write-group-metrics.js';
 import { log, peerText } from '../../util/log.js';
 import type { BrainCollection } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { COMMIT_ORDER, PLAN_KINDS, type PlanKind, type WritePlan } from './types.js';
-import { writeStage, reconcileLinkRows, landedEdgeOf, type LinkReconcile } from './commit.js';
-import { runAfterCommit, type FailedEffect, type LandedLinkRow } from './after-commit.js';
+import {
+  writeStage, reconcileLinkRows, landedEdgeOf, storedVersions, runAfterCommit, type LinkReconcile, type FailedEffect, type LandedLinkRow,
+} from './commit.js';
 
 /** The most records one group writes. A SPARQL Update's own cap (`sparql.maxRecordsChanged`) is bounded by it. */
 export const GROUP_MAX_RECORDS = 5_000;
@@ -183,7 +182,7 @@ interface RunValue {
   readonly linksAdded: number[];
   readonly owedLinks: LandedLinkRow[];
   readonly linkOwner: Map<string, number>;
-  readonly marker?: { readonly collection: string; readonly id: string; readonly seq: number };
+  readonly marker?: { readonly kind: PlanKind | 'link'; readonly id: string; readonly seq: number };
 }
 
 /**
@@ -224,8 +223,7 @@ export async function commitWriteGroup(spaceId: string, plans: readonly WritePla
       landed: async (run) => {
         readBack = true;
         if (!run.marker) return false;
-        const stored = await readStoredById<{ seq?: number }>(run.marker.collection, [run.marker.id], { seq: 1 });
-        return stored.get(run.marker.id)?.seq === run.marker.seq;
+        return (await storedVersions(spaceId, run.marker.kind, [run.marker.id])).get(run.marker.id) === run.marker.seq;
       },
     });
   } catch (err) {
@@ -250,7 +248,7 @@ export async function commitWriteGroup(spaceId: string, plans: readonly WritePla
     linkRows: value.owedLinks,
     embed: plans.filter(p => p.enqueue).map(p => ({ recordType: p.kind, recordId: p.id })),
     dupeRules: plans.filter(p => p.dupeRules).map(p => ({ kind: p.kind, id: p.id })),
-  }, 'write group');
+  });
   const linksAdded = [...value.linksAdded];
   const links: Array<{ plan: number; entityId: string }> = [];
   for (const [linkId, entityId] of report.linksTakenBack) {
@@ -294,7 +292,7 @@ async function runGroup(spaceId: string, plans: readonly WritePlan[], session: C
     if (stage.inserted < inserts) throw new GroupAborted('stale', attempt, kind);
     stage.sent.forEach((k, s) => {
       seqs[at[k]!] = stage.stamps[s]!.version;
-      if (!marker && ofKind[k]!.op === 'insert') marker = { collection: spaceCollection(spaceId, PLAN_KINDS[kind].collection), id: ofKind[k]!.id, seq: stage.stamps[s]!.version };
+      if (!marker && ofKind[k]!.op === 'insert') marker = { kind, id: ofKind[k]!.id, seq: stage.stamps[s]!.version };
     });
   }
 
@@ -313,7 +311,7 @@ async function runGroup(spaceId: string, plans: readonly WritePlan[], session: C
       });
       if (owner !== undefined) linkOwner.set(row._id, owner);
     }
-    if (!marker && owedLinks.length > 0) marker = { collection: spaceCollection(spaceId, 'links'), id: owedLinks[0]!._id, seq: owedLinks[0]!.seq };
+    if (!marker && owedLinks.length > 0) marker = { kind: 'link', id: owedLinks[0]!._id, seq: owedLinks[0]!.seq };
   }
   return { seqs, linksAdded, owedLinks, linkOwner, ...(marker ? { marker } : {}) };
 }
@@ -323,9 +321,8 @@ async function staleConverge(
   spaceId: string, kind: PlanKind, ofKind: readonly WritePlan[], stage: Awaited<ReturnType<typeof writeStage>>, session: ClientSession,
 ): Promise<string | undefined> {
   const converges = stage.sent.filter(k => ofKind[k]!.op === 'converge');
-  const stored = await readStoredById<{ seq?: number }>(spaceCollection(spaceId, PLAN_KINDS[kind].collection),
-    converges.map(k => ofKind[k]!.id), { seq: 1 }, { session });
-  const moved = converges.find(k => stored.get(ofKind[k]!.id)?.seq !== stage.stamps[stage.sent.indexOf(k)]!.version);
+  const stored = await storedVersions(spaceId, kind, converges.map(k => ofKind[k]!.id), session);
+  const moved = converges.find(k => stored.get(ofKind[k]!.id) !== stage.stamps[stage.sent.indexOf(k)]!.version);
   return moved === undefined ? undefined : ofKind[moved]!.id;
 }
 
