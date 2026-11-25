@@ -16,7 +16,8 @@
  * - **An unbounded read.** One counter of records read per query, shared by every match: the read of record cap+1 ends the stream with
  *   `413 sparql_too_much_read`, never a normal end. Every find carries a server deadline inside the query's (`maxTimeMS`, at most 10 s);
  *   past the query's deadline a read ends with `503 sparql_timeout`. A narrowed find is limited to cap+1 rows; a walk pages by `_id`.
- * - **A cursor held after its reader left.** Destroying a match stream closes every cursor it holds at once.
+ * - **A cursor held after its reader left.** Destroying a match stream closes every cursor it holds at once, and one whose find has not
+ *   answered yet the moment it answers ({@link HeldCursors}).
  * - **A false empty.** `countQuads` answers from estimates, and the engine skips a pattern it is told is empty: it answers 0 only when no
  *   find can answer the pattern at all, at least 1 otherwise, and a count it cannot make throws, never 0.
  * - **A statement twice.** An agent's statements are written once per member and match (`agentsSeen`), an edge statement once per
@@ -147,6 +148,47 @@ class ReadAborted extends Error {
 }
 
 /**
+ * The cursors one match holds, and the one rule for closing them: a cursor is closed the moment its stream is destroyed, but a cursor whose
+ * find has not answered yet is closed when it answers.
+ *
+ * ## What it prevents
+ *
+ * A cursor closed while its find is still on its way to the server. The driver ends the cursor's session on that close and has no server id
+ * to kill, so when the first batch arrives the cursor holds a server cursor that nothing can kill any more (a second `close` finds the session
+ * ended): it stays open until the server's idle timeout (seen in `a-quad-source-read-is-bounded-db`: one batch of 101 rows handed out, never
+ * killed). Here the close of a pending cursor waits for its answer ({@link HeldCursors.answered}), and no find starts after the destroy
+ * ({@link HeldCursors.open}).
+ */
+class HeldCursors {
+  private readonly held = new Set<FindCursor<Document>>();
+  private readonly pending = new Set<FindCursor<Document>>();
+  private gone = false;
+
+  /** Start no find once the stream is destroyed: a read already past its caller ends here. */
+  open(): void { if (this.gone) throw new ReadAborted(); }
+
+  /** A find starts: its cursor is held, with its first answer still to come. */
+  hold(cursor: FindCursor<Document>): void { this.held.add(cursor); this.pending.add(cursor); }
+
+  /** The find's first batch has arrived. True when the stream was destroyed meanwhile: the cursor has its server id now and is closed here, at once. */
+  async answered(cursor: FindCursor<Document>): Promise<boolean> {
+    this.pending.delete(cursor);
+    if (!this.gone) return false;
+    await cursor.close().catch(() => undefined);
+    return true;
+  }
+
+  /** The find is over; its cursor is closed by the caller. */
+  release(cursor: FindCursor<Document>): void { this.held.delete(cursor); this.pending.delete(cursor); }
+
+  /** The stream is destroyed: every cursor that has its answer is closed now; one without is closed when it answers. */
+  async destroy(): Promise<void> {
+    this.gone = true;
+    await Promise.all([...this.held].filter(c => !this.pending.has(c)).map(c => c.close().catch(() => undefined)));
+  }
+}
+
+/**
  * A match's stream: started on the first read, it pulls from the query's generator as the reader takes, and closes every cursor it holds
  * the moment it is destroyed.
  */
@@ -154,7 +196,7 @@ class MatchStream extends Readable {
   private pumping = false;
   /** The read of the generator in flight, if any: a find may be starting inside it. */
   private inflight: Promise<unknown> | null = null;
-  constructor(private readonly quads: AsyncGenerator<N3.Quad, void, undefined>, private readonly cursors: Set<FindCursor<Document>>) {
+  constructor(private readonly quads: AsyncGenerator<N3.Quad, void, undefined>, private readonly cursors: HeldCursors) {
     super({ objectMode: true });
   }
 
@@ -182,17 +224,14 @@ class MatchStream extends Readable {
   }
 
   /**
-   * Close every cursor now, and again once a read in flight has settled: a cursor whose first batch was still on its way when it was closed
-   * has no server id yet, so that close kills nothing and the cursor would stay open on the server until its idle timeout (seen in
-   * `a-quad-source-read-is-bounded-db`: one batch of 101 rows handed out, never killed).
+   * Close every cursor now; one whose find was still on its way is closed when its first batch arrives ({@link HeldCursors}), which the
+   * read in flight does before it settles, and `close` is emitted after that.
    */
   override _destroy(err: Error | null, callback: (error?: Error | null) => void): void {
-    const closeAll = (): Promise<unknown> => Promise.all([...this.cursors].map(c => c.close().catch(() => undefined)));
     const settled = this.inflight ? this.inflight.then(() => undefined, () => undefined) : Promise.resolve();
-    void closeAll()
+    void this.cursors.destroy()
       .then(() => settled)
-      .then(closeAll)
-      .then(() => { this.cursors.clear(); return this.quads.return(undefined).catch(() => undefined); })
+      .then(() => this.quads.return(undefined).catch(() => undefined))
       .then(() => callback(err), () => callback(err));
   }
 }
@@ -237,7 +276,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     quadCandidates(pattern, member, narrow).filter(f => f.kind !== 'file' || member.files);
 
   /** The rows of one find, each counted as it is read. */
-  async function* rowsOf(member: RdfMember, find: CandidateFind, cursors: Set<FindCursor<Document>>): AsyncGenerator<Document, void, undefined> {
+  async function* rowsOf(member: RdfMember, find: CandidateFind, cursors: HeldCursors): AsyncGenerator<Document, void, undefined> {
     const query = candidateQuery(member.space, find, cap);
     if (find.walk) {
       let after: string | undefined;
@@ -250,9 +289,13 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
         after = page.last;
       }
     }
+    cursors.open();
     const cursor = col<Document>(query.collection).find(query.filter, { projection: query.projection, limit: query.limit, maxTimeMS: findMs() });
-    cursors.add(cursor);
+    cursors.hold(cursor);
     try {
+      // The find's first answer is awaited here: a stream destroyed while it was on its way closes this cursor once it has its server id.
+      await cursor.hasNext();
+      if (await cursors.answered(cursor)) return;
       let sinceYield = 0;
       for await (const doc of cursor) {
         checkCaller();
@@ -261,13 +304,13 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
         if (++sinceYield >= ROWS_PER_YIELD) { sinceYield = 0; await yieldToEventLoop(); }
       }
     } finally {
-      cursors.delete(cursor);
+      cursors.release(cursor);
       await cursor.close().catch(() => undefined);
     }
   }
 
   /** Every statement of `pattern`, member by member, find by find. */
-  async function* quadsOf(pattern: QuadPattern, cursors: Set<FindCursor<Document>>): AsyncGenerator<N3.Quad, void, undefined> {
+  async function* quadsOf(pattern: QuadPattern, cursors: HeldCursors): AsyncGenerator<N3.Quad, void, undefined> {
     try {
       if (failed) throw failed;
       const [s, p, o, g] = pattern;
@@ -316,7 +359,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
 
   return {
     match(s, p, o, g) {
-      const cursors = new Set<FindCursor<Document>>();
+      const cursors = new HeldCursors();
       return new MatchStream(quadsOf([s, p, o, g], cursors), cursors);
     },
     async countQuads(s, p, o, g) {
