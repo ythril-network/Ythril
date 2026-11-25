@@ -8,7 +8,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { queryForm, acceptFor, EXPLORE_NUMBERS } from '../../benchmarks/rdf/queries.mjs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { queryForm, acceptFor, loadTemplates } from '../../benchmarks/rdf/queries.mjs';
 
 test('the form is the first keyword after the prologue, whatever the prefixes and comments say', () => {
   assert.equal(queryForm('PREFIX a: <http://a/>\nSELECT ?x WHERE { ?x ?p ?o }'), 'SELECT');
@@ -40,6 +43,18 @@ test('Ythril is asked for Turtle where Oxigraph is asked for N-Triples: its endp
   assert.throws(() => acceptFor('CONSTRUCT', 'virtuoso'), /engine/i);
 });
 
-test('the Explore mix is eleven queries: Q6 was removed from BSBM', () => {
-  assert.deepEqual(EXPLORE_NUMBERS, [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]);
+test('the templates are the archive\'s Explore queries but Q6, which BSBM removed from the mix: a Q6 file there is not read, a missing Q7 is refused', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'b271-queries-'));
+  try {
+    mkdirSync(join(dir, 'queries', 'explore'), { recursive: true });
+    for (let n = 1; n <= 12; n++) writeFileSync(join(dir, 'queries', 'explore', `query${n}.txt`), n === 9 ? 'DESCRIBE ?x WHERE { ?x ?p ?o }' : `SELECT ?x WHERE { ?x ?p ?o } # ${n}`);
+    const templates = loadTemplates(dir);
+    assert.deepEqual(Object.keys(templates), ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q7', 'Q8', 'Q9', 'Q10', 'Q11', 'Q12']);
+    assert.equal(templates['Q9']?.form, 'DESCRIBE');
+    assert.equal(templates['Q12']?.number, 12);
+    rmSync(join(dir, 'queries', 'explore', 'query7.txt'));
+    assert.throws(() => loadTemplates(dir), /query7/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
