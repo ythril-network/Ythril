@@ -84,10 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** config keys `sparql.timeoutMs`, `sparql.maxRecordsRead` and `sparql.maxResults`, read live; two queries at once per instance, one per token (`503 sparql_busy`).
 - **RDF:** audit event `brain.sparql_query`, written whatever `logReads` says, with a query's counts and outcome, never its text.
 - **RDF:** the SPARQL engine `@comunica/query-sparql-rdfjs` (MIT) ships, listed in `NOTICE`; it reaches no network.
+- **RDF:** addresses under the default base `<public url>/ld/` resolve to their statements for a token with read rights on the space; a browser gets `303` to the Brain ([Exports](docs/integration-guide/06f-exports.md#record-addresses)).
+- **RDF:** audit event `ld.read`, a read: the space and the record's id, never the address.
 - **MCP:** a tool may declare an `outputSchema` in `tools/list`; `export_rdf`, `space_schema_rdf` and `sparql_query` do.
-- **Server:** a path under `/ld/` that is no address answers `404` with a problem body naming the export, instead of the web app.
-- **RDF:** Linked Data addresses resolve: `GET <public url>/ld/<space>/<kind>/<id>` answers a record's statements and those pointing at it (Turtle, N-Quads or JSON-LD by `Accept`), and a file's, an agent's, a schema version's and a vocabulary term's address answer theirs, with a token holding read rights on the space whose base holds the address (a file `files: read`, a schema version or term `schema: read`). A browser is sent to the Brain page (`303`). Under the default base only; audited as `ld.read` ([Exports](docs/integration-guide/06f-exports.md#record-addresses)).
-- **Testing:** `node scripts/test-failure-rates.mjs` prints each test's failures over the runs that ran it from the recorded runs, and exits 1 naming each test that failed on a commit that also passed; 2 when the records hold no result per test.
+- **Server:** a path under `/ld/` that is no address answers `404` with a problem body naming the export, instead of the web app.- **Testing:** `node scripts/test-failure-rates.mjs` prints each test's failures over the runs that ran it from the recorded runs, and exits 1 naming each test that failed on a commit that also passed; 2 when the records hold no result per test.
 - **Testing:** `node scripts/test-failure-rates.mjs --list never-failed,together` also prints the slowest tenth of the test files with no recorded failure and the tests that only ever failed together; 2 when the per-file times cannot be read.
 
 ### Changed
