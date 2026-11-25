@@ -182,7 +182,9 @@ function collect(router, mount, out) {
     if (layer.route) {
       const path = layer.route.path;
       if (typeof path !== 'string') continue;
-      const full = `${mount}${path === '/' ? '' : path}`;
+      // A trailing slash is dropped, as mountedRoutes() drops it: Express routes are not strict, so `/x/` and `/x` are one
+      // route, and the Linked Data base root is registered as `/:spaceId/` (bundle-271, the audit named it on both sides).
+      const full = `${mount}${path === '/' ? '' : path}`.replace(/\/+$/, '') || '/';
       for (const [method, on] of Object.entries(layer.route.methods ?? {})) {
         if (on && method !== '_all') out.add(`${method.toUpperCase()} ${full}`);
       }
