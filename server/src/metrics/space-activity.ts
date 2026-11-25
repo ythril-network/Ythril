@@ -181,8 +181,9 @@ export function classifyOperation(operation: string): CallClass | null {
 
   // Demand on the brain — the reason a space exists. All three are the same class: `filter` is a
   // predicate read and `similar` is a vector query with a record as its query text, but a caller reaching
-  // for any of them is asking the space a question, which is what this class counts.
-  if (/^brain\.(recall|filter|similar)/.test(operation)) return 'recall';
+  // for any of them is asking the space a question, which is what this class counts. A SPARQL query (Q-757) is the same question in
+  // another language.
+  if (/^brain\.(recall|filter|similar|sparql_query)/.test(operation)) return 'recall';
 
   // Verb before noun: knowledge going IN is a write whether it arrived as a record or as a file. Grouping all
   // of `file.*` as file traffic instead would hide the "is anyone still adding to this space" signal inside

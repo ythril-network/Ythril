@@ -60,6 +60,7 @@ export const CAPABILITIES = [
   ['Brain — ingest', 'ingest', 'POST /api/brain/spaces/:spaceId/ingest'],
   ['Brain — ingest status', 'ingest_status', 'GET /api/brain/spaces/:spaceId/ingest/:runId'],
   ['Brain — export', 'export_rdf', 'GET /api/brain/spaces/:spaceId/export/rdf'],
+  ['Brain — query', 'sparql_query', 'GET /api/brain/spaces/:spaceId/sparql'],
   ['Brain — import', 'import_rdf', 'POST /api/brain/spaces/:spaceId/import/rdf'],
   ['Brain — import', 'import_rdf_status', 'GET /api/brain/spaces/:spaceId/import/rdf/:importId'],
 
@@ -303,6 +304,14 @@ export const NOT_A_CAPABILITY = new Map(Object.entries({
  * exemption that quietly widens is the thing this file's reasons exist to prevent.
  */
 NOT_A_CAPABILITY.set('POST /api/tokens', NOT_A_CAPABILITY.get('/api/tokens/:id'));
+
+/*
+ * Q-757: the SPARQL 1.1 Protocol spells one query operation as a GET and as a POST (the query in the URL, or in the body when it is too
+ * long for one). The capability is the GET's row above; the POST is its second spelling, the same act on the same parameters, so it is no
+ * capability of its own and one tool answers both.
+ */
+NOT_A_CAPABILITY.set('POST /api/brain/spaces/:spaceId/sparql',
+  'the SPARQL 1.1 Protocol\'s POST spelling of the query the GET row answers (sparql_query): the same act and parameters, the text in the body');
 
 /**
  * The generic tool door — the one route that answers EVERY tool.
