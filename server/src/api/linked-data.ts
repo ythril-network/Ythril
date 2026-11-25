@@ -19,7 +19,8 @@
  * - **Rights read off the URL segment** (r2 R1.3). The address is the public URL (`getPublicBaseUrl`) followed by the request's path, and
  *   the space is the one with RDF on whose base is the longest start of it, never the segment: a renamed space keeps its frozen base, and
  *   another space may hold `<public url>/ld/<other>/` as its explicit base. `requireResolvedRung` asks the rights row of the route (scope
- *   `resolved`, `auth/space-rights.ts`) of that space. A space with a base outside the public URL's `/ld/` is not served here.
+ *   `resolved`, `auth/space-rights.ts`) of that space, then asks the transfer hold as every path door does (`refuseHeldPeer`: a peer token on
+ *   a space held for it is `423 space_held`, as the export answers). A space with a base outside the public URL's `/ld/` is not served here.
  * - **An answer that tells who may not read what.** No rung on the space, an address no base holds and a record that is not there answer
  *   the same `404` problem body, byte for byte; a file address without `files: read` answers it too.
  * - **A browser shown a document it cannot read, or a token asked of it.** An `Accept` that prefers `text/html` over every RDF format is
@@ -36,7 +37,7 @@
  */
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { DataFactory } from 'n3';
-import { requireAuth } from '../auth/middleware.js';
+import { requireAuth, refuseHeldPeer } from '../auth/middleware.js';
 import { rungFor } from '../auth/required-rung.js';
 import { mayReadArea } from '../auth/reachable-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
@@ -154,6 +155,9 @@ function requireResolvedRung(req: Request, res: Response, next: NextFunction): v
   const space = spaceOfAddress(address);
   const rights = (req.authToken as { rights?: TokenRights | null } | undefined)?.rights;
   if (space === null || !mayReadArea(rights, space, verdict.area)) { sendNotFound(res); return; }
+  // After the rung, as on every path door: a token without the rung gets the one not-found answer and never learns the space is held. A
+  // peer-bound token on a space held for it (a wipe or deletion only this side has applied) is `423 space_held`, as the export answers it.
+  if (refuseHeldPeer(res, space, req.authToken)) return;
   RESOLVED.set(req, { address, space });
   req.authorisedSpaces = [space];
   next();
