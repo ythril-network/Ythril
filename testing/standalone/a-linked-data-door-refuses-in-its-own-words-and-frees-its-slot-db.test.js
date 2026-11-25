@@ -11,6 +11,9 @@
  * 2. **The slot is free after every ending.** After each of them (and after an answer) the caller can take its slot again: a refusal that
  *    kept it would lock the caller out until the process restarts.
  * 3. **A refusal is a log line.** The line names the code and the status, and never the address asked for.
+ * 4. **A read that fails with no refusal is the generic 500.** A defect of a read (a `TypeError`) ends the match stream with no error and is
+ *    recorded on the source; the read asks for it when the stream ends and never answers the statements read so far as the whole record.
+ *    The slot is free after it, and the process raises no uncaught exception and no unhandled rejection.
  *
  * ## Seen red
  *
@@ -25,6 +28,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { openSparqlDoors } from './_sparql-doors.mjs';
+import { failFirstBatches, recordProcessFaults } from './_quad-source-faults.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'ldrefuse';
@@ -129,6 +133,20 @@ describe('the Linked Data door refuses in its own words and frees its slot', { s
     const after_ = await get(`/ld/${S}/entity/two`);
     assert.equal(after_.status, 200, `after the slots are free: ${fmt(after_)}`);
     assert.ok(slotIsFree(), 'the slot is still held after the answer');
+  });
+
+  it('a read that fails with a defect that is no refusal is the generic 500, never the statements read so far, and the slot is free', async () => {
+    const faults = recordProcessFaults();
+    const restore = failFirstBatches(10, () => new TypeError('a defect of the read'));
+    let r;
+    try { r = await get(`/ld/${S}/entity/two`); } finally { restore(); }
+    try {
+      assert.equal(r.status, 500, fmt(r));
+      assert.equal(r.body?.code, undefined, `the answer is a refusal of its own: ${fmt(r)}`);
+      assert.ok(!r.text.includes('a defect of the read'), 'the body repeats the error');
+      assert.ok(slotIsFree(), 'the slot is still held after the failure');
+      await faults.quiet();
+    } finally { faults.stop(); }
   });
 
   it('an Accept naming no RDF format is 406 rdf_format_not_acceptable and holds no slot', async () => {

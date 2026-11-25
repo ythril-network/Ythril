@@ -20,6 +20,8 @@
  *   answered yet the moment it answers ({@link HeldCursors}).
  * - **An error event nobody listens for.** A match stream carries an error listener of its own from construction, so a refusal raised on it
  *   after its reader let it go (the deadline's, an abort's) is never an uncaught exception, which the server answers by ending the process.
+ *   No error of any kind enters the engine's iterators from a match stream: a failed read ends its stream, and the query's refusal
+ *   ({@link QuadSource.failure}) or defect ({@link QuadSource.defect}, an error that is no refusal) is what the reader asks when the stream ends.
  * - **A refusal for a read the consumer ended.** A read still on its way when its stream is destroyed ends with the driver's own error;
  *   that is no failure of the store and never the query's (`failure()` stays empty, the query's other matches read on).
  * - **A false empty.** `countQuads` answers from estimates, and the engine skips a pattern it is told is empty: it answers 0 only when no
@@ -92,6 +94,12 @@ export interface QuadSource {
   recordsRead(): number;
   /** The first refusal a read of this query met (it ends every later read too), or null. */
   failure(): SparqlRefusal | null;
+  /**
+   * The first error a read of this query met that is no refusal (a defect of a read path, or a store error nothing maps), as `{ error }`
+   * (the value thrown may be anything), or null. A stream a read failed on ends with no error, so the reader that sees it end asks
+   * {@link QuadSource.failure} first and this next: a query whose read failed is never answered as a whole one.
+   */
+  defect(): { error: unknown } | null;
 }
 
 /** The query one find sends: where, which rows, which fields, in what order and how many. */
@@ -238,13 +246,11 @@ class MatchStream extends Readable {
     } catch (err) {
       this.inflight = null;
       if (this.destroyed) return;
-      // A read that failed (a refusal `fail` recorded as the query's failure, or one its consumer ended) ends this stream without an error:
-      // the engine's iterators forward an error from one to the next, and one that has let go of its source meanwhile (the deadline's own
-      // end) has no listener, so the error is an uncaught exception that stops the process. The query's answer carries the failure from
-      // `failure()` (the engine asks it when the result ends) or from the deadline's own end, never from an event of this stream.
-      // An error that is none of those is a defect of the source itself and is raised as it is.
-      if (err instanceof SparqlRefusal || err instanceof ReadAborted) this.push(null);
-      else this.destroy(err as Error);
+      // A read that failed ends this stream without an error, whatever the error is: the engine's iterators forward an error from one to the
+      // next, and one that has let go of its source meanwhile (the deadline's own end) has no listener, so the error is an uncaught
+      // exception that stops the process. The query's answer carries the failure from `failure()` (a refusal) or `defect()` (anything else),
+      // which `fail` recorded and the engine asks when the result ends, or from the deadline's own end, never from an event of this stream.
+      this.push(null);
     }
   }
 
@@ -270,6 +276,8 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
   const counts = new Map<string, number>();
   let read = 0;
   let failed: SparqlRefusal | null = null;
+  /** The first error that is no refusal; read by {@link QuadSource.defect}. */
+  let defect: { error: unknown } | null = null;
 
   /** The time a find may take: what the query has left, at most {@link QUAD_FIND_MAX_MS}; past the deadline, the timeout. */
   const findMs = (): number => {
@@ -290,9 +298,17 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     if (isMaxTimeExpired(err)) return timeoutRefusal();
     return storeFailureRefusal(err) ?? err;
   };
+  /** Every later read of a query that failed ends with what ended the first: its refusal, else its defect. */
+  const throwWhenFailed = (): void => {
+    if (failed) throw failed;
+    if (defect) throw defect.error;
+  };
   const fail = (err: unknown): never => {
+    // A read the caller ended is no failure of the query; its next match reads on.
+    if (err instanceof ReadAborted) throw err;
     const mapped = failureOf(err);
-    if (mapped instanceof SparqlRefusal && !failed) failed = mapped;
+    if (mapped instanceof SparqlRefusal) failed ??= mapped;
+    else defect ??= { error: mapped };
     throw mapped;
   };
 
@@ -337,7 +353,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
   /** Every statement of `pattern`, member by member, find by find. */
   async function* quadsOf(pattern: QuadPattern, cursors: HeldCursors): AsyncGenerator<N3.Quad, void, undefined> {
     try {
-      if (failed) throw failed;
+      throwWhenFailed();
       const [s, p, o, g] = pattern;
       for (const member of members) {
         const graph = graphs.get(member.space)!;
@@ -391,7 +407,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     },
     async countQuads(s, p, o, g) {
       try {
-        if (failed) throw failed;
+        throwWhenFailed();
         const pattern: QuadPattern = [s, p, o, g];
         let any = false;
         let sum = 0;
@@ -412,7 +428,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
         // The engine takes this promise with a `.catch` that destroys an iterator nobody listens to, which raises an unhandled rejection
         // per count: a count never rejects. The failure is the query's (`fail` records it, and every read ends with it), and the engine is
         // told 1, the one answer that skips no pattern.
-        try { fail(err); } catch { /* recorded by `fail` when it is a refusal */ }
+        try { fail(err); } catch { /* recorded by `fail`: as the failure for a refusal, else as the defect */ }
         return 1;
       }
     },
@@ -420,6 +436,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     filesWithheld: () => members.filter(m => !m.files).map(m => m.space),
     recordsRead: () => read,
     failure: () => failed,
+    defect: () => defect,
   };
 }
 

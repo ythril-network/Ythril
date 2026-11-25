@@ -79,6 +79,8 @@ export async function takeStatements(source: QuadSource, stream: Readable, limit
 function throwWhenFailed(source: QuadSource): void {
   const failed = source.failure();
   if (failed) throw failed;
+  const defect = source.defect();
+  if (defect) throw defect.error;
 }
 
 /** A statement in the default graph: an address's answer describes one resource, in one graph. */

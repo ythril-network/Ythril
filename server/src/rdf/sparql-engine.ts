@@ -214,6 +214,18 @@ function recordedRefusal(source: unknown): SparqlRefusal | null {
 }
 
 /**
+ * What ended the source's reads, if anything, as `{ error }`: its recorded refusal, else the defect it recorded (an error that is no
+ * refusal, which the source ended its stream without raising, for the same reason). The result stream that ends rejects with it, so the
+ * act answers it as it answers any error of the engine: a defect is the generic 500, never a short result answered as a whole one.
+ */
+function recordedEnd(source: unknown): { error: unknown } | null {
+  const refusal = recordedRefusal(source);
+  if (refusal) return { error: refusal };
+  const defect = isRecord(source) && typeof source['defect'] === 'function' ? (source['defect'] as () => unknown)() : null;
+  return isRecord(defect) && 'error' in defect ? { error: defect['error'] } : null;
+}
+
+/**
  * The algebra of an ASK as the SELECT of at most one row (its ASK node replaced by a slice of length 1), or null when `algebra` is no ASK.
  * The engine answers an ASK with one promise that nothing can end; a stream of at most one row is read through {@link runSparql}'s
  * `collect`, so the deadline and the caller's abort destroy it like any other read.
@@ -289,8 +301,8 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
     });
     stream.on('error', (err) => settle(() => reject(refusalOf(err, source))));
     stream.on('end', () => settle(() => {
-      const failed = recordedRefusal(source);
-      if (failed) reject(failed); else resolve(out);
+      const failed = recordedEnd(source);
+      if (failed) reject(failed.error); else resolve(out);
     }));
   });
 
