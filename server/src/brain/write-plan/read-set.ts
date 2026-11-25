@@ -124,6 +124,8 @@ export class ReadSet {
   private readonly subjectEdges = new SubjectEdges();
   /** The functional subjects whose stored edges were read; asking about any other is a bug, not a zero. */
   private readonly loadedSubjects = new Set<string>();
+  /** Per functional subject: the identities (`tripletKey`) of the held edges this batch deletes (`noteDeleted`). */
+  private readonly deletedEdges = new Map<string, Set<string>>();
   private readonly nameTypeCounts = new Map<string, number>();
   /** Ids this batch minted — records that cannot appear in any stored edge or link. */
   private readonly mintedIds = new Set<string>();
@@ -380,7 +382,42 @@ export class ReadSet {
      * first. Counted by the same identity and the same arithmetic as a stored one, so an edge both stored and
      * repeated in the body is one edge, and the edge being asked about is still not its own duplicate.
      */
-    return this.subjectEdges.others(edge, sameBody);
+    const others = this.subjectEdges.others(edge, sameBody);
+    // An edge this batch deletes is held (`noteDeleted` holds it, so the subtraction is exact) and is not another edge at its subject —
+    // unless the same identity is written again in this body.
+    const deleted = this.deletedEdges.get(functionalSubjectKey(edge.from, edge.label));
+    if (!deleted) return others;
+    const own = edgeIdFor(edge.from, edge.to, edge.label, edge.fromKind, edge.toKind);
+    const again = new Set(sameBody.map(e => edgeIdFor(e.from, e.to, e.label, e.fromKind, e.toKind)));
+    return others - [...deleted].filter(identity => identity !== own && !again.has(identity)).length;
+  }
+
+  /**
+   * Record that this batch will DELETE the stored `kind` record `id` (`planDelete`, `Q-963`, design-r2 R6). Every later question sees it gone:
+   * its existence (absent), its triplet (none, so an edge of the same identity is planned as an insert) and, for an edge, its subject's
+   * functional count (no longer another edge there, so a swap in one batch is not refused). An entity no longer counts under its name.
+   * Throws when the record was never loaded, as `stored` does.
+   */
+  noteDeleted(kind: PlanKind, id: string): void {
+    const held = this.recordsOf(kind);
+    if (!held.has(id)) throw new Error(`read set: ${kind} '${id}' was noted deleted but never loaded`);
+    const doc = held.get(id);
+    held.set(id, null);
+    this.existenceOf(kind as RefKind).set(id, false);
+    if (!doc) return;
+    if (kind === 'edge') {
+      const e = doc as unknown as EdgeDoc;
+      this.triplets.set(tripletKey(e), null);
+      this.subjectEdges.add(e);
+      const key = functionalSubjectKey(e.from, e.label);
+      let deleted = this.deletedEdges.get(key);
+      if (!deleted) { deleted = new Set(); this.deletedEdges.set(key, deleted); }
+      deleted.add(tripletKey(e));
+    }
+    if (kind === 'entity') {
+      const k = nameTypeKey(String(doc['name']), String(doc['type']));
+      if (this.nameTypeCounts.has(k)) this.nameTypeCounts.set(k, Math.max(0, this.nameTypeCounts.get(k)! - 1));
+    }
   }
 
   /** How many entities named `name` with `type` exist — stored, plus this batch's earlier inserts. */
@@ -402,6 +439,8 @@ export class ReadSet {
     if (inserted) this.mintedIds.add(doc._id);
     if (kind === 'edge') {
       const e = doc as unknown as EdgeDoc;
+      // Written again after a delete of the same identity: it is at its subject once more.
+      this.deletedEdges.get(functionalSubjectKey(e.from, e.label))?.delete(tripletKey(e));
       this.triplets.set(tripletKey(e), e);
       // A subject this batch minted was never read (it has no stored edges), so its count starts here; one that was
       // read counts what this batch plans from then on. A subject nobody asked about is held too, and read by nobody.

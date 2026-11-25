@@ -25,7 +25,8 @@
  */
 import { readStoredById } from '../db/read-by-id.js';
 import { isStrictLinkage } from '../spaces/space-lookup.js';
-import { findEntityReferences, type BacklinkEntry } from './entities.js';
+import type { ClientSession } from 'mongodb';
+import { referencesToEach, type BacklinkEntry } from './entities.js';
 import { endsOfRecord } from './edge-ends-of-record.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -62,21 +63,23 @@ function describe(b: BacklinkEntry): string {
  * *"is every kind of reference found"* and has its own gate, so widening what it returns would put a second
  * responsibility inside it. This asks a narrower question about the rows it already found.
  */
-async function endsOfEdges(spaceId: string, entityId: string, targetKind: RefKind, ids: readonly string[]): Promise<Map<string, 'from' | 'to' | 'both'>> {
+async function endsOfEdges(
+  spaceId: string, ids: readonly string[], session?: ClientSession,
+): Promise<Map<string, { _id: string; from?: string; to?: string; fromKind?: RefKind; toKind?: RefKind }>> {
   if (ids.length === 0) return new Map();
-  const docs = await readStoredById<{ _id: string; from?: string; to?: string; fromKind?: RefKind; toKind?: RefKind }>(
-    spaceCollection(spaceId, 'edges'), ids, { from: 1, to: 1, fromKind: 1, toKind: 1 });
-  const out = new Map<string, 'from' | 'to' | 'both'>();
-  for (const d of docs.values()) {
-    // By id AND kind, as the scan that found the rows did (`edge-ends-of-record.ts`): a fact holding this id is not an end of the entity.
-    const { from: isFrom, to: isTo } = endsOfRecord(d, entityId, targetKind);
-    // A self-loop is one document with two matching ends. Reporting `from` alone would send the caller
-    // looking for an edge whose other end is the same record.
-    if (isFrom && isTo) out.set(String(d._id), 'both');
-    else if (isFrom) out.set(String(d._id), 'from');
-    else if (isTo) out.set(String(d._id), 'to');
-  }
-  return out;
+  return readStoredById<{ _id: string; from?: string; to?: string; fromKind?: RefKind; toKind?: RefKind }>(
+    spaceCollection(spaceId, 'edges'), ids, { from: 1, to: 1, fromKind: 1, toKind: 1 }, session ? { session } : {});
+}
+
+/** Which end of `edge` names `entityId` of `targetKind`, or none. */
+function endOf(
+  edge: { from?: string; to?: string; fromKind?: RefKind; toKind?: RefKind }, entityId: string, targetKind: RefKind,
+): 'from' | 'to' | 'both' | undefined {
+  // By id AND kind, as the scan that found the rows did (`edge-ends-of-record.ts`): a fact holding this id is not an end of the entity.
+  const { from: isFrom, to: isTo } = endsOfRecord(edge, entityId, targetKind);
+  // A self-loop is one document with two matching ends. Reporting `from` alone would send the caller
+  // looking for an edge whose other end is the same record.
+  return isFrom && isTo ? 'both' : isFrom ? 'from' : isTo ? 'to' : undefined;
 }
 
 /**
@@ -99,15 +102,39 @@ async function endsOfEdges(spaceId: string, entityId: string, targetKind: RefKin
  * array fields rather than only in a changelog line about them.
  */
 export async function entityDeleteBlockers(spaceId: string, entityId: string, targetKind: RefKind = 'entity'): Promise<EntityDeleteBlock | null> {
-  if (!isStrictLinkage(spaceId)) return null;
+  return (await deleteBlockersOfEach(spaceId, [entityId], targetKind)).get(entityId) ?? null;
+}
 
-  const found = await findEntityReferences(spaceId, entityId, targetKind);
+/**
+ * What stops each of `ids` (records of `targetKind`) being deleted: only the ids something blocks are in the answer — the guard of
+ * {@link entityDeleteBlockers}, batched (`referencesToEach`, one `$in` scan for all of them) so a write group deleting many records asks it
+ * once (`Q-963`, vet-2 S2). `opts.session`: inside a write group's transaction, after its writes, so the guard judges the group's own result.
+ */
+export async function deleteBlockersOfEach(
+  spaceId: string, ids: readonly string[], targetKind: RefKind = 'entity', opts: { session?: ClientSession } = {},
+): Promise<Map<string, EntityDeleteBlock>> {
+  const out = new Map<string, EntityDeleteBlock>();
+  if (!isStrictLinkage(spaceId) || ids.length === 0) return out;
+
+  const foundEach = await referencesToEach(spaceId, ids, targetKind, opts);
+  const edgeIds = [...new Set([...foundEach.values()].flatMap(found => found.filter(b => b.type === 'edge').map(b => b._id)))];
+  const edges = await endsOfEdges(spaceId, edgeIds, opts.session);
+  for (const [entityId, found] of foundEach) {
+    const block = blockOf(entityId, targetKind, found, edges);
+    if (block) out.set(entityId, block);
+  }
+  return out;
+}
+
+/** One record's refusal from what the scan found, or `null` when nothing blocks it. */
+function blockOf(
+  entityId: string, targetKind: RefKind, found: readonly BacklinkEntry[],
+  edges: ReadonlyMap<string, { from?: string; to?: string; fromKind?: RefKind; toKind?: RefKind }>,
+): EntityDeleteBlock | null {
   if (found.length === 0) return null;
-
-  const ends = await endsOfEdges(spaceId, entityId, targetKind,
-    found.filter(b => b.type === 'edge').map(b => b._id));
   const backlinks: BacklinkEntry[] = found.map(b => {
-    const end = b.type === 'edge' ? ends.get(b._id) : undefined;
+    const edge = b.type === 'edge' ? edges.get(b._id) : undefined;
+    const end = edge ? endOf(edge, entityId, targetKind) : undefined;
     return end ? { ...b, end } : b;
   });
 

@@ -104,7 +104,8 @@ describe('every reader uses them', () => {
     assert.match(src, /linksPointingAt\(/,
       'the scan that refuses a delete asks per class again — six queries plus six document reads for ONE '
       + 'target id, which measured 10.71 ms against the array path\'s 3.19');
-    assert.match(src, /docsFromCollection<\{ _id: string \}>\([^)]*\{ _id: 1 \}\)/,
+    // The arguments after the projection (the narrowing, a write group's session since Q-963) are not the question.
+    assert.match(src, /docsFromCollection<\{ _id: string \}>\([^)]*\{ _id: 1 \}[,)]/,
       'the delete scan reports ids and nothing else, so it must ask for `_id` alone — the union projection '
       + 'sends every field of every class to answer a question about membership');
   });

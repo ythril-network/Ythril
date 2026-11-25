@@ -171,7 +171,7 @@ const EXEMPT = {
   // ── face rows: child rows selected by entity
   'server/src/brain/merge.ts:relinkTally': 'by parent: counts the face chunk rows an entity merge would re-point (`faceEntityId`); face rows are children and never carry the flag',
   'server/src/brain/merge.ts:relinkAndAbsorb': 'by parent: re-points face chunk rows from the absorbed entity to the survivor; children never carry the flag',
-  'server/src/brain/entities.ts:findEntityReferences': 'by parent: finds the face chunk rows that name an entity, and its edges; children never carry the flag',
+  'server/src/brain/entities.ts:referencesToEach': 'by parent: finds the face chunk rows that name an entity, and its edges; children never carry the flag',
   'server/src/spaces/face-width-change.ts:storedFaceDescriptorCount': 'by parent: counts stored face descriptors (`faceEmbedding`), which only child rows hold',
   // ── it must SEE the flagged row, through the `_id` pager (Q-481)
   'server/src/files/leaked-rows-repair.ts:derivedRowsPage': 'the leaked-rows repair reads every row by `_id`, any kind and flagged ones included, and decides each itself: a derived row whose parent is gone is removed, a flagged one is kept by its own `deletedAt` check; a predicate on the read would make the cursor skip the rows it decides on and could wedge a page on a run of rows it excluded',

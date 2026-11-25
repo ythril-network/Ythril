@@ -46,7 +46,11 @@ async function kindsLinkingToEntities() {
   return [...new Set(LINK_CLASSES.filter(c => c.toKind === 'entity').map(c => c.kind))];
 }
 
-const backlinkFn = () => bodyOf(stripComments(readFileSync(ENTITIES, 'utf8')), 'findEntityReferences');
+/*
+ * `referencesToEach` since `Q-963` batched the scan (a write group judges every record it deletes in one `$in` read):
+ * `findEntityReferences` is its one-record answer and holds no scan of its own, which the last case below asserts.
+ */
+const backlinkFn = () => bodyOf(stripComments(readFileSync(ENTITIES, 'utf8')), 'referencesToEach');
 
 describe('backlinks cover every entity reference', () => {
   it('the derivation finds the record kinds before it is trusted', async () => {
@@ -130,5 +134,13 @@ describe('backlinks cover every entity reference', () => {
     const body = backlinkFn();
     assert.match(body, /faceEntityId/, 'face labels must still be found');
     assert.match(body, /type:\s*'face'/, "faces must keep their own backlink type — both doors filter on it");
+  });
+
+  it('the one-record scan is the batched one, not a second copy of it', () => {
+    // Two scans would be two coverage surfaces, and the gate above reads only one of them.
+    const single = bodyOf(stripComments(readFileSync(ENTITIES, 'utf8')), 'findEntityReferences');
+    assert.ok(single, 'findEntityReferences not found — re-anchor this gate');
+    assert.match(single, /referencesToEach\(/, 'findEntityReferences no longer answers from referencesToEach');
+    assert.doesNotMatch(single, /\.find\(/, 'findEntityReferences reads the store itself: a second scan beside referencesToEach');
   });
 });

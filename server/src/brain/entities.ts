@@ -27,7 +27,9 @@ import type { EntityDoc, EdgeDoc, FileMetaDoc } from '../config/types.js';
 import { listReadMaxMs, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
-import { edgeEndsAt } from './edge-ends-of-record.js';
+import { edgeEndsAt, endsOfRecord } from './edge-ends-of-record.js';
+import { inChunks } from '../util/chunks.js';
+import type { ClientSession } from 'mongodb';
 import { unstampEdgesOfRetypedEntity } from './retyped-entity-edges.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
 import { planAndCommitOne, refuseOversizeRecord } from './write-plan/plan-and-commit.js';
@@ -402,7 +404,7 @@ export async function deleteEntity(
  * silent about the one reference class holding biometric data.
  */
 /**
- * Every record that references `targetId`, grouped by the class that references it.
+ * Every record that references one of `targetIds`, with the class that references it and the target it names.
  *
  * ## Batched, and the measurement is why
  *
@@ -415,8 +417,8 @@ export async function deleteEntity(
  * once per class it holds.
  */
 async function referencesByClass(
-  spaceId: string, targetId: string, classes: readonly LinkClass[],
-): Promise<Array<{ cls: LinkClass; id: string }>> {
+  spaceId: string, targetIds: readonly string[], classes: readonly LinkClass[], session?: ClientSession,
+): Promise<Array<{ cls: LinkClass; id: string; target: string }>> {
   if (classes.length === 0) return [];
   /*
    * THE ARRAY PATH WAS HERE and 5.0 removed it with the fields. What stood in its place was a silent
@@ -430,14 +432,14 @@ async function referencesByClass(
   for (const c of classes) byPair.set(`${c.kind}>${c.toKind}`, c);
 
   const idsPerCollection = new Map<LinkClass['collection'], Set<string>>();
-  const claimed: Array<{ cls: LinkClass; id: string }> = [];
-  for (const r of await linksPointingAt(spaceId, [targetId])) {
+  const claimed: Array<{ cls: LinkClass; id: string; target: string }> = [];
+  for (const r of await linksPointingAt(spaceId, targetIds, undefined, session)) {
     const cls = byPair.get(`${r.fromKind}>${r.toKind}`);
     if (!cls) continue;
     let ids = idsPerCollection.get(cls.collection);
     if (!ids) { ids = new Set(); idsPerCollection.set(cls.collection, ids); }
     ids.add(r.from);
-    claimed.push({ cls, id: r.from });
+    claimed.push({ cls, id: r.from, target: r.to });
   }
 
   // The chunk exclusion, applied against the records: a link row has no `parentFileId`, so a file link and
@@ -445,7 +447,7 @@ async function referencesByClass(
   const admitted = new Set<string>();
   for (const [collection, ids] of idsPerCollection) {
     // `_id` only: this scan reports ids, and the union projection would send every field of every class.
-    for (const d of await docsFromCollection<{ _id: string }>(spaceId, collection, [...ids], { _id: 1 })) {
+    for (const d of await docsFromCollection<{ _id: string }>(spaceId, collection, [...ids], { _id: 1 }, undefined, session)) {
       admitted.add(d._id);
     }
   }
@@ -458,17 +460,50 @@ async function referencesByClass(
  * **`targetKind` since 4.0**, defaulting to `entity` because that is every existing caller and the published
  * `backlinks` contract. A fact, a chrono entry and a file can all be pointed AT now, and until they could
  * be seen here, deleting one that something named was never refused.
+ *
+ * One record's answer from {@link referencesToEach}, the one scan; `opts.session` reads inside a write group's transaction.
  */
-export async function findEntityReferences(spaceId: string, targetId: string, targetKind: RefKind = 'entity'): Promise<BacklinkEntry[]> {
-  const backlinks: BacklinkEntry[] = [];
+export async function findEntityReferences(
+  spaceId: string, targetId: string, targetKind: RefKind = 'entity', opts: { session?: ClientSession } = {},
+): Promise<BacklinkEntry[]> {
+  return (await referencesToEach(spaceId, [targetId], targetKind, opts)).get(targetId) ?? [];
+}
 
-  // Edges referencing this record as from or to. Edge endpoints carry their own kind since 3.7, so an edge
+/** Targets per edge `$or` read: two clauses each. */
+const REFERENCE_SCAN_CHUNK = 250;
+
+/**
+ * What still points at each of `targetIds` (records of `targetKind`), per target — THE scan behind every delete refusal, batched with `$in`
+ * so a write group deleting many records reads them in a handful of round trips, not a scan per record (`Q-963`, vet-2 S2). An edge naming
+ * two of the targets is reported for each.
+ *
+ * `opts.session`: a write group's transaction. Every read carries it, so the scan sees what the group itself wrote and removed: an edge it
+ * inserted to an entity it deletes blocks, a reference it deleted beside the entity does not.
+ */
+export async function referencesToEach(
+  spaceId: string, targetIds: readonly string[], targetKind: RefKind = 'entity', opts: { session?: ClientSession } = {},
+): Promise<Map<string, BacklinkEntry[]>> {
+  const { session } = opts;
+  const ids = [...new Set(targetIds)];
+  const backlinks = new Map<string, BacklinkEntry[]>(ids.map(id => [id, []]));
+  if (ids.length === 0) return backlinks;
+
+  // Edges referencing these records as from or to. Edge endpoints carry their own kind since 3.7, so an edge
   // whose `from` is a fact is found here too — and `fromKind`/`toKind` are absent on a pre-3.7 edge,
   // which means entity, which is why the kind is matched permissively for that case alone (`edge-ends-of-record.ts`).
-  const edges = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .find(asFilter<EdgeDoc>({ spaceId, ...edgeEndsAt(targetId, targetKind) }), { projection: { _id: 1 } })
-    .toArray() as Array<{ _id: string }>;
-  for (const e of edges) backlinks.push({ type: 'edge', _id: e._id });
+  for (const chunk of inChunks(ids, REFERENCE_SCAN_CHUNK)) {
+    const edges = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
+      // `as never`: the driver's filter type cannot follow an `$or` assembled from clauses.
+      .find(asFilter<EdgeDoc>({ spaceId, $or: chunk.flatMap(targetId => edgeEndsAt(targetId, targetKind).$or) } as never),
+        { projection: { _id: 1, from: 1, to: 1, fromKind: 1, toKind: 1 }, ...(session ? { session } : {}) })
+      .toArray() as Array<Pick<EdgeDoc, '_id' | 'from' | 'to' | 'fromKind' | 'toKind'>>;
+    for (const e of edges) {
+      for (const targetId of new Set([e.from, e.to])) {
+        const ends = endsOfRecord(e, targetId, targetKind);
+        if (ends.from || ends.to) backlinks.get(targetId)?.push({ type: 'edge', _id: e._id });
+      }
+    }
+  }
 
   /*
    * Every class whose TO kind is the kind of thing being deleted — six of them now, where this was three
@@ -483,9 +518,9 @@ export async function findEntityReferences(spaceId: string, targetId: string, ta
    * gets the block automatically, where a fourth hand-written block would have been forgotten exactly the
    * way the file one was.
    */
-  for (const { cls, id } of await referencesByClass(spaceId, targetId,
-    LINK_CLASSES.filter(c => c.toKind === targetKind))) {
-    backlinks.push({ type: cls.kind, _id: id });
+  for (const { cls, id, target } of await referencesByClass(spaceId, ids,
+    LINK_CLASSES.filter(c => c.toKind === targetKind), session)) {
+    backlinks.get(target)?.push({ type: cls.kind, _id: id });
   }
 
   /*
@@ -507,10 +542,13 @@ export async function findEntityReferences(spaceId: string, targetId: string, ta
   // this for a fact target would compare a fact id against a column of entity ids. It would find
   // nothing, every time, which is exactly what a silently wrong scan looks like from the outside.
   if (targetKind === 'entity') {
-    const faces = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-      .find(asFilter<FileMetaDoc>({ faceEntityId: targetId }), { projection: { _id: 1 } })
-      .toArray() as Array<{ _id: string }>;
-    for (const f of faces) backlinks.push({ type: 'face', _id: f._id });
+    for (const chunk of inChunks(ids, REFERENCE_SCAN_CHUNK)) {
+      const faces = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
+        // `as never`: the driver's filter type does not take `$in` on this optional field.
+        .find(asFilter<FileMetaDoc>({ faceEntityId: { $in: chunk } } as never), { projection: { _id: 1, faceEntityId: 1 }, ...(session ? { session } : {}) })
+        .toArray() as Array<{ _id: string; faceEntityId?: string }>;
+      for (const f of faces) if (f.faceEntityId) backlinks.get(f.faceEntityId)?.push({ type: 'face', _id: f._id });
+    }
   }
 
   return backlinks;

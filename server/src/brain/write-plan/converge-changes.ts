@@ -27,7 +27,8 @@ export type DesiredLinks = Partial<Record<RefKind, readonly string[]>>;
 /** What of a `WritePlan` this module reads: a plan of the planners is one (structurally). */
 export interface PlanLike {
   readonly kind: PlanKind;
-  readonly op: 'insert' | 'converge';
+  /** A delete (`Q-963`) changes no field, as an insert does not: only a converge is answered. */
+  readonly op: 'insert' | 'converge' | 'delete';
   readonly result: Readonly<Record<string, unknown>>;
   readonly links?: { readonly desired: DesiredLinks };
 }
