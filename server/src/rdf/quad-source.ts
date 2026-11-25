@@ -34,6 +34,7 @@ import { isMaxTimeExpired } from '../db/max-time.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { classifyReadFailure, isStoreSide } from '../brain/store-failure.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
+import { log } from '../util/log.js';
 import { RDF_READ_FIELDS, recordTriples, type RdfRecordKind } from './record-triples.js';
 import { recordIri, graphIri } from './term-iri.js';
 import { xsd } from './literals.js';
@@ -104,6 +105,25 @@ export function candidateQuery(space: string, find: CandidateFind, cap: number):
   const row = rdfRowFilter(find.kind);
   if (find.walk) return { collection, filter: row, projection: projectionOf(find.kind), walk: true, limit: QUAD_WALK_PAGE };
   return { collection, filter: { ...find.filter, ...row }, projection: projectionOf(find.kind), walk: false, limit: cap + 1 };
+}
+
+/** A driver's error class name or code name is an identifier; anything else is not logged. */
+const IDENTIFIER = /^[A-Za-z_$][\w$]{0,63}$/;
+
+/**
+ * The `503 sparql_store_unavailable` a failed read of the store answers, or null for an error that is no store failure. The cause is kept in the
+ * log (lens-3 O2): one line with the error's class and the driver's `code` and `codeName`, never its message, which may hold the filter the
+ * read failed on (ids, values, a space's name). Without it the answer said the store did not answer, and nothing said why.
+ */
+export function storeFailureRefusal(err: unknown): SparqlRefusal | null {
+  if (!isStoreSide(err)) return null;
+  const { code, codeName } = (err ?? {}) as { code?: unknown; codeName?: unknown };
+  const named = err instanceof Error && IDENTIFIER.test(err.constructor.name) ? err.constructor.name : 'a non-Error value';
+  const codeText = typeof code === 'number' && Number.isSafeInteger(code) ? `, code ${code}` : '';
+  const codeNameText = typeof codeName === 'string' && IDENTIFIER.test(codeName) ? `, ${codeName}` : '';
+  log.warn(`SPARQL read failed on the store (${named}${codeText}${codeNameText})`);
+  const f = classifyReadFailure(err);
+  return new SparqlRefusal(SPARQL_UNAVAILABLE, SPARQL_STORE_UNAVAILABLE, f.error, f.retryAfterSeconds ?? SPARQL_RETRY_AFTER_SECONDS);
 }
 
 /** The datatype a literal is compared by. */
@@ -204,11 +224,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     const named = sparqlRefusalOf(err);
     if (named) return named;
     if (isMaxTimeExpired(err)) return timeoutRefusal();
-    if (isStoreSide(err)) {
-      const f = classifyReadFailure(err);
-      return new SparqlRefusal(SPARQL_UNAVAILABLE, SPARQL_STORE_UNAVAILABLE, f.error, f.retryAfterSeconds ?? SPARQL_RETRY_AFTER_SECONDS);
-    }
-    return err;
+    return storeFailureRefusal(err) ?? err;
   };
   const fail = (err: unknown): never => {
     const mapped = failureOf(err);
