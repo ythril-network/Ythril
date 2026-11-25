@@ -2,10 +2,12 @@
  * The validity of a Ythril run (Q-759): a run is valid only when every query answers the row count Oxigraph
  * answered at the same size and parameters; each differing query is named. A query that errored, or that a record
  * does not hold, has no count and differs.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-validity.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { judgeValidity } from './validity.mjs';
+import { judgeValidity } from '../../benchmarks/rdf/validity.mjs';
 
 const ok = (rows) => ({ median: 3, p95: 4, n: 20, errors: 0, rows });
 const failed = (code) => ({ n: 0, errors: 23, error: { code, status: 500, message: 'x' } });

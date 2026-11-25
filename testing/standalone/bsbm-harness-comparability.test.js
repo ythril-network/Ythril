@@ -2,10 +2,12 @@
  * Whether each query of a Ythril run is comparable with Oxigraph's (Q-759), one query at a time: comparable when the
  * row counts match on every run, else not, with one reason from a fixed list derived from the data the import does
  * not keep and from the query's shape.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-comparability.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { REASONS, judgeComparability } from './comparability.mjs';
+import { REASONS, judgeComparability } from '../../benchmarks/rdf/comparability.mjs';
 
 const BSBM = 'http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/';
 const DC = 'http://purl.org/dc/elements/1.1/';

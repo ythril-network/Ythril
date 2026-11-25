@@ -1,10 +1,12 @@
 /**
  * The predicates the import does not keep (Q-759), found by counting what the variant states per predicate and what
  * the Ythril instance answers per predicate, never by a list typed for the benchmark.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-not-taken.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { countPredicates, countQuery, notTakenOf } from './not-taken.mjs';
+import { countPredicates, countQuery, notTakenOf } from '../../benchmarks/rdf/not-taken.mjs';
 
 const P = (n) => `http://example.org/${n}`;
 const line = (s, p, o) => `<http://example.org/s${s}> <${P(p)}> ${o} .`;

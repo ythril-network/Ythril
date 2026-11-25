@@ -1,10 +1,12 @@
 /**
  * The row count of an answer (Q-759): rows of a result set, and for a graph answer (Q9 DESCRIBE, Q12 CONSTRUCT)
  * the statements in it, counted by parsing the text on both engines, so Turtle and N-Triples are comparable.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-answer-rows.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { countRows } from './answer-rows.mjs';
+import { countRows } from '../../benchmarks/rdf/answer-rows.mjs';
 
 const TURTLE = `@prefix ex: <http://ex.test/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .

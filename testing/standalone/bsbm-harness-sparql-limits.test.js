@@ -1,10 +1,12 @@
 /**
  * The SPARQL limits of the scratch instance (Q-759): read from its config the way the server reads them (an absent key
  * is its default), raised to named values inside the server's own ceilings, and recorded with the run.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-sparql-limits.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CEILINGS, DEFAULTS, limitsOf, withLimits } from './sparql-limits.mjs';
+import { CEILINGS, DEFAULTS, limitsOf, withLimits } from '../../benchmarks/rdf/sparql-limits.mjs';
 
 test('an absent sparql block, or an absent key, reads as the server default', () => {
   assert.deepEqual(limitsOf({}), { timeoutMs: 30000, maxRecordsRead: 200000, maxResults: 10000 });

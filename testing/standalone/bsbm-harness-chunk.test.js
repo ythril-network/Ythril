@@ -3,13 +3,15 @@
  * statements are divided, every chunk is under its bound, and no chunk holds an edge whose end comes in a later
  * chunk. Cases drive the planner over subjects (id, bytes, the subjects it points at) and the file writer over a
  * small N-Triples text.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-chunk.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chunkFile, planChunks } from './chunk.mjs';
+import { chunkFile, planChunks } from '../../benchmarks/rdf/chunk.mjs';
 
 const s = (id, bytes, refs = []) => ({ id, bytes, refs });
 const flat = (plan) => plan.chunks.flat();

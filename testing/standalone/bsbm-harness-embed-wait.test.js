@@ -1,10 +1,12 @@
 /**
  * The wait for the embed queue to drain before a measured run (Q-759): until the instance reports nothing pending, at
  * most a deadline, and the wait and what was left are recorded either way.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-embed-wait.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { waitForDrain } from './embed-wait.mjs';
+import { waitForDrain } from '../../benchmarks/rdf/embed-wait.mjs';
 
 /** A clock the sleeps move: the wait is measured in the clock's own milliseconds, not in real ones. */
 function clock() {
