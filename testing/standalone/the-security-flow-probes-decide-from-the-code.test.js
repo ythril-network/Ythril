@@ -38,6 +38,7 @@ import { decide as decideContracts, unreferenced, pathPattern, surfaceTests, rea
 import { decide as decideLeaks, leakyRoutes, unpricedSpaceTools, realInput as leakInput } from '../../tools/flow-checks/check-i-privacy-no-cross-space-leak.mjs';
 import { decide as decideQuantities, uncappedProperties, budgetCappedFields, boundConstants, documented, realInput as quantityInput } from '../../tools/flow-checks/check-i-performance-user-quantities-capped.mjs';
 import { SPACE_SCHEMAS } from '../../tools/flow-checks/_built-registry.mjs';
+import { resolvedRungGuards } from './_area-guards.mjs';
 
 const probe = (name) => join(REPO_ROOT, 'tools', 'flow-checks', `${name}.mjs`);
 const run = (name) => {
@@ -257,6 +258,19 @@ describe('check-i-privacy-no-cross-space-leak', () => {
     const routes = input.routes.map((x) => (x === r ? { ...x, all: token, source: '' } : x));
     const found = leakyRoutes({ ...input, routes }).map((f) => f.id);
     assert.deepEqual(found, [`route ${r.method} ${r.path}`]);
+  });
+
+  it('judges a resolved row by its door: the chain authenticates and its file names a guard that asks the inventory and the rung', () => {
+    const r = input.routes.find((x) => input.ROUTE_RIGHTS.some((row) => row.scope === 'resolved' && row.method === x.method && row.route === x.path));
+    assert.ok(r, 'no route has a resolved rights row');
+    const id = `route ${r.method} ${r.path}`;
+    const token = [...input.guards].find(([n, f]) => f.metered && !f.spaceScope && !f.instanceAdmin && !f.spaceAdmin && !f.mfa && /^requireAuth$/.test(n))?.[0];
+    assert.ok(token, 'requireAuth is not a plain token guard');
+    const door = [...resolvedRungGuards(r.file)][0];
+    assert.ok(door, `${r.file} has no guard that asks the inventory and the rung`);
+    assert.deepEqual(leakyRoutes({ ...input, routes: [{ ...r, all: `${token}, ${door}` }] }).map((f) => f.id), [], 'a chain with both passes');
+    assert.deepEqual(leakyRoutes({ ...input, routes: [{ ...r, all: token }] }).map((f) => f.id), [id], 'no rung guard in the chain');
+    assert.deepEqual(leakyRoutes({ ...input, routes: [{ ...r, all: door }] }).map((f) => f.id), [id], 'no authentication in the chain');
   });
 
   it('is violated when a tool that takes a space loses its rights row (the real TOOL_RIGHTS without one tool)', () => {
