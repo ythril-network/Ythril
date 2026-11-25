@@ -584,6 +584,16 @@ function exportType(out: Out, space: Space, kind: KnowledgeType, type: string, r
   }
 }
 
+/**
+ * The definition of a type records use and the schema does not declare (bundle-271, S3b): its vocab address is `rdf:type rdfs:Class` (an
+ * edge label `owl:ObjectProperty`, as a declared one is a property) with `rdfs:label` its name. Nothing more: the schema says nothing else
+ * of it, and no shape checks it. The caller decides that a record uses it; a declared type is {@link schemaGraph}'s.
+ */
+export function usedTypeDefinition(meta: SpaceMeta, kind: KnowledgeType, type: string): Quad[] {
+  const term = iri(resolveTermIri(meta, kind, type));
+  return [quad(term, RDF_TYPE, kind === 'edge' ? OWL('ObjectProperty') : RDFS('Class')), quad(term, RDFS('label'), plain(type))];
+}
+
 // -- the space ----------------------------------------------------------------------------------------------------------------------------
 
 function exportOntology(out: Out, space: Space, fingerprint: string): void {

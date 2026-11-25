@@ -6,12 +6,14 @@
  *
  * Every address an RDF export writes starts with `<public url>/ld/<space>/`. Without a route of its own such an address fell through to the
  * single-page app and answered `200` with `index.html`: a tool dereferencing a record's name got a web page and took it for the record.
- * Since Q-758 a record address resolves; a path under `/ld/` that is no address (no space, the ontology alone, a kind no record has, a part
- * after the id) answers `404` with an RFC 9457 problem body that says where the export is, for every `Accept`, a browser's included.
+ * Since Q-758 a record address resolves, and since S3b the base itself and the ontology `schema` do; a path under `/ld/` that is no address
+ * (no space, a space's segment without the base's closing `/`, a kind no record has, a part after the id) answers `404` with an RFC 9457
+ * problem body that says where the export is, for every `Accept`, a browser's included.
  *
  * ## Seen red
  *
- * On c647bd24f the record address answers the placeholder's 404 to a browser (no 303) and to a token-less machine read (no 401).
+ * On c647bd24f the record address answers the placeholder's 404 to a browser (no 303) and to a token-less machine read (no 401). With the
+ * base-root route of S3b and no guard on its closing `/`, `/ld/rdfld` sends a browser to the app (303).
  *
  * Run: node --test testing/standalone/a-linked-data-path-is-not-the-app-shell-db.test.js (server build and the test MongoDB)
  */
@@ -28,7 +30,7 @@ describe('a linked data path is not the app shell', { skip }, () => {
   before(async () => { d = await openRdfExportDoors({ suite: 'rdf_ld_path', spaces: [{ id: SPACE, meta: rdfMeta(SPACE) }] }); });
   after(async () => { await d?.close(); });
 
-  for (const path of [`/ld/${SPACE}/vocab`, `/ld/${SPACE}/schema`, `/ld/${SPACE}/link/l1`, `/ld/${SPACE}/entity/e1/part`, '/ld/']) {
+  for (const path of [`/ld/${SPACE}/vocab`, `/ld/${SPACE}/shape`, `/ld/${SPACE}`, `/ld/${SPACE}/link/l1`, `/ld/${SPACE}/entity/e1/part`, '/ld/']) {
     it(`${path} is 404 with a problem body naming the export`, async () => {
       for (const accept of ['text/html', 'text/turtle', '*/*']) {
         const r = await fetch(`${d.server.url}${path}`, { headers: { Accept: accept }, redirect: 'manual' });

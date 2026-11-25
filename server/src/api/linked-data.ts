@@ -9,8 +9,11 @@
  * | `/ld/:spaceId/:kind/:id`, `:kind` one of `entity`, `fact`, `chrono`, `edge` | knowledge read | the record's statements, then those pointing at it |
  * | `/ld/:spaceId/file/*path` | knowledge read, and files read | the file's, likewise |
  * | `/ld/:spaceId/agent/:id` | knowledge read | the agent's statements |
+ * | `/ld/:spaceId/` (the base root) | knowledge read | the graph's description as a whole export of the space writes it (`graphDescription`) |
+ * | `/ld/:spaceId/schema` | schema read | the ontology's statements (the schema act, `term`) |
+ * | `/ld/:spaceId/schema/shape/*path` | schema read | the shape and its property shapes (`#<prop>`), likewise |
  * | `/ld/:spaceId/schema/:fp` | schema read | that schema version as OWL and SHACL (`rdfSchemaExportAct` with the version) |
- * | `/ld/:spaceId/vocab/*path` | schema read | the term's statements in the current schema (the same act, `term`) |
+ * | `/ld/:spaceId/vocab/*path` | schema read | the term's statements in the current schema (the same act, `term`); a type records use and the schema does not declare, its definition (`used`), asked only of a caller who also reads the records |
  *
  * Any other path under `/ld/` answers `404 ld_not_found`, an RFC 9457 problem body (`api/problem-body.ts`), as every refusal here does.
  *
@@ -56,11 +59,12 @@ import { networkIdsSharedWithCaller } from '../networks/network-spaces.js';
 import { EXPORT_OK } from '../export/export-statuses.js';
 import { chooseRdfFormat, RDF_MEDIA_TYPES, RDF_FORMAT_NOT_ACCEPTABLE } from '../rdf/export-format.js';
 import { rdfMembers, type RdfMember } from '../rdf/rdf-members.js';
-import { addressNames, recordOfAddress } from '../rdf/term-reverse.js';
+import { addressNames, recordOfAddress, shapeOfAddress, termOfIri } from '../rdf/term-reverse.js';
+import { exportReportIri, graphDescription } from '../rdf/export-act.js';
 import { createQuadSource } from '../rdf/quad-source.js';
 import { fromRdfJs } from '../rdf/rdf-js-terms.js';
 import type { Quad } from '../rdf/literals.js';
-import { rdfSchemaExportAct } from '../rdf/schema-export-act.js';
+import { rdfSchemaExportAct, type UsedType } from '../rdf/schema-export-act.js';
 import { renderGraph, SPARQL_GRAPH_FORMATS } from '../rdf/sparql-answer.js';
 import {
   sparqlRefusalOf, SPARQL_BUSY, SPARQL_UNAVAILABLE, SPARQL_TOO_LARGE, SPARQL_TOO_MANY_RESULTS, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT,
@@ -90,15 +94,18 @@ export const LD_CODES: readonly string[] = Object.freeze([
 const RECORD_KINDS: ReadonlySet<string> = new Set(['entity', 'fact', 'chrono', 'edge']);
 
 /** What a route answers, and the Brain tab a browser is sent to for it. */
-type LdKind = 'entity' | 'fact' | 'chrono' | 'edge' | 'file' | 'agent' | 'schema' | 'vocab';
+type LdKind = 'entity' | 'fact' | 'chrono' | 'edge' | 'file' | 'agent' | 'schema' | 'vocab' | 'graph' | 'ontology' | 'shape';
 const TAB_OF: Readonly<Record<LdKind, string>> = Object.freeze({
   entity: 'entities', fact: 'facts', chrono: 'chrono', edge: 'edges', file: 'files', agent: 'overview', schema: 'overview', vocab: 'overview',
+  graph: 'overview', ontology: 'overview', shape: 'overview',
 });
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 /** The media types a browser's `Accept` is weighed against: the RDF formats first, so a tie (`*\/*`) is a machine read. */
 const WEIGHED = Object.freeze([...SPARQL_GRAPH_FORMATS.map(f => RDF_MEDIA_TYPES[f]), 'text/html']);
 
 const DETAIL = 'Nothing this caller may read has this address. Under /ld/ an address in a space\'s base (by default <public url>/ld/<space>/) '
-  + 'resolves: a record, a file, an agent, a vocabulary term or a schema version, read with a token holding read rights on that space. '
+  + 'resolves: the base itself, a record, a file, an agent, a vocabulary term, the ontology, a shape or a schema version, read with a token '
+  + 'holding read rights on that space. '
   + 'A space\'s records are exported as RDF by GET /api/brain/spaces/{spaceId}/export/rdf (MCP export_rdf), and its schema by '
   + 'GET /api/spaces/{spaceId}/schema-rdf (MCP space_schema_rdf).';
 
@@ -128,6 +135,11 @@ function spaceOfAddress(address: string): string | null {
 /** Let `/:kind/:id` answer the record kinds only; any other kind goes on to the routes after it (the 404). */
 function recordKindOnly(req: Request, _res: Response, next: NextFunction): void {
   next(RECORD_KINDS.has(String(req.params['kind'])) ? undefined : 'route');
+}
+
+/** Let `/:spaceId/` answer the base root only, which ends in `/`: `/ld/<space>` is no address and goes on to the 404. */
+function baseRootOnly(req: Request, _res: Response, next: NextFunction): void {
+  next(pathOf(req).endsWith('/') ? undefined : 'route');
 }
 
 /** Send a browser to the app, before any token is asked: `303` when `Accept` prefers HTML over every RDF format. */
@@ -206,6 +218,20 @@ function sendRefusal(res: Response, err: unknown): boolean {
   return true;
 }
 
+/** A slot of family `sparql` for this caller's read of the store; or `null`, the busy answer sent. */
+function readSlotOf(req: Request, res: Response): ReturnType<typeof takeSlot> | null {
+  const callerKey = (req.authToken as { id?: string } | undefined)?.id ?? req.ip ?? '';
+  const slot = takeSlot('sparql', callerKey);
+  if (slot) return slot;
+  const { retryAfterSeconds, instance, perCaller } = SLOT_FAMILIES.sparql;
+  res.setHeader('Retry-After', String(retryAfterSeconds));
+  sendProblem(res, {
+    status: SPARQL_UNAVAILABLE, title: 'Busy', code: SPARQL_BUSY, extra: { retryAfterSeconds },
+    detail: `A read is already running for this caller, or as many as the instance runs at once (${instance}, ${perCaller} per caller): try again when it ends`,
+  });
+  return null;
+}
+
 /** The statements of a record, a file or an agent (`kind`), read from the quad source. */
 async function answerStatements(req: Request, res: Response, kind: LdKind): Promise<void> {
   const { address, space } = RESOLVED.get(req)!;
@@ -224,17 +250,8 @@ async function answerStatements(req: Request, res: Response, kind: LdKind): Prom
   // for want of statements anyway, and it keeps that true if the source's predicate ever moves.
   if (id === undefined || (kind === 'file' && !member.files)) { sendNotFound(res); return; }
 
-  const callerKey = (req.authToken as { id?: string } | undefined)?.id ?? req.ip ?? '';
-  const slot = takeSlot('sparql', callerKey);
-  if (!slot) {
-    const { retryAfterSeconds, instance, perCaller } = SLOT_FAMILIES.sparql;
-    res.setHeader('Retry-After', String(retryAfterSeconds));
-    sendProblem(res, {
-      status: SPARQL_UNAVAILABLE, title: 'Busy', code: SPARQL_BUSY, extra: { retryAfterSeconds },
-      detail: `A read is already running for this caller, or as many as the instance runs at once (${instance}, ${perCaller} per caller): try again when it ends`,
-    });
-    return;
-  }
+  const slot = readSlotOf(req, res);
+  if (!slot) return;
   const ended = new AbortController();
   res.once('close', () => { if (!res.writableFinished) ended.abort(); });
   try {
@@ -291,15 +308,94 @@ async function answerStatements(req: Request, res: Response, kind: LdKind): Prom
   }
 }
 
-/** A schema version (`schema/:fp`) or a vocabulary term (`vocab/...`), answered by the schema export's act. */
-async function answerSchema(req: Request, res: Response, kind: 'schema' | 'vocab'): Promise<void> {
+/**
+ * The base root (`<base>`), the graph a space's records are in: the statements the records export's description writes about it
+ * (`graphDescription`, as a whole export of this one space writes them: its report, and its shapes at the current version). Knowledge read.
+ */
+async function answerGraph(req: Request, res: Response): Promise<void> {
+  const { address, space } = RESOLVED.get(req)!;
+  res.setHeader('Cache-Control', 'no-store');
+  const choice = chooseRdfFormat({ accept: req.headers['accept'], members: 1, offered: SPARQL_GRAPH_FORMATS });
+  if (!choice.ok) { sendProblem(res, { status: choice.status, title: 'Not acceptable', detail: choice.error, code: choice.code, extra: { formats: choice.formats } }); return; }
+  const member = memberOf(req, res, space);
+  if (!member) return;
+  const read = recordOfAddress(address, addressNames(member.meta));
+  if (read.answer !== 'other' || read.what !== 'graph') { sendNotFound(res); return; }
+  const report = exportReportIri([{ space: member.space, fingerprint: member.fingerprint }], undefined, undefined);
+  const statements = graphDescription(member.meta, member.fingerprint, report);
+  const rendered = renderGraph(choice.format, statements);
+  if ('code' in rendered) { sendProblem(res, { status: rendered.status, title: 'Not writable', detail: rendered.error, code: rendered.code }); return; }
+  req.auditChangesExplicit = [{ field: 'kind', to: 'graph' }, { field: 'statements', to: statements.length }, { field: 'truncated', to: false }];
+  res.status(EXPORT_OK).setHeader('Content-Type', rendered.contentType);
+  res.end(rendered.body);
+}
+
+/**
+ * The type a vocab address names when the space's schema does not declare it (`termOfIri` reads it by the Direct Mapping alone), or
+ * undefined for any other address: a declared term, a property, a file's document.
+ */
+function undeclaredTypeOf(address: string, meta: RdfMember['meta']): UsedType | undefined {
+  const term = termOfIri(address, addressNames(meta));
+  if (term.answer !== 'term' || term.of !== 'space' || term.how !== 'vocabulary') return undefined;
+  const owner = term.owners[0];
+  if (owner === undefined || owner.prop !== undefined || owner.type === null || owner.kind === 'file') return undefined;
+  return { kind: owner.kind, type: owner.type };
+}
+
+/**
+ * Does a record of the space use the undeclared type at `address`: a record typed with it (`?s rdf:type <address>`), or for an edge label
+ * an edge under it (`?s <address> ?o`)? One statement of the quad source, read in a slot of family `sparql` under the query bounds. Asked
+ * only of a caller who reads the records (`knowledge: read`): the vocab address is read with schema read, and it must not tell such a
+ * caller that a record of a type exists. `null` when the answer (busy, a bound) was sent.
+ */
+async function typeInUse(req: Request, res: Response, space: string, address: string, used: UsedType): Promise<boolean | null> {
+  const rights = (req.authToken as { rights?: TokenRights | null } | undefined)?.rights;
+  if (!mayReadArea(rights, space, 'knowledge')) return false;
+  const slot = readSlotOf(req, res);
+  if (!slot) return null;
+  const ended = new AbortController();
+  res.once('close', () => { if (!res.writableFinished) ended.abort(); });
+  try {
+    const { timeoutMs } = sparqlLimits(getConfig());
+    const source = createQuadSource({ members: [space], caller: callerOf(req), fingerprintOf: schemaFingerprintOf }, { deadline: Date.now() + timeoutMs, signal: ended.signal });
+    const term = DataFactory.namedNode(address);
+    const stream = used.kind === 'edge' ? source.match(undefined, term, undefined, undefined) : source.match(undefined, DataFactory.namedNode(RDF_TYPE), term, undefined);
+    return (await take(stream as AsyncIterable<unknown>, 1)).quads.length > 0;
+  } catch (err) {
+    if (ended.signal.aborted) return null;
+    if (sendRefusal(res, err)) return null;
+    throw err;
+  } finally {
+    slot.release();
+  }
+}
+
+/**
+ * A schema version (`schema/:fp`), the ontology (`schema`), a shape (`schema/shape/<kind>/<type>`) or a vocabulary term (`vocab/...`),
+ * answered by the schema export's act; a vocab address of a type records use and the schema does not declare by the act's `used`.
+ */
+async function answerSchema(req: Request, res: Response, kind: 'schema' | 'vocab' | 'ontology' | 'shape'): Promise<void> {
   const { address, space } = RESOLVED.get(req)!;
   res.setHeader('Cache-Control', 'no-store');
   const member = memberOf(req, res, space);
   if (!member) return;
   const token = req.authToken as { rights?: TokenRights | null } | undefined;
   let version: { fingerprint: string; typeSchemas: Record<string, unknown>; rules: Record<string, unknown> } | undefined;
-  if (kind === 'schema') {
+  let used: UsedType | undefined;
+  if (kind === 'ontology') {
+    const read = recordOfAddress(address, addressNames(member.meta));
+    if (read.answer !== 'other' || read.what !== 'ontology') { sendNotFound(res); return; }
+  } else if (kind === 'shape') {
+    const read = shapeOfAddress(address, addressNames(member.meta));
+    if (read.answer !== 'shape' || read.of !== 'space') { sendNotFound(res); return; }
+  } else if (kind === 'vocab') {
+    const undeclared = undeclaredTypeOf(address, member.meta);
+    if (undeclared !== undefined) {
+      const inUse = await typeInUse(req, res, space, address, undeclared);
+      if (inUse === null) return;
+      if (inUse) used = undeclared;
+    }
+  } else {
     const read = recordOfAddress(address, addressNames(member.meta));
     if (read.answer !== 'other' || read.what !== 'schema-version' || read.name === undefined) { sendNotFound(res); return; }
     // The version's read asks what the schema versions door asks: a peer-bound token has only what the sync door serves it.
@@ -312,7 +408,7 @@ async function answerSchema(req: Request, res: Response, kind: 'schema' | 'vocab
   }
   const outcome = rdfSchemaExportAct({
     spaceId: space, accept: req.headers['accept'], caller: callerOf(req), fingerprintOf: schemaFingerprintOf, formats: SPARQL_GRAPH_FORMATS,
-    ...(version ? { version } : { term: address }),
+    ...(version ? { version } : { term: address }), ...(used ? { used } : {}),
   });
   if (outcome.status !== EXPORT_OK) {
     sendProblem(res, { status: outcome.status, title: 'Not answered', detail: outcome.error, code: outcome.code, ...(outcome.detail ? { extra: outcome.detail } : {}) });
@@ -341,6 +437,15 @@ export const linkedDataRouter = Router();
 const kindParam = (req: Request): LdKind => String(req.params['kind']) as LdKind;
 const fixed = (k: LdKind) => (): LdKind => k;
 
+// GET /ld/:spaceId/ - the base root: the graph the space's records are in, described as the export describes it; knowledge read.
+linkedDataRouter.get('/:spaceId/', baseRootOnly, globalRateLimit, browsersToTheApp(fixed('graph')), requireAuth, requireResolvedRung,
+  answered('GET /ld/:spaceId/', answerGraph));
+// GET /ld/:spaceId/schema - the ontology (the shapes graph's description), schema read.
+linkedDataRouter.get('/:spaceId/schema', globalRateLimit, browsersToTheApp(fixed('ontology')), requireAuth, requireResolvedRung,
+  answered('GET /ld/:spaceId/schema', (req, res) => answerSchema(req, res, 'ontology')));
+// GET /ld/:spaceId/schema/shape/... - one SHACL shape with its property shapes (`#<prop>` is read at its document), schema read.
+linkedDataRouter.get('/:spaceId/schema/shape/*path', globalRateLimit, browsersToTheApp(fixed('shape')), requireAuth, requireResolvedRung,
+  answered('GET /ld/:spaceId/schema/shape/*path', (req, res) => answerSchema(req, res, 'shape')));
 // GET /ld/:spaceId/schema/:fp - a schema version as OWL and SHACL, schema read on the space whose base holds the address.
 linkedDataRouter.get('/:spaceId/schema/:fp', globalRateLimit, browsersToTheApp(fixed('schema')), requireAuth, requireResolvedRung,
   answered('GET /ld/:spaceId/schema/:fp', (req, res) => answerSchema(req, res, 'schema')));

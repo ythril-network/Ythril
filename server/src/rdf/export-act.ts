@@ -417,6 +417,28 @@ function refusalOfStore(err: unknown, spaceId: string): RdfExportRefusal {
   throw err;
 }
 
+/**
+ * The address of an export's report node: a digest of what the document is (the member spaces exported, each one's schema version, where
+ * in the walk it starts and where it ends), never of its bytes. One rule for the export's description graph and for the Linked Data
+ * address of a space's base, which describes the graph as a whole export of that one space writes it (bundle-271, S3b).
+ */
+export function exportReportIri(exported: readonly { space: string; fingerprint: string }[], after: string | undefined, nextAfter: string | undefined): string {
+  const what = JSON.stringify([exported.map(e => [e.space, e.fingerprint]), after ?? '', nextAfter ?? '']);
+  return `urn:ythril:export-report:${createHash('sha256').update(what).digest('hex')}`;
+}
+
+/**
+ * What the description graph says about a space's record graph (its base): `dcterms:isPartOf` the report and `sh:shapesGraph` the schema
+ * at the exported version. The one writer of these statements: the export's ending and the Linked Data address of the base both call it.
+ */
+export function graphDescription(meta: SpaceMeta, fingerprint: string, report: string): Quad[] {
+  const graphName = iri(graphIri(meta));
+  return [
+    quad(graphName, stdIri('dcterms', 'isPartOf'), iri(report)),
+    quad(graphName, stdIri('sh', 'shapesGraph'), iri(versionIri(meta, fingerprint))),
+  ];
+}
+
 interface PageInput {
   input: RdfExportInput;
   exported: { space: string; meta: SpaceMeta; fingerprint: string }[];
@@ -568,9 +590,7 @@ class ExportWalk {
    * leaves no trace in it.
    */
   private report(nextAfter: string | undefined): string {
-    const { p } = this;
-    const what = JSON.stringify([p.exported.map(e => [e.space, e.fingerprint]), p.after ?? '', nextAfter ?? '']);
-    return `urn:ythril:export-report:${createHash('sha256').update(what).digest('hex')}`;
+    return exportReportIri(this.p.exported, this.p.after, nextAfter);
   }
 
   /**
@@ -603,12 +623,9 @@ class ExportWalk {
     });
     const shapes: string[] = [];
     for (const g of this.graphs) {
-      const graphName = iri(graphIri(g.meta));
-      const shapesAt = versionIri(g.meta, g.fingerprint);
-      shapes.push(shapesAt);
-      quads.push(quad(report, stdIri('dcterms', 'hasPart'), graphName));
-      quads.push(quad(graphName, stdIri('dcterms', 'isPartOf'), report));
-      quads.push(quad(graphName, stdIri('sh', 'shapesGraph'), iri(shapesAt)));
+      shapes.push(versionIri(g.meta, g.fingerprint));
+      quads.push(quad(report, stdIri('dcterms', 'hasPart'), iri(graphIri(g.meta))));
+      quads.push(...graphDescription(g.meta, g.fingerprint, reportId));
     }
     // A view with no member the caller reads holds nothing, and says why, in standard terms (bundle-269 drive, finding 11).
     const empty = p.view && p.exported.length === 0 ? EMPTY_VIEW_WORDS : undefined;

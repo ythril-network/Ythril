@@ -85,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** audit event `brain.sparql_query`, written whatever `logReads` says, with a query's counts and outcome, never its text.
 - **RDF:** the SPARQL engine `@comunica/query-sparql-rdfjs` (MIT) ships, listed in `NOTICE`; it reaches no network.
 - **RDF:** addresses in a space's base under `<public url>/ld/` resolve to their statements for a token with read rights on the space (`423` for a peer token on a held space); a browser gets `303` to the Brain ([Exports](docs/integration-guide/06f-exports.md#record-addresses)).
+- **RDF:** under `/ld/` the base itself, the ontology, each SHACL shape and a type records use but the schema does not declare resolve too.
 - **RDF:** audit event `ld.read`, a read: the space and the record's id, and the request path as sent; no field holds the absolute address.
 - **RDF:** a base that starts another space's base, or is started by it, is refused at the save with `409 rdf_base_nested`, as an equal one is with `rdf_base_shared`.
 - **MCP:** a tool may declare an `outputSchema` in `tools/list`; `export_rdf`, `space_schema_rdf` and `sparql_query` do.
