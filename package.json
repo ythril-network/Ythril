@@ -47,6 +47,7 @@
     "test:all:keep": "npm run test:all:core",
     "test:all": "node testing/_init/run-test-all-with-cleanup.mjs",
     "test:client": "npm run test --workspace=client",
+    "test:bench": "node --test benchmarks/rdf/*.test.mjs",
     "typecheck:client": "npm run typecheck --workspace=client",
     "release:gate": "node ./scripts/release-gate.mjs",
     "links:convert": "node ./scripts/convert-links.mjs",
