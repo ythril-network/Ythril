@@ -366,11 +366,28 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
       return refuseRun(refusal(named.status, named.code, named.message, named.retryAfterSeconds !== undefined ? { retryAfterSeconds: named.retryAfterSeconds } : {}));
     }
     if (input.signal?.aborted) throw new CallerGone();
-    throw err;
+    // An error nothing here maps: only its class goes on. Its message may hold the query's text (an engine names the function or the IRI it
+    // met), and a thrown error is logged by whoever catches it, so what is thrown is a fixed sentence and the class.
+    throw new SparqlEngineFailure(err);
   } finally {
     if (onAbort) input.signal?.removeEventListener('abort', onAbort);
     result?.destroy();
     slot.release();
+  }
+}
+
+/** The most of an error class's name a failure repeats: a class name is an identifier, and anything else is not one. */
+const CLASS_NAME = /^[A-Za-z_$][\w$]{0,63}$/;
+
+/**
+ * An engine error nothing maps, as the act throws it: a fixed sentence and the error's class name, no message, no stack and no cause (each
+ * may hold text of the query, which no log line, error body or audit row carries).
+ */
+export class SparqlEngineFailure extends Error {
+  constructor(cause: unknown) {
+    const name = cause instanceof Error && CLASS_NAME.test(cause.constructor.name) ? cause.constructor.name : 'a non-Error value';
+    super(`The SPARQL engine failed with an error of class ${name}; its message is not kept, as it may hold the query`);
+    this.name = 'SparqlEngineFailure';
   }
 }
 
