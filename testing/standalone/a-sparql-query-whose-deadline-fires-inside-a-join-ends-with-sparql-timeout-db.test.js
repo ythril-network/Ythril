@@ -12,12 +12,16 @@
  * 1. A join whose later finds are ended by the store's maximum time (code 50) answers `503 sparql_timeout`.
  * 2. A join whose own deadline fires while its finds are on their way answers `503 sparql_timeout`.
  * 3. A join whose later finds fail with a store error answers `503 sparql_store_unavailable`, never a `200` with the rows read so far.
+ * 4. A join whose later finds fail with an error that is no refusal (a defect of the read, a `TypeError`) answers the app's generic `500`, outcome
+ *    `engine_failed`, with no text of the query, and the process lives: the source ends the match stream with no error for every error and
+ *    records the defect, so none reaches an iterator of the engine that holds no listener.
  *
  * Each case asserts both halves: the answer, and that no uncaught exception and no unhandled rejection was raised.
  *
  * ## Seen red
  *
- * On c932747c9 the quad source ended a failed match stream with `destroy(err)`: the error reached a join with no listener.
+ * On c932747c9 the quad source ended a failed match stream with `destroy(err)`: the error reached a join with no listener. On a34575097 it
+ * still did so for an error that is no refusal (rule 4).
  *
  * Run: a Mongo the harness accepts, then node --test testing/standalone/a-sparql-query-whose-deadline-fires-inside-a-join-ends-with-sparql-timeout-db.test.js
  * (a prior `npm run build:server`).
@@ -26,8 +30,9 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
-import { openRdfExportDoors, rdfMeta, baseOf } from './_rdf-export-doors.mjs';
-import { delayFirstBatches, failFindsAfter, failFindsAt, recordProcessFaults, serverDriver } from './_quad-source-faults.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
+import { openSparqlDoors, rdfMeta, baseOf } from './_sparql-doors.mjs';
+import { delayFirstBatches, failFindsAfter, failFindsAfterAt, failFindsAt, recordProcessFaults, serverDriver } from './_quad-source-faults.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'qjoin';
@@ -42,8 +47,10 @@ const FIND_MS = 40;
 /** A deadline a delayed find cannot meet: the first find answers inside it, the finds it starts do not. */
 const DEADLINE_MS = 400;
 const FIRST_BATCH_MS = 25;
+/** A deadline the first pattern's real find meets, so that the join's inner finds are started and still on their way at it. */
+const JOIN_DEADLINE_MS = 200;
 
-let d, caller, quadSource, sparql;
+let d, caller, callerKey, quadSource, sparql;
 const faults = recordProcessFaults();
 
 const source = (opts = {}) => needModule(quadSource, ['createQuadSource'], 'the quad source')
@@ -60,9 +67,11 @@ async function answerOf(src, deadline) {
 
 describe('a SPARQL query whose read fails inside a join answers its refusal and leaves the process running', { skip }, () => {
   before(async () => {
-    d = await openRdfExportDoors({ suite: 'qjoin_deadline', spaces: [{ id: SPACE, meta: rdfMeta(SPACE, { typeSchemas: { entity: { Thing: { propertySchemas: { color: { type: 'string' }, shape: { type: 'string' }, weight: { type: 'number' } } } } } }) }] });
+    d = await openSparqlDoors({ suite: 'qjoin_deadline', spaces: [{ id: SPACE, meta: rdfMeta(SPACE, { typeSchemas: { entity: { Thing: { propertySchemas: { color: { type: 'string' }, shape: { type: 'string' }, weight: { type: 'number' } } } } } }) }] });
     await d.seed(SPACE, 'entity', Array.from({ length: ROWS }, (_, i) => ({ _id: `t-${String(i).padStart(4, '0')}`, name: `Thing ${i}`, type: 'Thing', properties: { color: 'red', shape: 'round', weight: i } })));
-    caller = (await d.mint('qjoin-reader', { [SPACE]: d.row({ knowledge: 'read', files: 'read' }) })).record;
+    const minted = await d.mint('qjoin-reader', { [SPACE]: d.row({ knowledge: 'read', files: 'read' }) });
+    caller = minted.record;
+    callerKey = minted.key;
     quadSource = await loadDistModule('../../server/dist/rdf/quad-source.js', import.meta.url);
     sparql = await loadDistModule('../../server/dist/rdf/sparql-engine.js', import.meta.url);
   });
@@ -144,6 +153,46 @@ describe('a SPARQL query whose read fails inside a join answers its refusal and 
     assert.equal(got.error?.code, 'sparql_store_unavailable', `the join answered ${JSON.stringify(got).slice(0, 200)}`);
     assert.equal(got.error?.status, 503);
     assert.equal(src.failure()?.code, 'sparql_store_unavailable');
+    await faults.quiet();
+  });
+
+  it('a join whose later finds fail with a defect that is no refusal answers the generic 500 with no query text, audits engine_failed, and raises no fault', async () => {
+    const restore = failFindsAfter(0, FIND_MS, () => new TypeError('a defect of the read'));
+    let engine, got, rows;
+    try {
+      // The engine's own answer: the defect itself, never a short result.
+      engine = await answerOf(source(), Date.now() + 60_000);
+      const seen = (await auditRowsOf(d.door.mongo, { operation: 'brain.sparql_query' })).length;
+      got = await d.sparqlGet(callerKey, SPACE, JOIN);
+      rows = (await auditRowsOf(d.door.mongo, { operation: 'brain.sparql_query' })).slice(seen);
+    } finally { restore(); }
+    assert.ok(!engine.rows, `the join answered ${engine.rows?.length} rows of a read that failed under it`);
+    assert.ok(engine.error instanceof TypeError, `the join answered ${String(engine.error)}`);
+    assert.equal(got.status, 500, `the door answered ${got.status} ${got.text.slice(0, 200)}`);
+    assert.ok(!got.text.includes(THING_CLASS), 'the body repeats the query');
+    assert.equal(rows.length, 1, `audit rows: ${rows.length}`);
+    assert.deepEqual(rows[0].changes.filter(c => c.field === 'outcome').map(c => c.to), ['engine_failed']);
+    await faults.quiet();
+  });
+
+  it('a join whose finds fail with a defect that is no refusal at any moment around its deadline ends with the timeout or the defect, and raises no fault', async () => {
+    // The same crossing as above with a `TypeError` for the store's end, after the first pattern's real answer: the defect lands before, with and after the engine's timer, that is
+    // while the engine's iterators still listen and after it has let go of them. An error of the source's stream that reaches an iterator
+    // nobody listens to is an uncaught exception, whoever it was meant for.
+    const answers = [];
+    let endAt = 0;
+    const restore = failFindsAfterAt(1, () => endAt, () => new TypeError('a defect of the read'));
+    try {
+      for (let offset = -4; offset <= 4; offset++) {
+        for (let again = 0; again < 4; again++) {
+          const deadline = Date.now() + JOIN_DEADLINE_MS;
+          endAt = deadline + offset;
+          const got = await answerOf(source(), deadline);
+          answers.push(got.error?.code ?? (got.error instanceof TypeError ? 'defect' : 'answered'));
+        }
+      }
+    } finally { restore(); }
+    assert.deepEqual(answers.filter((a) => a !== 'sparql_timeout' && a !== 'defect'), [], `a defect was answered otherwise: ${answers.join(' ')}`);
     await faults.quiet();
   });
 

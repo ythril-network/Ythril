@@ -67,17 +67,7 @@ export function failFirstBatches(delayMs, makeError) {
  * @returns the function that puts the driver back.
  */
 export function failFindsAfter(answered, delayMs, makeError) {
-  const { FindCursor } = serverDriver();
-  const real = FindCursor.prototype.hasNext;
-  const order = new WeakMap();
-  let started = 0;
-  FindCursor.prototype.hasNext = async function answersThenFails(...args) {
-    if (!order.has(this)) order.set(this, ++started);
-    if (order.get(this) <= answered) return real.apply(this, args);
-    await elapse(delayMs, 'simulated latency: the find\'s first batch is on its way for this long');
-    throw makeError();
-  };
-  return () => { FindCursor.prototype.hasNext = real; };
+  return failFindsAfterAt(answered, () => Date.now() + delayMs, makeError);
 }
 
 /**
@@ -89,6 +79,26 @@ export function failFindsAt(epochOf, makeError) {
   const { FindCursor } = serverDriver();
   const real = FindCursor.prototype.hasNext;
   FindCursor.prototype.hasNext = async function failingAt() {
+    await elapse(Math.max(0, epochOf() - Date.now()), 'simulated latency: the find\'s first batch is on its way until its time is out');
+    throw makeError();
+  };
+  return () => { FindCursor.prototype.hasNext = real; };
+}
+
+/**
+ * The first `answered` finds answer as the store does; every later find's first batch waits until the epoch millisecond `epochOf()` names and
+ * then fails with `makeError()`: a join that has read its first pattern, whose inner finds are still on their way when the deadline passes and
+ * are ended by the store at that very moment, whichever of the engine's timer and the store's end lands first.
+ * @returns the function that puts the driver back.
+ */
+export function failFindsAfterAt(answered, epochOf, makeError) {
+  const { FindCursor } = serverDriver();
+  const real = FindCursor.prototype.hasNext;
+  const order = new WeakMap();
+  let started = 0;
+  FindCursor.prototype.hasNext = async function answersThenFailsAt(...args) {
+    if (!order.has(this)) order.set(this, ++started);
+    if (order.get(this) <= answered) return real.apply(this, args);
     await elapse(Math.max(0, epochOf() - Date.now()), 'simulated latency: the find\'s first batch is on its way until its time is out');
     throw makeError();
   };
