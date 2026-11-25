@@ -206,6 +206,18 @@ describe('every function that writes a space asks the write gate before its firs
     }
   });
 
+  it('the write group asks the gate for its families BEFORE it opens its transaction (Q-760): a group lands whole, so it is admitted whole', () => {
+    // The group shares the commit's stage writer (`writeStage`), reached through it; what this adds is the order: asked before the
+    // session opens, so a standing act refuses the whole group and no transaction is started for it (vet-1 S2).
+    const body = INDEX.bodies.get('server/src/brain/write-plan/write-group.ts:commitWriteGroup')?.body;
+    assert.ok(body, 'commitWriteGroup is gone: re-anchor this case');
+    const ask = body.search(ASKS);
+    const session = body.search(/\binHeldTransaction\s*\(/);
+    assert.ok(ask >= 0, 'the write group does not ask the gate');
+    assert.ok(session > ask, 'the write group opens its transaction before it asks the gate (or opens none)');
+    assert.match(body.slice(ask), /^admitSpaceWriteUnit\(\s*spaceId,\s*families\s*\)/, 'the write group asks for something other than every family it writes');
+  });
+
   it('every asking wrapper asks the gate (itself or through another wrapper) before it runs the body it was handed', () => {
     for (const name of ASKING_WRAPPERS) {
       const key = [...INDEX.bodies.keys()].find(k => k.endsWith(`:${name}`));

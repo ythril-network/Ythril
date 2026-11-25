@@ -530,6 +530,17 @@ export const spaceExchangeHeld = new Gauge({
   },
 });
 
+/**
+ * Write groups (`brain/write-plan/write-group.ts`, Q-760) that landed nothing, by why. Every reason is counted from 0 at process start (the
+ * group module touches each once), so a rate is never read off an absent series.
+ */
+export const writeGroupAbortsTotal = new Counter({
+  name: 'ythril_write_group_aborts_total',
+  help: 'Write groups that landed nothing, by reason (stale, duplicate_key, version_ceiling, retries, too_large, space_not_writable, failed)',
+  labelNames: ['reason'] as const,
+  registers: [register],
+});
+
 export const spaceHeldRefusalsTotal = new Counter({
   name: 'ythril_space_held_refusals_total',
   help: 'Peer requests refused 423 because their space is held, by door',
