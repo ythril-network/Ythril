@@ -17,6 +17,7 @@
  * - A fact with no `schema:text` stays refused (a fact has no sensible default), as `missing-required-field` naming `fact`, and its message
  *   is the planner's own sentence.
  * - An edge whose end was refused in this import is reported as `end-refused`, naming that end's subject, never as a schema violation.
+ * - A converge onto an unlabelled address keeps the stored name (review F5).
  * - The default name is the address's local name, trimmed; an address that gives none (a trailing slash, blanks, a control character) is
  *   refused as `address-gives-no-name`, naming the subject, and an edge that ends at it is `end-refused` (review F4, F5).
  * - A fact whose stored link points at a record that does not exist is refused as `stored-link-dangling`, in a generic sentence that quotes
@@ -41,7 +42,8 @@ const STORED_FACT = '66666666-6666-4666-8666-666666666666';
 /** The id a stored link points at, which no record holds: the file never says it, so no answer may. */
 const GHOST = '77777777-7777-4777-8777-777777777777';
 const NONAME = 'rdfnoname';
-const SPACES = [LANDS, REFUSES, NONAME, DANGLES, MIXED];
+const KEEPS = 'rdfkeepname';
+const SPACES = [LANDS, REFUSES, NONAME, KEEPS, DANGLES, MIXED];
 const SCHEMA_TEXT = '<http://schema.org/text>';
 const SCHEMA_START = '<http://schema.org/startDate>';
 const RDFS_LABEL = '<http://www.w3.org/2000/01/rdf-schema#label>';
@@ -123,6 +125,17 @@ describe('a subject with no label is named by its address, and every refusal nam
       assert.doesNotMatch(edge[0].message, /schema/);
       assert.equal(report.reasonsByCode.schema_violation, undefined, 'no reason is a schema violation');
     });
+  });
+
+  it('a converge onto an unlabelled address keeps the stored name: the address\'s local name is a default for a new record only', async () => {
+    const stored = '88888888-8888-4888-8888-888888888888';
+    await d.seed(KEEPS, 'entity', [{ _id: stored, name: 'Stored Name', type: 'person' }]);
+    const file = `<${baseOf(KEEPS)}entity/${stored}> a <${baseOf(KEEPS)}vocab/entity/person> .\n`;
+    const r = await d.importRest(writer.key, KEEPS, file);
+    const report = reportOf(r);
+    assert.equal(report?.status, 'completed', JSON.stringify(report?.reasons ?? r.text).slice(0, 600));
+    assert.deepEqual(report.kinds.entity, { inserted: 0, converged: 1 }, 'the record is converged onto, not inserted');
+    assert.deepEqual((await d.records(KEEPS, 'entities')).map(e => [e._id, e.name]), [[stored, 'Stored Name']], `the stored name stays, not the address's last part ('${stored}')`);
   });
 
   describe('an address that gives no name', () => {
