@@ -18,6 +18,8 @@
  *   past the query's deadline a read ends with `503 sparql_timeout`. A narrowed find is limited to cap+1 rows; a walk pages by `_id`.
  * - **A cursor held after its reader left.** Destroying a match stream closes every cursor it holds at once, and one whose find has not
  *   answered yet the moment it answers ({@link HeldCursors}).
+ * - **An error event nobody listens for.** A match stream carries an error listener of its own from construction, so a refusal raised on it
+ *   after its reader let it go (the deadline's, an abort's) is never an uncaught exception, which the server answers by ending the process.
  * - **A refusal for a read the consumer ended.** A read still on its way when its stream is destroyed ends with the driver's own error;
  *   that is no failure of the store and never the query's (`failure()` stays empty, the query's other matches read on).
  * - **A false empty.** `countQuads` answers from estimates, and the engine skips a pattern it is told is empty: it answers 0 only when no
@@ -209,6 +211,11 @@ class MatchStream extends Readable {
   private inflight: Promise<unknown> | null = null;
   constructor(private readonly quads: AsyncGenerator<N3.Quad, void, undefined>, private readonly cursors: HeldCursors) {
     super({ objectMode: true });
+    // An error event nobody listens for is an uncaught exception, and the server's handler ends the process on one. The reader of this stream
+    // (the engine) takes its errors through its own listener and, once it has destroyed the stream, may have let it go before a late error
+    // (the deadline's refusal, a read that ended after its consumer left) is raised. This listener is there from construction, so no
+    // error of this stream, whenever raised and whoever destroyed it, reaches the process: the query's refusal tells the caller, never an event.
+    this.on('error', () => undefined);
   }
 
   override _read(): void {

@@ -61,6 +61,20 @@ export function failFirstBatches(delayMs, makeError) {
 }
 
 /**
+ * Every find's first batch answers `delayMs` late, with what the store answers.
+ * @returns the function that puts the driver back.
+ */
+export function delayFirstBatches(delayMs) {
+  const { FindCursor } = serverDriver();
+  const real = FindCursor.prototype.hasNext;
+  FindCursor.prototype.hasNext = async function slow(...args) {
+    await elapse(delayMs, 'simulated latency: the find\'s first batch is on its way for this long');
+    return real.apply(this, args);
+  };
+  return () => { FindCursor.prototype.hasNext = real; };
+}
+
+/**
  * Every count of a collection (`countDocuments`, `estimatedDocumentCount`) fails with `makeError()`.
  * @returns the function that puts the driver back.
  */

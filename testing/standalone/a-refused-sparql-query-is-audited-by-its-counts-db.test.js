@@ -23,8 +23,11 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { auditRowsOf } from './_audit-rows.mjs';
 import { openSparqlDoors } from './_sparql-doors.mjs';
+import { recordProcessFaults } from './_quad-source-faults.mjs';
 
 const skip = await mongoSkipReason();
+/** Every unhandled rejection and uncaught exception of the file's run: the server ends its process on either, so none may be raised. */
+const faults = recordProcessFaults();
 const S = 'spq-refused-audit';
 const OP = 'brain.sparql_query';
 const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
@@ -53,7 +56,7 @@ describe('a refused SPARQL query is audited by its counts', { skip }, () => {
     await d.seed(S, 'entity', Array.from({ length: ENTITIES }, (_, i) => ({ _id: `e-${i}`, name: `N${i}`, type: 'Person', createdAt: STAMP, updatedAt: STAMP })));
     tok = await d.mint('spq-refused-audit', { [S]: d.row({ knowledge: 'read' }) });
   });
-  after(async () => { await d?.close(); });
+  after(async () => { faults.stop(); await d?.close(); });
 
   for (const [what, sparql, query, code, rows] of [
     ['an answer over maxResults', { maxResults: 5 }, LABELS, 'sparql_too_many_results', 0],
@@ -136,4 +139,6 @@ describe('a refused SPARQL query is audited by its counts', { skip }, () => {
     assert.equal(fieldsOf(rows_[0]).outcome, 'answered');
     assert.equal(fieldsOf(rows_[0]).rows, 3);
   });
+
+  it('raised no unhandled rejection and no uncaught exception', async () => { await faults.quiet(); });
 });

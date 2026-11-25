@@ -29,6 +29,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf } from './_rdf-export-doors.mjs';
 import { drain } from './_quad-source-fixture.mjs';
+import { recordProcessFaults } from './_quad-source-faults.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
 import { elapse } from '../_shared/sleep.mjs';
 
@@ -37,6 +38,8 @@ const CLOSE_WITHIN_MS = 2_000;
 const CLOSE_PROBE_MS = 50;
 
 const skip = await mongoSkipReason();
+/** Every unhandled rejection and uncaught exception of the file's run: the server ends its process on either, so none may be raised. */
+const faults = recordProcessFaults();
 const BULK = 'qbound';
 const EMPTY = 'qboundempty';
 const ROWS = 300;
@@ -70,7 +73,7 @@ describe('the quad source read is bounded and its estimate is never a false empt
     quadSource = await loadDistModule('../../server/dist/rdf/quad-source.js', import.meta.url);
     sparql = await loadDistModule('../../server/dist/rdf/sparql-engine.js', import.meta.url);
   });
-  after(async () => { await d?.close(); });
+  after(async () => { faults.stop(); await d?.close(); });
 
   it('a query that reads exactly the cap ends normally, and records read are counted across matches', async () => {
     const s = source({ maxRecordsRead: ROWS });
@@ -150,4 +153,6 @@ describe('the quad source read is bounded and its estimate is never a false empt
     const back = await holdsWithin(async () => (await openCursors()) <= baseline, CLOSE_WITHIN_MS, CLOSE_PROBE_MS);
     assert.ok(back, `a cursor stayed open after its stream was destroyed with its find in flight: ${(await idleCursors()).join(' ')}`);
   });
+
+  it('raised no unhandled rejection and no uncaught exception', async () => { await faults.quiet(); });
 });

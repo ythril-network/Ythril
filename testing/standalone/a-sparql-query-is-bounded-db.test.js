@@ -27,8 +27,11 @@ import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { openSparqlDoors } from './_sparql-doors.mjs';
 import { elapse } from '../_shared/sleep.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { recordProcessFaults } from './_quad-source-faults.mjs';
 
 const skip = await mongoSkipReason();
+/** Every unhandled rejection and uncaught exception of the file's run: the server ends its process on either, so none may be raised. */
+const faults = recordProcessFaults();
 const S = 'spq-bounds';
 const BIG = 'spq-bounds-big';
 const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
@@ -54,7 +57,7 @@ describe('a SPARQL query is bounded', { skip }, () => {
     tok = await d.mint('spq-bounds', { [S]: d.row({ knowledge: 'read' }), [BIG]: d.row({ knowledge: 'read' }) });
     slots = await loadDistModule('../../server/dist/util/slots.js', import.meta.url);
   });
-  after(async () => { await d?.close(); });
+  after(async () => { faults.stop(); await d?.close(); });
 
   it('an answer over maxResults is 413 with no row of it, on REST and MCP; a lower limit bounds alike; a limit above it is 400', async () => {
     await setLimits({ maxResults: 5 });
@@ -110,4 +113,6 @@ describe('a SPARQL query is bounded', { skip }, () => {
       assert.deepEqual(readsOfBig(after_), [], 'the store was still read for a query whose client went away');
     } finally { await setLimits(undefined); }
   });
+
+  it('raised no unhandled rejection and no uncaught exception', async () => { await faults.quiet(); });
 });
