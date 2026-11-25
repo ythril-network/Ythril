@@ -28,7 +28,8 @@
  *   the URL the client sent. Every other read is authenticated (`requireAuth`) and rate limited, and every answer says `Vary: Accept`.
  * - **An unbounded answer.** A record's answer reads the quad source of S1 (`match(<address>, ?, ?, ?)`, the chrono entry's `#start` and
  *   `#end` time nodes too, then `match(?, ?, <address>, ?)`) in a slot of family `sparql`, under the query bounds. It holds at most
- *   `sparql.maxResults` statements: the pointing half stops at the cap and says so (`X-Ythril-Truncated: inbound`); a record whose own
+ *   `sparql.maxResults` statements: the pointing half stops at the cap (counting statements about other records only), at the read's record
+ *   bound and at its deadline, and says so (`X-Ythril-Truncated: inbound`), the record's own half answered whole; a record whose own
  *   statements pass the cap is `413 sparql_too_many_results`.
  * - **A second writer or chooser.** Statements are written by the export's writer (`renderGraph`, `createRdfWriter`) in a format the
  *   export's chooser picks from Turtle, N-Quads and JSON-LD; the schema answers by the schema export's act.
@@ -176,10 +177,14 @@ function memberOf(req: Request, res: Response, space: string): RdfMember | null 
   return null;
 }
 
-/** At most `limit` quads of a match, and whether there were more; the stream is closed either way. */
-async function take(stream: AsyncIterable<unknown>, limit: number): Promise<{ quads: unknown[]; more: boolean }> {
+/**
+ * At most `limit` quads of a match that `keep` admits, and whether there were more of them; the stream is closed either way. A quad `keep`
+ * refuses is neither counted nor answered, so the cap and the "more" are about the statements the answer would carry.
+ */
+async function take(stream: AsyncIterable<unknown>, limit: number, keep: (q: unknown) => boolean = () => true): Promise<{ quads: unknown[]; more: boolean }> {
   const quads: unknown[] = [];
   for await (const q of stream) {
+    if (!keep(q)) continue;
     if (quads.length >= limit) return { quads, more: true };
     quads.push(q);
   }
@@ -256,13 +261,17 @@ async function answerStatements(req: Request, res: Response, kind: LdKind): Prom
     if (kind !== 'agent') {
       const own = new Set(subjects);
       try {
-        const got = await take(source.match(undefined, undefined, DataFactory.namedNode(address), undefined) as AsyncIterable<unknown>, maxResults - about.length);
-        pointing = got.quads.filter(q => !own.has((q as { subject: { value: string } }).subject.value));
+        // A statement of the record's own (a self-reference) is answered in its own half: it is filtered before the cap counts, so an answer
+        // that fits the cap is not called cut because of a statement it would not carry twice.
+        const got = await take(source.match(undefined, undefined, DataFactory.namedNode(address), undefined) as AsyncIterable<unknown>, maxResults - about.length,
+          q => !own.has((q as { subject: { value: string } }).subject.value));
+        pointing = got.quads;
         truncated = got.more;
       } catch (err) {
-        // The pointing half stops at a bound of the read as it stops at the cap: what was read about the record is answered whole.
+        // The pointing half stops at a bound of the read (the records read, the time) as it stops at the cap: what was read about the record is
+        // answered whole, and the answer says its inbound half was cut.
         const named = sparqlRefusalOf(err);
-        if (named?.code !== SPARQL_TOO_MUCH_READ) throw err;
+        if (named?.code !== SPARQL_TOO_MUCH_READ && named?.code !== SPARQL_TIMEOUT) throw err;
         truncated = true;
       }
     }
@@ -320,7 +329,8 @@ async function answerSchema(req: Request, res: Response, kind: 'schema' | 'vocab
 function answered(route: string, handle: (req: Request, res: Response) => Promise<void>) {
   return (req: Request, res: Response): void => {
     handle(req, res).catch((err: unknown) => {
-      log.error(`${route}: ${err instanceof Error ? err.message : String(err)}`);
+      // The class only: a store or driver message can carry the query, the address and the ids around it, and the log is read by more than may read the space.
+      log.error(`${route}: ${err instanceof Error ? err.constructor.name : typeof err}`);
       if (!res.headersSent) sendProblem(res, { status: INTERNAL_ERROR, title: 'Internal server error', detail: 'The address could not be read; the server log says why' });
     });
   };
