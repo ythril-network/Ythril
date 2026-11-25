@@ -569,8 +569,12 @@ stage('test:standalone (offline subset)', async () => {
     header: ({ label, code, index, total, files, startedAt, endedAt }) =>
       `  batch ${index + 1}/${total} (${label}) — ${files.length} pure file(s), ${((endedAt - startedAt) / 1000).toFixed(0)}s, exit ${code}\n`,
   });
+  // The benchmark's own tests (`benchmarks/rdf/*.test.mjs`) are no standalone file, so the plan above never holds them; CI's standalone-pure
+  // job runs them as `npm run test:bench`, and so does this stage, so the verdict here is the one CI will give.
+  let benchFailed = false;
+  try { run('npm run test:bench'); } catch { benchFailed = true; }
   // Every unit has ended (a failing one lets the others finish, so a second failure is not hidden): the stage fails once.
-  if (failed > 0) {
+  if (failed > 0 || benchFailed) {
     failures.push({ name: 'test:standalone (offline subset)', why: 'server contracts and pure logic — no Docker needed, so no reason to learn this from CI' });
   }
 });
