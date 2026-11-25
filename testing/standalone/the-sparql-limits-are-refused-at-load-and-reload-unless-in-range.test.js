@@ -70,6 +70,20 @@ describe('the SPARQL limits are whole numbers inside their bounds, at load and a
     } finally { write(GOOD); loader.loadConfig(); }
   });
 
+  // S1 review m4: a key the block does not know (a typo of a bound, a bound of another version) was taken and read as nothing, so the
+  // operator believed a limit was set that never was.
+  for (const key of ['timeout', 'maxRecords', 'timeoutMS', 'maxResult', '__proto__', 'constructor', '']) {
+    it(`an unknown key ${JSON.stringify(key)} in the sparql block is refused at load and at reload, naming it, and the limits in effect stay`, () => {
+      const text = JSON.stringify({ ...base, sparql: GOOD }).replace(/"sparql":\{/, `"sparql":{${JSON.stringify(key)}:5,`);
+      fs.writeFileSync(CONFIG_PATH, text, { mode: 0o600 });
+      try {
+        assert.throws(() => loader.loadConfig(), (err) => err.message.includes('sparql') && err.message.includes(JSON.stringify(key)), `loadConfig() took the key ${JSON.stringify(key)}`);
+        assert.throws(() => loader.reloadConfig(), (err) => err.message.includes('sparql') && err.message.includes(JSON.stringify(key)), `reloadConfig() took the key ${JSON.stringify(key)}`);
+        assert.equal(loader.getConfig().sparql?.maxResults, GOOD.maxResults, 'a refused reload changed the limits in effect');
+      } finally { write(GOOD); loader.loadConfig(); }
+    });
+  }
+
   for (const [key, values] of Object.entries(BAD)) {
     for (const [what, value] of Object.entries(values)) {
       it(`sparql.${key} as ${what} is refused at load, naming the key`, () => {
