@@ -163,7 +163,7 @@ A record a planner refuses is named by the reason's `kind` and `subject` (the ad
 | `schema_violation` | The record breaks the space's schema | `fields`: the fields it breaks (never their values) |
 | `stored_record_links_over_bound` | See above | |
 | `record_version_at_ceiling`, or another planner code | The planner refused it for that cause | `message`: the planner's sentence |
-| `plan_refused` | The planner refused it and gave no code | |
+| `plan_refused` | The planner refused it and gave no code | `message`: the planner's sentence |
 
 ### While it runs
 

@@ -50,6 +50,12 @@ describe('the RDF import section says what the import writes and reads by defaul
     for (const code of codes) assert.ok(section.includes(`coded \`${code}\``), `the section names the reason \`${code}\``);
   });
 
+  it('says in the `plan_refused` row that the reason carries the planner\'s sentence (Q-759 review F3)', () => {
+    const row = importSection().split('\n').find(l => l.startsWith('| `plan_refused` |'));
+    assert.ok(row, 'the table has a `plan_refused` row');
+    assert.ok(row.includes('`message`: the planner\'s sentence'), `the row says where the sentence is: ${row}`);
+  });
+
   it('says the order the kinds are written in, which is the source\'s', () => {
     const source = read('server/src/rdf/import-report.ts');
     const order = /IMPORT_OP_ORDER: readonly OpKind\[\] = \[([^\]]+)\]/.exec(source)?.[1]?.replaceAll("'", '').split(',').map(s => s.trim());
