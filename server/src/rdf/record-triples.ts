@@ -27,7 +27,7 @@ import { SCHEMA_FINGERPRINT_FIELD } from '@ythril-network/schema/internal';
 import { isRefKind, type RefKind } from '../config/types-knowledge.js';
 import {
   declaredTypeOf, iri, literalForBoolean, literalForDecimal, literalForInteger, literalForTemporal, literalForValue, plain, stdIri, temporalKind, triple,
-  type EdgeDetails, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term, type TemporalKind,
+  type EdgeDetails, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type StandardPrefix, type Term, type TemporalKind,
 } from './literals.js';
 import { agentIri, edgeClassIri, graphIri, recordAddressable, recordIri, resolveTermIri, versionIri, type TermKind } from './term-iri.js';
 import { ythrilIri } from './ythril-vocabulary.js';
@@ -83,6 +83,68 @@ export const RDF_READ_FIELDS: Readonly<Record<RdfRecordKind, readonly string[]>>
   edge: Object.freeze([...SHARED_FIELDS, 'from', 'to', 'fromKind', 'toKind', 'label', 'type', 'weight', 'properties']),
   link: Object.freeze(['_id', 'from', 'fromKind', 'to', 'toKind']),
   file: Object.freeze(['_id', 'path', 'description', 'tags', 'properties', 'createdAt', 'updatedAt', 'sizeBytes', 'sha256', 'parentFileId', 'deletedAt', 'feedMarker']),
+});
+
+/** The kinds that carry an author, so an agent's statements, and the ones that carry the common fields (dates, keywords, description). */
+const AUTHORED: readonly RdfRecordKind[] = Object.freeze(['entity', 'fact', 'chrono', 'edge']);
+const COMMON: readonly RdfRecordKind[] = Object.freeze(['entity', 'fact', 'chrono', 'edge', 'file']);
+const std = (prefix: StandardPrefix, local: string): string => stdIri(prefix, local).value;
+
+/**
+ * The predicates this mapper writes on its own account (not a term of the space's schema or vocabulary), each with the record kinds whose
+ * form writes it (bundle-271, Q-756, design §1.1). The quad source reads, for a pattern with one of these as its predicate, only these kinds:
+ * a kind missing here is a statement the source never finds, which `the-mapper-predicate-table-matches-the-mapper.test.js` refuses (and a
+ * kind listed that writes no such term, which only costs reads).
+ */
+export const RDF_MAPPER_PREDICATE_KINDS: Readonly<Record<string, readonly RdfRecordKind[]>> = Object.freeze({
+  [std('rdf', 'type')]: COMMON,
+  // An entity's name and a chrono entry's title, and the label of the agent every authored record states.
+  [std('rdfs', 'label')]: AUTHORED,
+  [std('dcterms', 'created')]: COMMON,
+  [std('dcterms', 'modified')]: COMMON,
+  [std('schema', 'keywords')]: COMMON,
+  [std('schema', 'description')]: COMMON,
+  [std('prov', 'wasAttributedTo')]: AUTHORED,
+  [std('dcterms', 'conformsTo')]: AUTHORED,
+  [ythrilIri('superseded')]: AUTHORED,
+  [std('schema', 'text')]: ['fact'],
+  [std('time', 'hasBeginning')]: ['chrono'],
+  [std('time', 'hasEnd')]: ['chrono'],
+  [std('time', 'inXSDDateTimeStamp')]: ['chrono'],
+  [std('time', 'inXSDDateTime')]: ['chrono'],
+  [std('time', 'inXSDDate')]: ['chrono'],
+  [std('schema', 'eventStatus')]: ['chrono'],
+  [std('schema', 'startDate')]: ['chrono'],
+  [std('schema', 'endDate')]: ['chrono'],
+  [ythrilIri('status')]: ['chrono'],
+  [ythrilIri('confidence')]: ['chrono'],
+  [ythrilIri('recurrenceFreq')]: ['chrono'],
+  [ythrilIri('recurrenceInterval')]: ['chrono'],
+  [ythrilIri('recurrenceUntil')]: ['chrono'],
+  [ythrilIri('contentRedacted')]: ['chrono'],
+  [std('rdf', 'reifies')]: ['edge'],
+  [std('rdf', 'subject')]: ['edge'],
+  [std('rdf', 'predicate')]: ['edge'],
+  [std('rdf', 'object')]: ['edge'],
+  [ythrilIri('weight')]: ['edge'],
+  [ythrilIri('edgeType')]: ['edge'],
+  [std('dcterms', 'references')]: ['link'],
+  [ythrilIri('path')]: ['file'],
+  [ythrilIri('sizeBytes')]: ['file'],
+  [std('schema', 'sha256')]: ['file'],
+});
+
+/** The classes this mapper types records with on its own account (`rdf:type` objects that are no term of the space), each with its kinds. */
+export const RDF_MAPPER_CLASS_KINDS: Readonly<Record<string, readonly RdfRecordKind[]>> = Object.freeze({
+  [ythrilIri('Entity')]: ['entity'],
+  [ythrilIri('Untyped')]: ['entity'],
+  [ythrilIri('Fact')]: ['fact'],
+  [std('prov', 'Agent')]: AUTHORED,
+  [std('time', 'Instant')]: ['chrono'],
+  [std('time', 'Interval')]: ['chrono'],
+  [std('schema', 'Event')]: ['chrono'],
+  [std('rdf', 'Statement')]: ['edge'],
+  [std('schema', 'MediaObject')]: ['file'],
 });
 
 /** How many left-out values an export names one by one; the rest are counted (design r4 section 5.2). */
