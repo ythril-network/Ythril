@@ -9,6 +9,7 @@ import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
 import { spaceTransferRouter, markImportBody, skipsGlobalParsers, IMPORT_PATH } from './api/admin-space-transfer.js';
 import { RDF_IMPORT_PATH } from './api/brain/rdf-import.js';
+import { SPARQL_PATH } from './api/brain/sparql.js';
 import path from 'path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
@@ -131,6 +132,8 @@ export function createApp() {
   app.post(RDF_IMPORT_PATH, markImportBody);
   // The schema import (Q-754) likewise, on its own path: a POST to the schema export's path is the only one there, and only it is marked.
   app.post(SCHEMA_RDF_PATH, markImportBody);
+  // The SPARQL query body (Q-757) is parsed by its own route, under the text cap's limit and code (`api/brain/sparql.ts`).
+  app.post(SPARQL_PATH, markImportBody);
   app.use(express.json({ limit: JSON_BODY_MAX_BYTES, type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/json')) }));
   app.use(express.urlencoded({ extended: true, limit: JSON_BODY_MAX_BYTES, type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/x-www-form-urlencoded')) }));
 
