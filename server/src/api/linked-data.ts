@@ -97,7 +97,7 @@ const TAB_OF: Readonly<Record<LdKind, string>> = Object.freeze({
 /** The media types a browser's `Accept` is weighed against: the RDF formats first, so a tie (`*\/*`) is a machine read. */
 const WEIGHED = Object.freeze([...SPARQL_GRAPH_FORMATS.map(f => RDF_MEDIA_TYPES[f]), 'text/html']);
 
-const DETAIL = 'Nothing this caller may read has this address. Under /ld/ an address in a space\'s default base (<public url>/ld/<space>/) '
+const DETAIL = 'Nothing this caller may read has this address. Under /ld/ an address in a space\'s base (by default <public url>/ld/<space>/) '
   + 'resolves: a record, a file, an agent, a vocabulary term or a schema version, read with a token holding read rights on that space. '
   + 'A space\'s records are exported as RDF by GET /api/brain/spaces/{spaceId}/export/rdf (MCP export_rdf), and its schema by '
   + 'GET /api/spaces/{spaceId}/schema-rdf (MCP space_schema_rdf).';
