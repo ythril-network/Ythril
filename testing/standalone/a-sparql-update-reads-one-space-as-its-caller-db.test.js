@@ -14,8 +14,8 @@
  * ## Seen red
  *
  * On 3f48206ac: `server/src/rdf/sparql-update-eval.ts` does not exist, and the quad source exports no seq of what it read (`readRecords`,
- * `lostRace`). Mutations after: the file filter of the quad source's finds dropped (rule 1); `members` widened to every space the caller
- * reads (rule 2); the seq left out of the projection (rule 3).
+ * `lostRace`). Mutations of the built server after, each seen red: the file filter of the quad source's finds dropped (rule 1); `members`
+ * widened by the other space (rule 2); the seq left out of the projection (rule 3).
  *
  * Run: a Mongo the harness accepts, npm run build:server, then
  *      node --test testing/standalone/a-sparql-update-reads-one-space-as-its-caller-db.test.js

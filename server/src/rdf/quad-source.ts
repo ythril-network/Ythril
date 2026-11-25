@@ -28,6 +28,9 @@
  *   find can answer the pattern at all, at least 1 otherwise, and a count it cannot make answers 1 and ends the
  *   query's reads with the refusal it recorded: it never answers 0 and never rejects (the engine's handler for a rejected count raises an
  *   unhandled rejection).
+ * - **A conclusion drawn from a record that changed under the read** (bundle-272, Q-965; design r2 R5, vet-2 S8). Each record read is noted
+ *   with its `seq` ({@link QuadSource.readRecords}); a record read again at another seq is the query's lost race
+ *   ({@link QuadSource.lostRace}), which an Update answers by evaluating again, never by planning on what it read.
  * - **A statement twice.** An agent's statements are written once per member and match (`agentsSeen`), an edge statement once per
  *   (from, label, to); no whole-quad set is kept.
  */
@@ -100,6 +103,10 @@ export interface QuadSource {
    * {@link QuadSource.failure} first and this next: a query whose read failed is never answered as a whole one.
    */
   defect(): { error: unknown } | null;
+  /** Every record read so far, once each, with the seq it was first read at (an Update's planner compares them with what it plans on). */
+  readRecords(): ReadRecord[];
+  /** The first record read at two different seqs by this query, or null: the record changed while the query read it. */
+  lostRace(): LostRace | null;
 }
 
 /** The query one find sends: where, which rows, which fields, in what order and how many. */
@@ -112,7 +119,17 @@ export interface CandidateQuery {
   limit: number;
 }
 
-const projectionOf = (kind: RdfRecordKind): Record<string, 1> => Object.fromEntries(RDF_READ_FIELDS[kind].map(f => [f, 1 as const]));
+/**
+ * A find's projection: the mapper's fields, and the record's `seq`, which the mapper never reads (no statement carries it) and the source
+ * records per record read ({@link QuadSource.readRecords}).
+ */
+const projectionOf = (kind: RdfRecordKind): Record<string, 1> => Object.fromEntries([...RDF_READ_FIELDS[kind], 'seq'].map(f => [f, 1 as const]));
+
+/** A record a query read, with the `seq` it was read at (null for a row that carries none). */
+export interface ReadRecord { space: string; kind: RdfRecordKind; id: string; seq: number | null }
+
+/** A record one query read at two seqs: it changed while the query read, so what the query concluded from it may be stale. */
+export interface LostRace { space: string; kind: RdfRecordKind; id: string; seqs: [number | null, number | null] }
 
 /** The query `find` sends in `space`: a walk's page (by `_id`) or a narrowed find (limited to `cap + 1` rows, so the cap read is seen). */
 export function candidateQuery(space: string, find: CandidateFind, cap: number): CandidateQuery {
@@ -278,6 +295,19 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
   let failed: SparqlRefusal | null = null;
   /** The first error that is no refusal; read by {@link QuadSource.defect}. */
   let defect: { error: unknown } | null = null;
+  /** Each record read, by space, kind and id (bounded by the read cap: one entry per record counted). */
+  const reads = new Map<string, ReadRecord>();
+  let lost: LostRace | null = null;
+
+  /** Note the seq `doc` was read at; a record seen before at another seq is the query's lost race (the first one is kept). */
+  const noteRead = (space: string, kind: RdfRecordKind, doc: Document): void => {
+    const id = String(doc['_id']);
+    const seq = typeof doc['seq'] === 'number' ? doc['seq'] : null;
+    const key = JSON.stringify([space, kind, id]);
+    const seen = reads.get(key);
+    if (seen === undefined) { reads.set(key, { space, kind, id, seq }); return; }
+    if (seen.seq !== seq) lost ??= { space, kind, id, seqs: [seen.seq, seq] };
+  };
 
   /** The time a find may take: what the query has left, at most {@link QUAD_FIND_MAX_MS}; past the deadline, the timeout. */
   const findMs = (): number => {
@@ -362,6 +392,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
         const statements = new Set<string>();
         for (const find of findsOf(pattern, member)) {
           for await (const doc of rowsOf(member, find, cursors)) {
+            noteRead(member.space, find.kind, doc);
             const form = recordTriples(member.meta, find.kind, doc, { edgeDetails: 'rdf12', agentsSeen });
             if (form.leftOut !== undefined) continue;
             const own = find.kind === 'edge' ? recordIri(member.meta, 'edge', String(doc['_id'])) : null;
@@ -437,6 +468,8 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     recordsRead: () => read,
     failure: () => failed,
     defect: () => defect,
+    readRecords: () => [...reads.values()].map(r => ({ ...r })),
+    lostRace: () => (lost ? { ...lost, seqs: [lost.seqs[0], lost.seqs[1]] } : null),
   };
 }
 
