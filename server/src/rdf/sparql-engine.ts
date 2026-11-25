@@ -304,6 +304,8 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
       const failed = recordedEnd(source);
       if (failed) reject(failed.error); else resolve(out);
     }));
+    // A stream that closes with no end and no error ends the read too, as a failure: its rows are a short answer, never a whole one.
+    stream.on('close', () => settle(() => reject(refusalOf(ended ?? recordedEnd(source)?.error ?? new Error('The result stream closed before it ended'), source))));
   });
 
   /** `read` as the one reading of the result: a failure is the query's refusal, and the deadline's timer and the abort's listener are let go. */
