@@ -22,7 +22,7 @@ import { mayReadArea } from '../auth/reachable-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { takeSlot } from '../util/slots.js';
 import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
-import { createQuadSource } from './quad-source.js';
+import { createQuadSource, type QuadSource } from './quad-source.js';
 import { addressNames, recordOfAddress, termOfIri } from './term-reverse.js';
 import { fromRdfJs, type RdfJsLike } from './rdf-js-terms.js';
 import type { RdfMember } from './rdf-members.js';
@@ -61,7 +61,7 @@ export function spaceOfAddress(address: string): string | null {
  * At most `limit` quads of a match that `keep` admits, and whether there were more of them; the stream is closed either way. A quad `keep`
  * refuses is neither counted nor answered, so the cap and the "more" are about the statements the answer would carry.
  */
-export async function takeStatements(stream: Readable, limit: number, keep: (q: RdfJsLike) => boolean = () => true, meter?: ByteMeter): Promise<{ quads: RdfJsLike[]; more: boolean }> {
+export async function takeStatements(source: QuadSource, stream: Readable, limit: number, keep: (q: RdfJsLike) => boolean = () => true, meter?: ByteMeter): Promise<{ quads: RdfJsLike[]; more: boolean }> {
   const quads: RdfJsLike[] = [];
   for await (const q of stream as AsyncIterable<RdfJsLike>) {
     if (!keep(q)) continue;
@@ -70,7 +70,15 @@ export async function takeStatements(stream: Readable, limit: number, keep: (q: 
     meter?.add(termBytes(q));
     quads.push(q);
   }
+  // A read the source failed ends its stream with no error: the failure is the source's to tell, and a short read is no whole one.
+  throwWhenFailed(source);
   return { quads, more: false };
+}
+
+/** Throw the refusal the source recorded for its query, if any: a stream that ended is the whole read only when this does not throw. */
+function throwWhenFailed(source: QuadSource): void {
+  const failed = source.failure();
+  if (failed) throw failed;
 }
 
 /** A statement in the default graph: an address's answer describes one resource, in one graph. */
@@ -137,7 +145,7 @@ export async function readStatements(input: StatementsInput): Promise<LdOutcome<
     const subjects = kind === 'chrono' ? [address, `${address}#start`, `${address}#end`] : [address];
     const about: RdfJsLike[] = [];
     for (const s of subjects) {
-      const got = await takeStatements(source.match(DataFactory.namedNode(s), undefined, undefined, undefined), maxResults + 1 - about.length, undefined, meter);
+      const got = await takeStatements(source, source.match(DataFactory.namedNode(s), undefined, undefined, undefined), maxResults + 1 - about.length, undefined, meter);
       about.push(...got.quads);
       if (about.length > maxResults) {
         return {
@@ -158,7 +166,7 @@ export async function readStatements(input: StatementsInput): Promise<LdOutcome<
       try {
         // A statement of the record's own (a self-reference) is answered in its own half: it is filtered before the cap counts, so an answer
         // that fits the cap is not called cut because of a statement it would not carry twice.
-        const got = await takeStatements(source.match(undefined, undefined, DataFactory.namedNode(address), undefined), maxResults - about.length,
+        const got = await takeStatements(source, source.match(undefined, undefined, DataFactory.namedNode(address), undefined), maxResults - about.length,
           q => !own.has(q.subject!.value), meter);
         pointing = got.quads;
         truncated = got.more;
@@ -248,8 +256,9 @@ export async function usedPropertiesOf(input: UsedPropertiesInput): Promise<LdOu
       // A name counts when the forward rule gives the predicate back for it: no spelling the export does not write is a property here.
       const name = nameOfFragment(predicate.slice(prefix.length));
       if (name !== undefined && name !== '' && resolveTermIri(input.meta, input.kind, null, name) === predicate) names.add(name);
-      if (names.size >= PROPERTY_NAMES_MAX) break;
+      if (names.size >= PROPERTY_NAMES_MAX) return { answer: 'read', names: [...names].sort() };
     }
+    throwWhenFailed(source);
     return { answer: 'read', names: [...names].sort() };
   } catch (err) {
     if (input.signal.aborted) return { answer: 'gone' };
@@ -287,7 +296,7 @@ export async function typeInUse(input: TypeInUseInput): Promise<LdOutcome<{ used
     const source = createQuadSource({ members: [input.space], caller: input.caller, fingerprintOf: schemaFingerprintOf }, { deadline: Date.now() + timeoutMs, signal: input.signal });
     const term = DataFactory.namedNode(input.address);
     const stream = input.used.kind === 'edge' ? source.match(undefined, term, undefined, undefined) : source.match(undefined, DataFactory.namedNode(RDF_TYPE), term, undefined);
-    return { answer: 'read', used: (await takeStatements(stream, 1)).quads.length > 0 };
+    return { answer: 'read', used: (await takeStatements(source, stream, 1)).quads.length > 0 };
   } catch (err) {
     if (input.signal.aborted) return { answer: 'gone' };
     const refusal = refusalOfError(err);

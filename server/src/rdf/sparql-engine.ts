@@ -200,8 +200,17 @@ interface EngineStream {
 function refusalOf(err: unknown, source: unknown): unknown {
   const named = sparqlRefusalOf(err);
   if (named) return named;
+  return recordedRefusal(source) ?? err;
+}
+
+/**
+ * The refusal the source recorded for this query, or null. A source's failed read ends its stream with no error (an error raised into the
+ * engine's iterators reaches one that no longer listens, and is an uncaught exception that stops the process), so a result stream that
+ * ends is asked this before its rows are answered: a query whose source failed never answers a short result as a whole one.
+ */
+function recordedRefusal(source: unknown): SparqlRefusal | null {
   const recorded = isRecord(source) && typeof source['failure'] === 'function' ? (source['failure'] as () => unknown)() : null;
-  return recorded instanceof SparqlRefusal ? recorded : err;
+  return recorded instanceof SparqlRefusal ? recorded : null;
 }
 
 /**
@@ -279,7 +288,10 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
       if (out.length >= limit) { settle(() => resolve(out)); stream.destroy(); }
     });
     stream.on('error', (err) => settle(() => reject(refusalOf(err, source))));
-    stream.on('end', () => settle(() => resolve(out)));
+    stream.on('end', () => settle(() => {
+      const failed = recordedRefusal(source);
+      if (failed) reject(failed); else resolve(out);
+    }));
   });
 
   /** `read` as the one reading of the result: a failure is the query's refusal, and the deadline's timer and the abort's listener are let go. */

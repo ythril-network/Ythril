@@ -237,7 +237,14 @@ class MatchStream extends Readable {
       }
     } catch (err) {
       this.inflight = null;
-      if (!this.destroyed) this.destroy(err as Error);
+      if (this.destroyed) return;
+      // A read that failed (a refusal `fail` recorded as the query's failure, or one its consumer ended) ends this stream without an error:
+      // the engine's iterators forward an error from one to the next, and one that has let go of its source meanwhile (the deadline's own
+      // end) has no listener, so the error is an uncaught exception that stops the process. The query's answer carries the failure from
+      // `failure()` (the engine asks it when the result ends) or from the deadline's own end, never from an event of this stream.
+      // An error that is none of those is a defect of the source itself and is raised as it is.
+      if (err instanceof SparqlRefusal || err instanceof ReadAborted) this.push(null);
+      else this.destroy(err as Error);
     }
   }
 
