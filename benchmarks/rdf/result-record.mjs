@@ -18,12 +18,18 @@ import { join } from 'node:path';
 export const END_MARKER = 'END-OF-RECORD';
 
 const OUTCOMES = ['ok', 'partial', 'failed'];
-const REQUIRED = ['outcome', 'engine', 'size', 'ythrilCommit', 'oxigraphDigest', 'bsbmSeed', 'queries'];
+const REQUIRED = ['outcome', 'engine', 'size', 'ythrilCommit', 'oxigraphDigest', 'bsbmSeed', 'dataset', 'queries'];
 
 export function buildRecord(input) {
   for (const key of REQUIRED) {
     if (input[key] === undefined || input[key] === null) throw new Error(`result record is missing ${key}`);
   }
+  // Both engines load one variant of the data; the record says which, and its hash, so two records can be
+  // compared only when they ran on the same bytes.
+  const { variant, triples, sha256 } = input.dataset;
+  if (typeof variant !== 'string' || variant === '') throw new Error('result record dataset is missing its variant');
+  if (!Number.isInteger(triples) || triples <= 0) throw new Error('result record dataset is missing its triples count');
+  if (typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)) throw new Error('result record dataset needs the variant sha256 (64 hex digits)');
   if (!OUTCOMES.includes(input.outcome)) {
     throw new Error(`outcome must be one of ${OUTCOMES.join(', ')}, got ${JSON.stringify(input.outcome)}`);
   }

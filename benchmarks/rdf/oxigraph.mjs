@@ -11,8 +11,8 @@
  *   in the docker booking only while it runs.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { docker, dockerOk, dockerPlain, pinnedImage, sleep } from './env.mjs';
+import { basename, join } from 'node:path';
+import { docker, dockerOk, dockerPlain, pinnedImage, sleep, variantOf } from './env.mjs';
 
 export const oxigraphNames = (size) => ({ container: `b271-oxigraph-${size}`, volume: `b271-oxigraph-${size}` });
 
@@ -29,6 +29,7 @@ export function ensureImage(ref) {
 }
 
 export async function oxigraphUp(work, size) {
+  const variant = variantOf(work, size);
   const image = pinnedImage('oxigraph');
   const digest = ensureImage(image);
   const { container, volume } = oxigraphNames(size);
@@ -36,8 +37,8 @@ export async function oxigraphUp(work, size) {
   dockerOk(['volume', 'create', volume]);
 
   const t0 = process.hrtime.bigint();
-  const load = docker(['run', '--rm', '-m', '4g', '-v', `${volume}:/data`, '-v', `${work}/data/${size}:/in:ro`, image,
-    'load', '--location', '/data', '--file', '/in/dataset.nt'], { mem: 4 });
+  const load = docker(['run', '--rm', '-m', '4g', '-v', `${volume}:/data`, '-v', `${variant.dir}:/in:ro`, image,
+    'load', '--location', '/data', '--file', `/in/${basename(variant.file)}`], { mem: 4 });
   const loadMs = Number((process.hrtime.bigint() - t0) / 1_000_000n);
   if (load.status !== 0) throw new Error(`oxigraph load failed (${load.status}): ${load.stderr || load.stdout}`);
 
@@ -52,7 +53,7 @@ export async function oxigraphUp(work, size) {
     } catch { /* not listening yet */ }
     await sleep(500);
   }
-  const state = { engine: 'oxigraph', size, url: `${url}/query`, container, volume, image, digest: `sha256:${digest.replace('sha256:', '')}`, loadMs };
+  const state = { engine: 'oxigraph', size, url: `${url}/query`, container, volume, image, digest: `sha256:${digest.replace('sha256:', '')}`, loadMs, variant: variant.name, variantSha256: variant.sha256 };
   mkdirSync(join(work, 'state'), { recursive: true });
   writeFileSync(statePath(work, `oxigraph-${size}`), `${JSON.stringify(state, null, 2)}\n`);
   return state;

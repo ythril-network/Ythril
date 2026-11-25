@@ -8,8 +8,10 @@
  *
  * 1. Fetches BSBM Tools v0.2 and refuses it unless its sha256 is the pinned one (`dataset-pin.mjs`).
  * 2. Extracts it (the archive ships its jars, so nothing is compiled).
- * 3. Per size, runs the BSBM generator in the pinned temurin image: `<work>/data/<size>/dataset.nt` and
- *    the driver's own data folder `td_data/`, plus `manifest.json` (triples, bytes, sha256).
+ * 3. Per size, runs the BSBM generator in the pinned temurin image WITHOUT forward chaining:
+ *    `<work>/data/<size>/dataset.nt` (raw) and the driver's own data folder `td_data/`.
+ * 3b. Per size, `prepare.mjs` turns the raw file into `variant.nt`, the one file both engines load (one `rdf:type`
+ *    per subject, no language tags); `manifest.json` holds the raw digest and the variant's name, sha256 and counts.
  * 4. Per size, asks the BSBM test driver for the query parameters. The driver chooses them from its
  *    serialised data files, which only it can read, so it is run against a tiny capture server that records
  *    every query the driver sends. Each is matched back to its template (`extractParams`) and the values are
@@ -24,7 +26,8 @@ import { join } from 'node:path';
 import { fetchPinned, readPinnedDataset } from '../dataset-pin.mjs';
 import { dockerAsync, dockerOk, parseArgs, pinnedImage, workDir, PIN, PIN_PATH, TOOLS_SUBDIR } from './env.mjs';
 import { extractParams } from './params.mjs';
-import { acceptFor, loadTemplates } from './queries.mjs';
+import { prepareFile } from './prepare.mjs';
+import { loadTemplates } from './queries.mjs';
 import { unzip } from './unzip.mjs';
 
 async function fileDigest(path) {
@@ -52,21 +55,22 @@ async function ensureTools(work) {
   return tools;
 }
 
+/** The raw generator output, WITHOUT forward chaining (no `-fc`): each product states its own types only. */
 function generateDataset(work, tools, size) {
   const out = join(work, 'data', String(size));
-  if (existsSync(join(out, 'manifest.json'))) return out;
+  if (existsSync(join(out, 'dataset.nt'))) return out; // renamed into place last, so it is only there whole
   const partial = `${out}.partial`;
   rmSync(partial, { recursive: true, force: true });
   mkdirSync(partial, { recursive: true });
   console.log(`generating ${size} products`);
   const script = [
     'set -e', 'mkdir /w', 'cd /w', 'cp /bsbm/*.txt .',
-    `java -Xmx1g -cp "/bsbm/lib/*" benchmark.generator.Generator -fc -pc ${size} -s nt -dir /w/td_data -fn /w/dataset > /w/gen.log`,
+    `java -Xmx3g -cp "/bsbm/lib/*" benchmark.generator.Generator -pc ${size} -s nt -dir /w/td_data -fn /w/dataset > /w/gen.log`,
     'cp -r /w/dataset.nt /w/td_data /w/gen.log /out/',
   ].join('; ');
   // The generator reads its word lists one byte at a time: from a bind mount that took minutes, so the work
   // happens on the container's own disk and the result is copied out once.
-  dockerOk(['run', '--rm', '-m', '2g', '-v', `${tools}:/bsbm:ro`, '-v', `${partial}:/out`, pinnedImage('temurin'), 'sh', '-c', script], { mem: 2 });
+  dockerOk(['run', '--rm', '-m', '4g', '-v', `${tools}:/bsbm:ro`, '-v', `${partial}:/out`, pinnedImage('temurin'), 'sh', '-c', script], { mem: 4 });
   renameSync(partial, out);
   return out;
 }
@@ -110,8 +114,7 @@ async function captureParams(work, tools, out, size, runs) {
     params[name] = list.slice(0, runs);
   }
   const record = {
-    size, driverSeed: seed, runs, accept: Object.fromEntries(Object.entries(templates).map(([n, t]) => [n, acceptFor(t.form)])),
-    params,
+    size, driverSeed: seed, runs, params,
   };
   writeFileSync(join(out, 'params.json'), `${JSON.stringify(record, null, 1)}\n`);
 }
@@ -127,12 +130,17 @@ async function main() {
     const out = generateDataset(work, tools, size);
     const manifestPath = join(out, 'manifest.json');
     if (!existsSync(manifestPath)) {
-      const d = await fileDigest(join(out, 'dataset.nt'));
+      const raw = await fileDigest(join(out, 'dataset.nt'));
+      const v = prepareFile(join(out, 'dataset.nt'), join(out, 'variant.nt'));
+      const { variant: name, sha256, bytes, triples, ...changes } = v;
       writeFileSync(manifestPath, `${JSON.stringify({
-        size, ...d, generatorSeed: PIN.seeds.generator, generatorImage: pinnedImage('temurin'),
-        bsbmToolsSha256: PIN.datasets.bsbmtools.sha256, forwardChaining: true,
+        size, forwardChaining: false, raw,
+        variant: { name, sha256, bytes, triples, changes },
+        generatorSeed: PIN.seeds.generator, generatorImage: pinnedImage('temurin'),
+        bsbmToolsSha256: PIN.datasets.bsbmtools.sha256,
       }, null, 2)}\n`);
-      console.log(`${size}: ${d.triples} triples, ${d.bytes} bytes, sha256 ${d.sha256}`);
+      console.log(`${size}: raw ${raw.triples} triples sha256 ${raw.sha256}`);
+      console.log(`${size}: variant ${name} ${triples} triples, ${bytes} bytes, sha256 ${sha256} (${JSON.stringify(changes)})`);
     }
     if (!existsSync(join(out, 'params.json'))) await captureParams(work, tools, out, size, runs);
     console.log(`${size}: ready in ${out}`);

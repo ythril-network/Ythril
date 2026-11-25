@@ -18,16 +18,19 @@ import { readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { PIN, REPO_ROOT, TOOLS_SUBDIR, parseArgs, workDir } from './env.mjs';
+import { PIN, REPO_ROOT, TOOLS_SUBDIR, parseArgs, variantOf, workDir } from './env.mjs';
 import { statePath } from './oxigraph.mjs';
 import { substitute } from './params.mjs';
-import { loadTemplates } from './queries.mjs';
+import { acceptFor, loadTemplates } from './queries.mjs';
 import { buildRecord, writeRecord } from './result-record.mjs';
 import { summarize } from './stats.mjs';
 
 const REQUEST_TIMEOUT_MS = 120_000;
 
-/** Counts the rows a response carries, to make two engines' answers comparable at a glance. */
+/**
+ * Counts the rows a response carries, to make two engines' answers comparable at a glance. A Turtle graph has no
+ * cheap triple count (prefixes, `;` and `,` lists), so its row count is null and `bytes` is the comparison.
+ */
 function countRows(text, accept) {
   if (accept === 'application/n-triples') return text.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
   try {
@@ -49,7 +52,7 @@ async function ask(endpoint, token, query, accept) {
     });
     const text = await res.text();
     const ms = performance.now() - t0;
-    if (res.status >= 200 && res.status < 300) return { ok: true, ms, rows: countRows(text, accept) };
+    if (res.status >= 200 && res.status < 300) return { ok: true, ms, rows: countRows(text, accept), bytes: Buffer.byteLength(text) };
     let code = res.status;
     let message = text.slice(0, 300);
     try { const j = JSON.parse(text); code = j.code ?? j.error?.code ?? res.status; message = j.message ?? j.error?.message ?? j.error ?? message; } catch { /* plain text body */ }
@@ -60,23 +63,24 @@ async function ask(endpoint, token, query, accept) {
   }
 }
 
-async function runQueries({ endpoint, token, templates, paramsFile, warmups, runs }) {
+async function runQueries({ engine, endpoint, token, templates, paramsFile, warmups, runs }) {
   const queries = {};
   for (const [name, t] of Object.entries(templates)) {
     const sets = paramsFile.params[name];
     if (!sets || sets.length < warmups + runs) throw new Error(`${name}: params.json holds ${sets?.length ?? 0} sets, ${warmups + runs} are needed`);
-    const accept = paramsFile.accept[name];
+    const accept = acceptFor(t.form, engine);
     const times = [];
     let firstError = null;
     let errors = 0;
     let rows = null;
+    let bytes = null;
     for (let k = 0; k < warmups + runs; k++) {
       const r = await ask(endpoint, token, substitute(t.text, sets[k]), accept);
       if (!r.ok) { errors++; firstError ??= r.error; continue; }
-      if (k >= warmups) { times.push(r.ms); rows ??= r.rows; }
+      if (k >= warmups) { times.push(r.ms); rows ??= r.rows; bytes ??= r.bytes; }
     }
     queries[name] = times.length
-      ? { ...summarize(times), rows, errors, ...(firstError ? { error: firstError } : {}) }
+      ? { ...summarize(times), rows, bytes, errors, ...(firstError ? { error: firstError } : {}) }
       : { n: 0, errors, error: firstError ?? { code: 'no-measured-run', status: 0, message: 'every request failed' } };
   }
   return queries;
@@ -109,11 +113,15 @@ async function main() {
 
   const state = JSON.parse(readFileSync(statePath(work, `${engine}-${size}`), 'utf8'));
   const paramsFile = JSON.parse(readFileSync(join(work, 'data', String(size), 'params.json'), 'utf8'));
-  const manifest = JSON.parse(readFileSync(join(work, 'data', String(size), 'manifest.json'), 'utf8'));
+  const variant = variantOf(work, size);
+  // A store loaded from another variant (or an older file) would be timed against queries chosen for this one.
+  if (state.variantSha256 !== variant.sha256) {
+    throw new Error(`${engine} ${size} was loaded from variant ${state.variantSha256 ?? 'unknown'}, not ${variant.sha256}: load it again`);
+  }
   const templates = loadTemplates(join(work, TOOLS_SUBDIR));
 
   const startedAt = new Date();
-  const queries = await runQueries({ endpoint: state.url, token: state.token, templates, paramsFile, warmups, runs });
+  const queries = await runQueries({ engine, endpoint: state.url, token: state.token, templates, paramsFile, warmups, runs });
   const timed = Object.values(queries).filter((q) => typeof q.median === 'number');
   const clean = timed.length === Object.keys(queries).length && timed.every((q) => q.errors === 0);
   const outcome = clean ? 'ok' : timed.length ? 'partial' : 'failed';
@@ -127,7 +135,7 @@ async function main() {
     oxigraphDigest: PIN.images.oxigraph.ref.slice(PIN.images.oxigraph.ref.indexOf('@') + 1),
     ythrilImage: engine === 'ythril' ? state.imageId ?? state.image ?? null : undefined,
     bsbmSeed: { generator: PIN.seeds.generator, driver: PIN.seeds.driver },
-    dataset: { triples: manifest.triples, sha256: manifest.sha256 },
+    dataset: { variant: variant.name, triples: variant.triples, sha256: variant.sha256 },
     loadMs: engine === 'ythril' ? (load?.ok ? load.loadMs : null) : state.loadMs,
     ...(engine === 'ythril' && !load?.ok ? { loadRefusal: { status: load?.status ?? 0, code: load?.code ?? 'no-load-recorded', message: load?.message ?? '' } } : {}),
     warmups, runs, queries,
