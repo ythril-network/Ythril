@@ -26,10 +26,9 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenRouterApp } from '../_shared/in-process-app.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openRdfExportDoors, rdfMeta } from './_rdf-export-doors.mjs';
-import http from 'node:http';
 
 const skip = await mongoSkipReason();
 const S = 'resolvedrow';
@@ -55,7 +54,7 @@ describe('a path guard refuses a resolved rights row', { skip }, () => {
     const app = express();
     app.get(row.route, requireSpaceAuth, (_req, res) => { res.status(200).send('reached'); });
     indexRoutes(app);
-    listening = await listenOnLoopback(http.createServer(app));
+    listening = await listenRouterApp(app);
     // Reaches the space through files and holds no rung on the row's area (knowledge); the other holds it.
     keys.noRung = (await d.mint('resolved-no-rung', { [S]: d.row({ files: 'read' }) })).key;
     keys.rung = (await d.mint('resolved-rung', { [S]: d.row({ knowledge: 'read' }) })).key;
