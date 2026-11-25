@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Loads a generated BSBM dataset into one engine and times the load.
+ * Loads the generated BSBM dataset variant (`variant.nt`, see prepare.mjs) into one engine and times the load.
+ * Both engines load the same bytes; the state records the variant and its sha256.
  *
  *   node benchmarks/rdf/load.mjs oxigraph-up   --size 1000       bulk `load` into a fresh store, then `serve`
  *   node benchmarks/rdf/load.mjs oxigraph-down --size 1000
@@ -12,9 +13,9 @@
  * scratch instance, the image digest and the load time. When the Ythril import refuses the data, the state
  * says so with the status and code instead of a time, and the server is left as it is.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseArgs, workDir } from './env.mjs';
+import { parseArgs, variantOf, workDir } from './env.mjs';
 import { oxigraphDown, oxigraphUp, statePath } from './oxigraph.mjs';
 import { createRdfSpace, deleteSpace, loadInto, spaceCounts, ythrilDown, ythrilUp } from './ythril.mjs';
 
@@ -25,7 +26,7 @@ async function main() {
   const size = Number(flags.size);
   const needSize = () => {
     if (!Number.isInteger(size) || size <= 0) throw new Error('--size <products> is required');
-    if (!existsSync(join(work, 'data', String(size), 'dataset.nt'))) throw new Error(`no dataset for ${size}: run generate.mjs --sizes ${size}`);
+    return variantOf(work, size); // throws when generate.mjs has not made the variant
   };
 
   if (cmd === 'oxigraph-up') {
@@ -45,16 +46,19 @@ async function main() {
     ythrilDown();
     console.log('scratch ythril removed');
   } else if (cmd === 'ythril') {
-    needSize();
+    const variant = needSize();
     const state = JSON.parse(readFileSync(statePath(work, 'ythril'), 'utf8'));
     const spaceId = `bsbm-${size}`;
     await deleteSpace(state, spaceId);
     await createRdfSpace(state, spaceId, flags.base ? String(flags.base) : undefined);
-    const file = join(work, 'data', String(size), 'dataset.nt');
     // --import-query "schema=generate&from=data" adds the door's own parameters (docs 06f-exports.md, RDF import).
-    const result = await loadInto(state, spaceId, file, Object.fromEntries(new URLSearchParams(String(flags['import-query'] ?? ''))));
+    const importQuery = String(flags['import-query'] ?? '');
+    const result = await loadInto(state, spaceId, variant.file, Object.fromEntries(new URLSearchParams(importQuery)));
     const counts = await spaceCounts(state, spaceId).catch(() => null);
-    const out = { ...state, size, spaceId, url: `${state.url}/api/brain/spaces/${spaceId}/sparql`, load: result, counts };
+    const out = {
+      ...state, size, spaceId, url: `${state.url}/api/brain/spaces/${spaceId}/sparql`, load: result, counts,
+      importQuery, variant: variant.name, variantSha256: variant.sha256,
+    };
     mkdirSync(join(work, 'state'), { recursive: true });
     writeFileSync(statePath(work, `ythril-${size}`), `${JSON.stringify(out, null, 2)}\n`, { mode: 0o600 });
     if (result.ok) console.log(`ythril ${size}: imported in ${result.loadMs} ms (${JSON.stringify(result.report.kinds)})`);

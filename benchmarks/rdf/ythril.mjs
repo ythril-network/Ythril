@@ -116,10 +116,23 @@ export async function loadInto(state, spaceId, file, params = {}) {
   const report = body.report ?? body;
   const completed = res.status >= 200 && res.status < 300 && report.status === 'completed';
   if (completed) return { ok: true, loadMs, status: res.status, report: summarizeReport(report) };
-  return {
-    ok: false, loadMs, status: res.status, code: body.code ?? report.code ?? report.status ?? 'unknown',
-    message: String(body.error ?? body.message ?? res.text).slice(0, 500), report: summarizeReport(report),
-  };
+  return { ok: false, loadMs, status: res.status, ...describeRefusal(res), report: summarizeReport(report) };
+}
+
+/**
+ * The code and message a refused import is recorded with. A refusal polled to its end answers `200` with a report
+ * whose status is `refused`: it is `rdf_import_refused`, and its message is the reason codes with their counts
+ * (never the report's text, which names statements). Any other refusal keeps the code and message it came with.
+ */
+export function describeRefusal({ json, text }) {
+  const body = json ?? {};
+  const report = body.report ?? body;
+  const byCode = report.reasonsByCode ?? null;
+  const counts = byCode ? Object.entries(byCode).map(([c, n]) => `${c} ${n}`).join(', ') : '';
+  if (report.status === 'refused' || body.code === 'rdf_import_refused') {
+    return { code: 'rdf_import_refused', message: `reasons: ${counts || 'none listed'}` };
+  }
+  return { code: body.code ?? report.code ?? 'unknown', message: String(body.error ?? body.message ?? text).slice(0, 500) };
 }
 
 function summarizeReport(r) {

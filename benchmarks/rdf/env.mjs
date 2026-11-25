@@ -50,6 +50,22 @@ export function workDir(flags) {
   return dir.replace(/\\/g, '/');
 }
 
+/**
+ * The dataset variant both engines load for `size` products: its file, name, sha256 and triple count, read from
+ * the manifest `generate.mjs` wrote. The raw generator output (`dataset.nt`) is never loaded; refusing to answer
+ * without a variant is what keeps one engine from loading different triples than the other.
+ */
+export function variantOf(work, size) {
+  const dir = join(work, 'data', String(size));
+  const manifestPath = join(dir, 'manifest.json');
+  if (!existsSync(manifestPath)) throw new Error(`no dataset for ${size}: run generate.mjs --sizes ${size}`);
+  const v = JSON.parse(readFileSync(manifestPath, 'utf8')).variant;
+  if (!v?.sha256 || !v.name) throw new Error(`the manifest of ${size} names no variant: regenerate with generate.mjs`);
+  const file = join(dir, 'variant.nt');
+  if (!existsSync(file)) throw new Error(`${file} is missing: regenerate with generate.mjs`);
+  return { file, dir, name: v.name, sha256: v.sha256, triples: v.triples };
+}
+
 export function pinnedImage(name) {
   const ref = PIN.images?.[name]?.ref;
   if (!ref || !/@sha256:[0-9a-f]{64}$/.test(ref)) throw new Error(`no digest-pinned image "${name}" in pin.json`);

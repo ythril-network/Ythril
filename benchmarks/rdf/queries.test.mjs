@@ -28,6 +28,16 @@ test('rows are asked for as SPARQL JSON and graphs as N-Triples', () => {
   assert.throws(() => acceptFor('UPDATE'), /form/i);
 });
 
+test('Ythril is asked for Turtle where Oxigraph is asked for N-Triples: its endpoint answers a graph as Turtle, N-Quads or JSON-LD', () => {
+  for (const form of ['DESCRIBE', 'CONSTRUCT']) {
+    assert.equal(acceptFor(form, 'ythril'), 'text/turtle');
+    assert.equal(acceptFor(form, 'oxigraph'), 'application/n-triples');
+    assert.equal(acceptFor(form), 'application/n-triples', 'the default engine is Oxigraph');
+  }
+  for (const form of ['SELECT', 'ASK']) assert.equal(acceptFor(form, 'ythril'), 'application/sparql-results+json');
+  assert.throws(() => acceptFor('CONSTRUCT', 'virtuoso'), /engine/i);
+});
+
 test('the Explore mix is eleven queries: Q6 was removed from BSBM', () => {
   assert.deepEqual(EXPLORE_NUMBERS, [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]);
 });

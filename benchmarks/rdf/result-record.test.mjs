@@ -17,6 +17,7 @@ function input(over = {}) {
     ythrilCommit: '2bfffd806',
     oxigraphDigest: 'sha256:' + 'a'.repeat(64),
     bsbmSeed: { generator: 53223436, driver: 808080 },
+    dataset: { variant: 'ythril-loadable-1', triples: 371000, sha256: 'b'.repeat(64) },
     loadMs: 1234,
     warmups: 3,
     runs: 20,
@@ -50,6 +51,17 @@ test('a record missing a required field is refused, naming the field', () => {
     delete bad[key];
     assert.throws(() => buildRecord(bad), new RegExp(key), `${key} must be required`);
   }
+});
+
+test('a record names the dataset variant it ran on and that variant\'s sha256, so two engines are known to have loaded the same bytes', () => {
+  const rec = buildRecord(input());
+  assert.deepEqual(rec.dataset, { variant: 'ythril-loadable-1', triples: 371000, sha256: 'b'.repeat(64) });
+  const bad = (dataset) => () => buildRecord(input({ dataset }));
+  assert.throws(bad(undefined), /dataset/);
+  assert.throws(bad({ triples: 1, sha256: 'b'.repeat(64) }), /variant/);
+  assert.throws(bad({ variant: 'v', triples: 1 }), /sha256/);
+  assert.throws(bad({ variant: 'v', triples: 1, sha256: 'xyz' }), /sha256/);
+  assert.throws(bad({ variant: 'v', sha256: 'b'.repeat(64) }), /triples/);
 });
 
 test('an unknown outcome and a query with neither timing nor error are refused', () => {

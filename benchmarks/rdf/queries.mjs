@@ -28,9 +28,14 @@ export function queryForm(text) {
   return m[1].toUpperCase();
 }
 
-export function acceptFor(form) {
+/**
+ * The media type to ask `engine` for. Ythril's endpoint answers a graph as Turtle, N-Quads or JSON-LD, never
+ * N-Triples (design R3.2), so it is asked for Turtle; Oxigraph keeps N-Triples.
+ */
+export function acceptFor(form, engine = 'oxigraph') {
+  if (engine !== 'oxigraph' && engine !== 'ythril') throw new Error(`unknown engine ${JSON.stringify(engine)}`);
   if (form === 'SELECT' || form === 'ASK') return 'application/sparql-results+json';
-  if (form === 'DESCRIBE' || form === 'CONSTRUCT') return 'application/n-triples';
+  if (form === 'DESCRIBE' || form === 'CONSTRUCT') return engine === 'ythril' ? 'text/turtle' : 'application/n-triples';
   throw new Error(`unknown query form ${JSON.stringify(form)}`);
 }
 
