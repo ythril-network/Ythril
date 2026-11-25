@@ -87,7 +87,9 @@ export function mountedRoutes({ roots = SERVER_CODE_ROOTS, floor = 150 } = {}) {
        */
       const args = argumentsOf(src, src.indexOf('(', m.index), `${routePath}: the route registration`);
       const chain = args.slice(1, -1).join(',');
-      out.push({ method: method.toUpperCase(), path, routePath, router, chain, file, at: m.index });
+      // `args` are the registration's arguments, each as written (path first, handler last): a gate that asks where in the chain a guard
+      // stands (before the handler or after it) reads them; `chain` is the joined text of the middle ones.
+      out.push({ method: method.toUpperCase(), path, routePath, router, chain, args, file, at: m.index });
     }
   }
 
