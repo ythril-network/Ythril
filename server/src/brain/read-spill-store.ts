@@ -130,7 +130,8 @@ export function suppressEmbeddings<T>(value: T): T {
 }
 
 /**
- * Every space whose records an item carries: its own `spaceId`, and any nested `_graph` node's.
+ * Every space whose records an item carries: its own `spaceId`, any nested `_graph` node's, and every space of its `members` (a SPARQL row,
+ * Q-757 r2 R3.7: a row of a view's answer is joined from several members, so the spill's read check and a member's deletion reach them all).
  * `null` when the item itself names none — a spill whose read check cannot be stated is refused.
  */
 function spacesOf(item: unknown, into: Set<string>): boolean {
@@ -138,6 +139,8 @@ function spacesOf(item: unknown, into: Set<string>): boolean {
   const own = (item as { spaceId?: unknown }).spaceId;
   if (typeof own !== 'string' || own.length === 0) return false;
   into.add(own);
+  const members = (item as { members?: unknown }).members;
+  if (Array.isArray(members)) for (const m of members) if (typeof m === 'string' && m.length > 0) into.add(m);
   const walk = (v: unknown): void => {
     if (Array.isArray(v)) { for (const x of v) walk(x); return; }
     if (v === null || typeof v !== 'object') return;

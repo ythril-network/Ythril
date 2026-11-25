@@ -436,4 +436,48 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
       assert.deepEqual(reached.filter(k => refusing.some(p => `${p.area}/${p.needs}` === k)), [], 'a body-scoped route that does not take a view reached its handler with a view');
     } finally { await server.close(); }
   });
+
+  // Q-757 (bundle-271, design r2 R1.1): the SPARQL door reads a view as its members' graphs, alike on REST and MCP, and a view owner
+  // without `files: read` gets no file statement on either door, told by `warnings`. Seen red on db66e206d: the route answers 404 and
+  // `sparql_query` is no tool. Mutation: dropping the quad source's files predicate (the file statement reaches the owner).
+  it('a view reads as SPARQL alike on REST and MCP, each member its own graph, and an owner without files: read gets no file statement', async () => {
+    const base = (s) => `https://rdf.example.org/ld/${s}/`;
+    const restore = {};
+    await d.loader.mutateConfig(cfg => {
+      for (const s of cfg.spaces.filter(x => x.id === QA || x.id === OPS)) {
+        restore[s.id] = s.meta;
+        s.meta = { ...(s.meta ?? {}), rdf: { enabled: true, base: base(s.id), vocab: `${base(s.id)}vocab/`, baseEpoch: 0 } };
+      }
+    });
+    const files = d.col(d.spaceCollection(QA, 'files'));
+    const stamp = '2026-03-04T05:06:07.000Z';
+    await files.insertOne({ _id: 'vp/plan.txt', path: 'vp/plan.txt', sizeBytes: 3, sha256: 'cd'.repeat(32), createdAt: stamp, updatedAt: stamp });
+    try {
+      const knowing = await d.mint('vp-sparql-knowledge', { [QA]: d.row({ knowledge: 'read' }), [OPS]: d.row({ knowledge: 'read' }) });
+      await mustCreate(owner.key, 'sparqlv', [QA, OPS]);
+      await mustCreate(knowing.key, 'sparqlk', [QA, OPS]);
+      const query = 'SELECT ?g ?s WHERE { GRAPH ?g { ?s ?p ?o } }';
+      const rest = (key, view) => d.rest(key, 'GET', `/api/brain/spaces/${encodeURIComponent(view)}/sparql?query=${encodeURIComponent(query)}`);
+      const answerRows = (body) => (body?.results?.bindings ?? []).map(b => `${b.g.value} ${b.s.value}`).sort();
+      const mcpBody = (a) => { try { return JSON.parse(a.text.split('\n')[0] || '{}'); } catch { return {}; } };
+      const r1 = await rest(owner.key, '@sparqlv');
+      const m = await d.mcp(owner.key, 'sparql_query', { space: '@sparqlv', query });
+      const r2 = await rest(owner.key, '@sparqlv');
+      assert.equal(r1.status, 200, `REST: ${fmt(r1)}`);
+      assert.deepEqual(answerRows(r1.body), answerRows(r2.body), 'the REST answer moved between the two sides of the sandwich');
+      assert.deepEqual(answerRows(mcpBody(m)), answerRows(r1.body), `MCP rows differ from REST's: ${m.text.slice(0, 200)}`);
+      const graphs = [...new Set(r1.body.results.bindings.map(b => b.g.value))].sort();
+      assert.deepEqual(graphs, [base(OPS), base(QA)].sort(), 'each member is its own named graph');
+      assert.ok(answerRows(r1.body).some(t => t.includes('/file/vp/plan.txt')), 'the owner with files: read is not answered the file statement');
+      const k = await rest(knowing.key, '@sparqlk');
+      const km = await d.mcp(knowing.key, 'sparql_query', { space: '@sparqlk', query });
+      assert.equal(k.status, 200, `REST knowledge-only: ${fmt(k)}`);
+      assert.deepEqual(answerRows(k.body).filter(t => t.includes('/file/')), [], 'REST: a file statement reached an owner without files: read');
+      assert.deepEqual(answerRows(mcpBody(km)).filter(t => t.includes('/file/')), [], 'MCP: a file statement reached an owner without files: read');
+      assert.ok(km.text.includes('file_triples_withheld'), `MCP does not say file statements were withheld: ${km.text.slice(0, 300)}`);
+    } finally {
+      await files.deleteOne({ _id: 'vp/plan.txt' });
+      await d.loader.mutateConfig(cfg => { for (const s of cfg.spaces.filter(x => x.id in restore)) s.meta = restore[s.id]; });
+    }
+  });
 });

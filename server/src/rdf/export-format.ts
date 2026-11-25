@@ -18,6 +18,7 @@
  */
 import { RDF_FORMATS, type RdfFormat } from './serialize.js';
 import { exportContentDisposition } from '../export/export-file-name.js';
+import { acceptRanges, weightOf } from '../http/accept-weigh.js';
 import { EXPORT_BAD_REQUEST, EXPORT_NOT_ACCEPTABLE } from '../export/export-statuses.js';
 
 /** Each format's registered media type. */
@@ -43,42 +44,6 @@ export type FormatChoice =
 /** The formats that fit a scope of `members` member graphs, from `offered`, in preference order. */
 export function formatsThatFit(members: number, offered: readonly RdfFormat[] = RDF_FORMATS): RdfFormat[] {
   return members > 1 ? SEVERAL_GRAPHS.filter(f => offered.includes(f)) : [...offered];
-}
-
-/** One range of an Accept header: `type/subtype` (either may be `*`) and its weight. */
-interface AcceptRange { type: string; subtype: string; q: number }
-
-/** The ranges of an Accept header; a malformed range is skipped, a malformed q is weight 1 (the header's default). */
-function acceptRanges(header: string): AcceptRange[] {
-  const out: AcceptRange[] = [];
-  for (const part of header.split(',')) {
-    const [range, ...params] = part.split(';').map(s => s.trim());
-    const m = /^([A-Za-z0-9!#$&^_.+*-]+)\/([A-Za-z0-9!#$&^_.+*-]+)$/.exec(range ?? '');
-    if (!m) continue;
-    let q = 1;
-    for (const p of params) {
-      const qm = /^q\s*=\s*([0-9](?:\.[0-9]{0,3})?)$/i.exec(p);
-      if (qm) q = Math.min(1, Number(qm[1]));
-    }
-    out.push({ type: m[1]!.toLowerCase(), subtype: m[2]!.toLowerCase(), q });
-  }
-  return out;
-}
-
-/** How specifically a range names a media type (RFC 9110 §12.5.1): the more specific range decides the type's weight. */
-const SPECIFICITY = Object.freeze({ exact: 2, subtypes: 1, anything: 0, none: -1 });
-
-/** The weight `ranges` give `mediaType`: the most specific matching range decides; none matching is 0. */
-function weightOf(mediaType: string, ranges: readonly AcceptRange[]): number {
-  const [type, subtype] = mediaType.split('/') as [string, string];
-  let best: { specificity: number; q: number } | null = null;
-  for (const r of ranges) {
-    const specificity = r.type === type && r.subtype === subtype ? SPECIFICITY.exact : r.type === type && r.subtype === '*' ? SPECIFICITY.subtypes
-      : r.type === '*' && r.subtype === '*' ? SPECIFICITY.anything : SPECIFICITY.none;
-    if (specificity < 0) continue;
-    if (best === null || specificity > best.specificity) best = { specificity, q: r.q };
-  }
-  return best?.q ?? 0;
 }
 
 const NAMES: Readonly<Record<RdfFormat, string>> = { turtle: 'Turtle', trig: 'TriG', nquads: 'N-Quads', jsonld: 'JSON-LD' };
