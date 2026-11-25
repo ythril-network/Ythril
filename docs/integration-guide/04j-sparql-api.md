@@ -61,9 +61,10 @@ Parameters, on both doors:
   Member ids are percent-encoded and comma-separated. MCP says the same in the summary's `warnings`:
   `[{ "code": "members_left_out", "members": [...] }, { "code": "file_triples_withheld", "members": [...] }]`.
 
-**MCP** answers the body REST would give (SPARQL results JSON, or Turtle) in the first text block; the summary (`form`, `rows`,
-`returned`, `truncated`, the budget used, `warnings`, `remainder`) in the second and in `structuredContent`. The size ceilings admit whole
-rows (or statements) only; what they cut is kept for a day as a [read spill](04a-recall-api.md), read with `read_spill`
+**MCP** answers the body in the first text block, once: SPARQL results JSON for a SELECT or ASK, the admitted statements as N-Quads (one per
+line, `mediaType: application/n-quads`) for a CONSTRUCT or DESCRIBE. The summary (`form`, `rows`, `returned`, `truncated`, the budget used,
+`warnings`, `remainder`) is in the second block and in `structuredContent`, which does not repeat the rows. `charsReturned` and `bytesReturned`
+measure the text returned. The size ceilings admit whole rows (or statements) only; what they cut is kept for a day as a [read spill](04a-recall-api.md), read with `read_spill`
 (`remainder.spillId`). Each spilled item is `{ "spaceId", "members", "row" }`; deleting any of those spaces deletes the spill.
 
 ## Bounds

@@ -6,7 +6,7 @@
  *
  * - **Two doors that differ.** Both run `rdf/sparql-answer.ts`, which owns the parameters, the members, the bounds, every refusal's sentence
  *   and code and the bytes of the answer; the dispatcher leaves those arguments to it (`argumentsJudgedByTheAct`). The answer body is the one
- *   REST answers (SPARQL results JSON for SELECT and ASK, Turtle for CONSTRUCT and DESCRIBE).
+ *   REST answers for SELECT and ASK (SPARQL results JSON); for CONSTRUCT and DESCRIBE it is the admitted statements as N-Quads, one per line.
  * - **A budget that cuts a row in half** (decision 04). The size ceilings (`maxChars`, `maxBytes`, `maxTokens`, MCP only: an agent pays for
  *   the bytes in its own context) admit whole rows or statements only; what they cut is kept as a read spill (`read_spill`), each row
  *   `{spaceId, members, row}`, so the spill's read check and a space's deletion reach every member it came from.
@@ -29,7 +29,7 @@ import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
 import { createRdfWriter, RdfWriteError } from '../../rdf/serialize.js';
 import type { Quad } from '../../rdf/literals.js';
 import {
-  answerSparql, prepareSparql, renderGraph, resultsJson, unwritable, holdsTriple, SPARQL_ENDPOINT_CODES, SPARQL_MEMBERS_LEFT_OUT, SPARQL_FILE_TRIPLES_WITHHELD, type PreparedSparql, type SparqlAnswerRefusal, type SparqlQueryInput,
+  answerSparql, prepareSparql, resultsJson, unwritable, holdsTriple, SPARQL_ENDPOINT_CODES, SPARQL_MEMBERS_LEFT_OUT, SPARQL_FILE_TRIPLES_WITHHELD, type PreparedSparql, type SparqlAnswerRefusal, type SparqlQueryInput,
 } from '../../rdf/sparql-answer.js';
 
 const STRINGS = { type: 'array', items: { type: 'string' } } as const;
@@ -96,9 +96,13 @@ export const sparql_queryTool: ToolHandler = {
   name: 'sparql_query',
   description: 'Ask a SPARQL 1.1 query (SELECT, ASK, CONSTRUCT, DESCRIBE) of the records of a space, read at query time. Name a personal view '
     + 'as `space` to query several spaces at once: the default graph is the union of the member spaces you read, and each member is its own '
+/** What a graph answer (CONSTRUCT, DESCRIBE) is written as: the admitted statements, one N-Quads line each. */
+const GRAPH_MEDIA_TYPE = 'application/n-quads';
+
     + 'named graph (`GRAPH ?g`). Same as GET/POST /api/brain/spaces/:spaceId/sparql.\n\n'
-    + 'ANSWER: the first text block is the answer body REST gives: SPARQL results JSON for SELECT and ASK, Turtle for CONSTRUCT and '
-    + 'DESCRIBE. The second block and `structuredContent` hold the summary: the form, the rows answered, the budget used, and `warnings` '
+    + 'ANSWER: the first text block is the answer body, sent once: SPARQL results JSON for SELECT and ASK (`head`, and `results` or '
+    + '`boolean`), the statements as N-Quads, one per line, for CONSTRUCT and DESCRIBE (`mediaType: application/n-quads`). The second block '
+    + 'and `structuredContent` hold the summary alone: the form, the rows answered, the budget used (of the text returned), and `warnings` '
     + '(`members_left_out`: view members with RDF off or unsettled names; `file_triples_withheld`: members whose file statements need '
     + '`files: read`).\n\n'
     + 'WHOLE OR REFUSED: an answer over `sparql.maxResults` rows (or the lower `limit` you send) is refused (413, `sparql_too_many_results`), '
@@ -168,9 +172,15 @@ export const sparql_queryTool: ToolHandler = {
       throw err;
     }
     const outcome = applyBudget(lines, budget);
-    const document = renderGraph('turtle', c.quads.slice(0, outcome.returned.length));
-    if (isRefusal(document)) throw refused(document);
-    const summary = { ...head, mediaType: document.contentType, ...budgetSummary(outcome, budget), ...(await spillCut(ctx, spaces, outcome.remainder, request)) };
-    return { content: [{ type: 'text' as const, text: document.body }, { type: 'text' as const, text: JSON.stringify(summary) }], structuredContent: { ...summary } };
+    const document = outcome.returned.map(line => `${line}\n`).join('');
+    const summary = {
+      ...head, mediaType: GRAPH_MEDIA_TYPE, ...budgetSummary(outcome, budget),
+      charsReturned: document.length, bytesReturned: Buffer.byteLength(document, 'utf8'),
+      ...(await spillCut(ctx, spaces, outcome.remainder, request)),
+    };
+    return { content: [{ type: 'text' as const, text: document }, { type: 'text' as const, text: JSON.stringify(summary) }], structuredContent: { ...summary } };
   },
 };
+    // The answer is the admitted N-Quads lines and nothing else (a Turtle document carries a prefix block no ceiling was measured against):
+    // the budget admits whole lines, with the JSON quoting each is metered with, so the text stays under the ceiling, and the sizes the summary
+    // states are those of the text returned.
