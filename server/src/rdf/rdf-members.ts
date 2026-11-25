@@ -7,6 +7,8 @@
  *
  * - **A read that shows file statements to a token without `files: read`.** `files` is decided here, per member, once; a reader that walks
  *   the file kind asks it, so no door can forget the right.
+ * - **A read of a space the caller cannot read.** {@link rdfMembers} skips every space its caller holds no `knowledge: read` on (the one
+ *   question `mayReadArea` asks, the area a view's members are narrowed by), and does not name it: it trusts no door to have asked.
  * - **A member read under unsettled names.** A member with RDF off, a contested or shared base, a term clash or an address no document can
  *   carry is left out and named with the code and status the export answers for it, never read under names that are not its own.
  * - **A row that is not a record read as one.** {@link rdfRowFilter} is the filter every reader applies to a kind's collection: a file row
@@ -45,7 +47,8 @@ export interface RdfMemberLeftOut {
 export interface RdfMembers { members: RdfMember[]; leftOut: RdfMemberLeftOut[] }
 
 /**
- * The members of `spaces` (the spaces the caller's guard accepted: one space, or a view's readable members) as RDF, for `caller`.
+ * The members of `spaces` (the spaces the caller's guard accepted: one space, or a view's readable members) as RDF, for `caller`; a space
+ * the caller cannot read in the knowledge area is dropped here, whatever the door asked.
  * `fingerprintOf` is the door's schema fingerprint (`rdf-space-state.ts` says why it is handed in); the stamp's own by default.
  */
 export function rdfMembers(spaces: readonly string[], caller: RdfCaller | undefined, fingerprintOf: FingerprintOf = schemaFingerprintOf): RdfMembers {
@@ -54,6 +57,8 @@ export function rdfMembers(spaces: readonly string[], caller: RdfCaller | undefi
   const members: RdfMember[] = [];
   const leftOut: RdfMemberLeftOut[] = [];
   for (const space of spaces) {
+    // A space the caller cannot read in the knowledge area is no member and is not named (naming it says it exists and how its RDF is settled).
+    if (!mayReadArea(rights, space, 'knowledge')) continue;
     const state = rdfSpaceState(cfg, space, caller, fingerprintOf);
     if (state.ok) {
       members.push({ space, meta: state.meta, fingerprint: state.fingerprint, files: mayReadArea(rights, space, 'files') });
