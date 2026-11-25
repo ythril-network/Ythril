@@ -1,5 +1,6 @@
 import type { TokenRights } from './rights-shape.js';
 import type { BodyLimitsConfig } from './body-limits.js';
+import type { SparqlLimitsConfig } from './sparql-limits.js';
 import type { ModelSlot, ModelSlotsConfig } from './model-slots.js';
 import type { AssistModelExtras } from './assist-backend.js';
 import type { MachineMadeSource } from '../files/machine-made-sources.js';
@@ -844,7 +845,7 @@ export interface AuditConfig {
 // because this file was where types went, which is the god-file failure the ratchet describes: every
 // change lands in the same place because that is where the code already is.
 
-export interface Config extends BodyLimitsConfig {
+export interface Config extends BodyLimitsConfig, SparqlLimitsConfig {
   instanceId: string;
   instanceLabel: string;
   publicUrl?: string;         // optional canonical public URL for this brain instance
