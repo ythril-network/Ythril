@@ -39,7 +39,7 @@ import { fromRdfJs } from './rdf-js-terms.js';
 import { createRdfWriter, rdfVersionOf, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentType, RDF_FORMAT_NOT_ACCEPTABLE } from './export-format.js';
 import type { Quad } from './literals.js';
-import { RDF_NOT_ENABLED, RDF_BASE_SHARED, RDF_UNWRITABLE, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
+import { RDF_NOT_ENABLED, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_UNWRITABLE, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
 
 /** No `query`, or more than one. */
 export const SPARQL_NO_QUERY = 'sparql_no_query';
@@ -61,7 +61,7 @@ export const SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS = 415;
  */
 export const SPARQL_ENDPOINT_CODES: readonly string[] = Object.freeze([
   ...SPARQL_REFUSAL_CODES, SPARQL_NO_QUERY, SPARQL_BAD_LIMIT, SPARQL_BAD_DATASET, SPARQL_NOT_ACCEPTABLE, SPARQL_UNSUPPORTED_MEDIA_TYPE,
-  RDF_NOT_ENABLED, 'rdf_base_conflict', RDF_BASE_SHARED, 'rdf_term_clash', RDF_UNWRITABLE, RDF_FORMAT_NOT_ACCEPTABLE,
+  RDF_NOT_ENABLED, 'rdf_base_conflict', RDF_BASE_SHARED, RDF_BASE_NESTED, 'rdf_term_clash', RDF_UNWRITABLE, RDF_FORMAT_NOT_ACCEPTABLE,
 ]);
 
 /** What an answer says it left out, as MCP's `warnings` name it (REST says the same in headers). */

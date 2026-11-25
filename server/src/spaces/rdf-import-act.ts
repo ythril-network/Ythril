@@ -146,7 +146,7 @@ export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   RDF_UPLOAD_TOO_SLOW, RDF_UPLOAD_COOLDOWN,
   'rdf_malformed', 'rdf_relative_iri', 'rdf_remote_context', 'rdf_jsonld_not_streamable', 'rdf_bound_exceeded', 'rdf_gzip_invalid',
   'rdf_unsupported_format', 'rdf_unsupported', 'rdf_source_failed',
-  'rdf_not_enabled', 'rdf_base_conflict', 'rdf_base_shared', 'rdf_term_clash', 'rdf_unwritable', 'space_not_found',
+  'rdf_not_enabled', 'rdf_base_conflict', 'rdf_base_shared', 'rdf_base_nested', 'rdf_term_clash', 'rdf_unwritable', 'space_not_found',
   // With `schema` set (Q-955): the schema door's own codes, answered by the shared step for the same causes.
   'schema_rdf_bad_param', 'schema_rdf_rung', 'schema_rdf_networked', 'schema_rdf_not_empty', 'schema_rdf_changed', 'schema_rdf_refused',
 ]);

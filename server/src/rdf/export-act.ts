@@ -48,7 +48,7 @@ import { graphIri, prefixesFor, recordAddressable, recordIri, versionIri } from 
 import { createRdfWriter, rdfVersionOf, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
 import {
-  RDF_BASE_SHARED, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
+  RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
 } from './rdf-space-state.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 import { MIN_TRANSFER_BYTES_PER_SECOND } from '../util/pace-window.js';
@@ -90,7 +90,7 @@ export const RDF_EXPORT_INCOMPLETE = 'rdf_export_incomplete';
 /** Every refusal code the records export answers, for the tool's description and the guide. */
 export const RDF_EXPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   RDF_BAD_FORMAT, 'rdf_format_not_acceptable', RDF_BAD_EDGE_DETAILS, RDF_BAD_AFTER, RDF_BAD_LIMIT, RDF_BAD_BUDGET,
-  RDF_NOT_ENABLED, 'rdf_base_conflict', RDF_BASE_SHARED, 'rdf_term_clash', RDF_UNWRITABLE, RDF_EXPORT_BUSY, RDF_EXPORT_INCOMPLETE,
+  RDF_NOT_ENABLED, 'rdf_base_conflict', RDF_BASE_SHARED, RDF_BASE_NESTED, 'rdf_term_clash', RDF_UNWRITABLE, RDF_EXPORT_BUSY, RDF_EXPORT_INCOMPLETE,
 ]);
 
 /** The edge forms, by their parameter value. */

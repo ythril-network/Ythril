@@ -98,7 +98,7 @@ text, and a `503` adds `retryAfterSeconds` and `Retry-After`.
 | 400 | `sparql_bad_dataset` | `default-graph-uri` or `named-graph-uri` is no text. |
 | 406 | `sparql_not_acceptable` | `Accept` names no format a SELECT or ASK answers in. |
 | 406 | `rdf_format_not_acceptable` | `Accept` names no format a CONSTRUCT or DESCRIBE answers in. |
-| 409 | `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_term_clash` | A space read alone has RDF off or unsettled names (the export's own refusals; a view leaves such a member out and names it). |
+| 409 | `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_base_nested`, `rdf_term_clash` | A space read alone has RDF off or unsettled names (the export's own refusals; a view leaves such a member out and names it). |
 | 409 | `rdf_unwritable` | The answer holds a term no document of the format can carry (an IRI with a character an IRI cannot hold, a triple term in JSON-LD). |
 | 413 | `sparql_query_too_large` | The text is over 64 KiB, or a form holds more parameters than a query takes. |
 | 413 | `sparql_too_many_results` | The answer holds more than `sparql.maxResults` rows, or more than `limit`. |
