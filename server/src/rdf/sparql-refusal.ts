@@ -27,6 +27,13 @@ export const SPARQL_REFUSAL_CODES: readonly string[] = Object.freeze([
   SPARQL_TOO_MUCH_READ, SPARQL_TOO_MANY_RESULTS, SPARQL_STORE_UNAVAILABLE, SPARQL_BUSY,
 ]);
 
+/** The statuses a SPARQL read refuses with. */
+export const SPARQL_BAD_REQUEST = 400;
+export const SPARQL_TOO_LARGE = 413;
+export const SPARQL_UNAVAILABLE = 503;
+/** How deep a refusal is looked for in the causes an engine wrapped it in. */
+const CAUSE_DEPTH_MAX = 8;
+
 /** The wait a query ended by its deadline or a store that did not answer is told to keep before trying again, in seconds. */
 export const SPARQL_RETRY_AFTER_SECONDS = 5;
 
@@ -51,7 +58,7 @@ export class SparqlRefusal extends Error {
 /** Is `err` a SPARQL refusal, here or as the cause an engine wrapped it in? Answers the refusal itself. */
 export function sparqlRefusalOf(err: unknown): SparqlRefusal | null {
   let e: unknown = err;
-  for (let depth = 0; depth < 8 && e !== null && e !== undefined; depth++) {
+  for (let depth = 0; depth < CAUSE_DEPTH_MAX && e !== null && e !== undefined; depth++) {
     if (e instanceof SparqlRefusal) return e;
     e = (e as { cause?: unknown }).cause;
   }
@@ -59,9 +66,9 @@ export function sparqlRefusalOf(err: unknown): SparqlRefusal | null {
 }
 
 /** The deadline passed: 503, try again. */
-export const timeoutRefusal = (): SparqlRefusal => new SparqlRefusal(503, SPARQL_TIMEOUT,
+export const timeoutRefusal = (): SparqlRefusal => new SparqlRefusal(SPARQL_UNAVAILABLE, SPARQL_TIMEOUT,
   'The query did not finish inside the server\'s time bound (sparql.timeoutMs), so nothing of it is answered: narrow it or try again', SPARQL_RETRY_AFTER_SECONDS);
 
 /** The read cap passed: 413. */
-export const tooMuchReadRefusal = (cap: number): SparqlRefusal => new SparqlRefusal(413, SPARQL_TOO_MUCH_READ,
+export const tooMuchReadRefusal = (cap: number): SparqlRefusal => new SparqlRefusal(SPARQL_TOO_LARGE, SPARQL_TOO_MUCH_READ,
   `The query reads more than ${cap} records (sparql.maxRecordsRead), so nothing of it is answered: bind more of its patterns`);

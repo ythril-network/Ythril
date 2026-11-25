@@ -42,10 +42,15 @@ export interface SparqlLimits { timeoutMs: number; maxRecordsRead: number; maxRe
 export const SPARQL_LIMIT_DEFAULTS: Readonly<SparqlLimits> = Object.freeze({ timeoutMs: 30_000, maxRecordsRead: 200_000, maxResults: 10_000 });
 
 /** The bounds each key is held to, inclusive. */
+const TIMEOUT_MS_MIN = 1_000;
+const TIMEOUT_MS_MAX = 300_000;
+const RECORDS_READ_MIN = 1_000;
+const RECORDS_READ_MAX = 10_000_000;
+const RESULTS_MAX = 1_000_000;
 export const SPARQL_LIMIT_BOUNDS: Readonly<Record<keyof SparqlLimits, { min: number; max: number }>> = Object.freeze({
-  timeoutMs: { min: 1_000, max: 300_000 },
-  maxRecordsRead: { min: 1_000, max: 10_000_000 },
-  maxResults: { min: 1, max: 1_000_000 },
+  timeoutMs: { min: TIMEOUT_MS_MIN, max: TIMEOUT_MS_MAX },
+  maxRecordsRead: { min: RECORDS_READ_MIN, max: RECORDS_READ_MAX },
+  maxResults: { min: 1, max: RESULTS_MAX },
 });
 
 const KEYS = Object.keys(SPARQL_LIMIT_BOUNDS) as (keyof SparqlLimits)[];

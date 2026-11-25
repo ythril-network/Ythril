@@ -29,6 +29,7 @@ import assert from 'node:assert/strict';
 import net from 'node:net';
 import { Store, DataFactory } from 'n3';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const { namedNode, literal, quad } = DataFactory;
 const G = 'https://rdf.example.org/ld/netspace/';
@@ -72,11 +73,10 @@ async function attempt(text, protocol) {
 describe('a SPARQL query never reaches the network', () => {
   before(async () => {
     engine = await loadDistModule('../../server/dist/rdf/sparql-engine.js', import.meta.url);
-    listener = net.createServer((socket) => { connections++; socket.destroy(); });
-    await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
-    url = `http://127.0.0.1:${listener.address().port}/sparql`;
+    listener = await listenOnLoopback(net.createServer((socket) => { connections++; socket.destroy(); }));
+    url = `http://127.0.0.1:${listener.port}/sparql`;
   });
-  after(async () => { await new Promise(resolve => listener?.close(resolve)); });
+  after(async () => { await listener?.close(); });
 
   for (const [what, , code] of REFUSED('http://127.0.0.1:1/')) {
     it(`${what} is refused as ${code}, and no connection is made`, async () => {

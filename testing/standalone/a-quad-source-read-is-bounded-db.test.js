@@ -29,6 +29,10 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf } from './_rdf-export-doors.mjs';
 import { drain } from './_quad-source-fixture.mjs';
+import { holdsWithin } from '../_shared/wait-for.mjs';
+
+const CLOSE_WITHIN_MS = 2_000;
+const CLOSE_PROBE_MS = 50;
 
 const skip = await mongoSkipReason();
 const BULK = 'qbound';
@@ -119,11 +123,8 @@ describe('the quad source read is bounded and its estimate is never a false empt
     stream.pause();
     assert.ok(await openCursors() > baseline, 'no cursor was open while the stream was read (the fixture is too small to hold one)');
     stream.destroy();
-    let open = Infinity;
-    for (let i = 0; i < 40 && open > baseline; i++) {
-      await new Promise(r => setTimeout(r, 50));
-      open = await openCursors();
-    }
-    assert.equal(open, baseline, `the cursor stayed open after its stream was destroyed: ${(await idleCursors()).join(' ')}`);
+    // Closed at once: the server's own idle timeout is ten minutes, so two seconds can only pass through the source's close.
+    const closed = await holdsWithin(async () => (await openCursors()) <= baseline, CLOSE_WITHIN_MS, CLOSE_PROBE_MS);
+    assert.ok(closed, `the cursor stayed open after its stream was destroyed: ${(await idleCursors()).join(' ')}`);
   });
 });

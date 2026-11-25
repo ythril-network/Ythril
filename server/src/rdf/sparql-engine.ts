@@ -27,7 +27,7 @@ import { QueryEngine } from '@comunica/query-sparql-rdfjs';
 import { DataFactory } from 'n3';
 import { MAX_PATTERN_LENGTH, hasReDoSRisk } from '../util/redos.js';
 import {
-  SPARQL_FEDERATION_REFUSED, SPARQL_MALFORMED, SPARQL_PATTERN_REFUSED, SPARQL_QUERY_TOO_LARGE, SPARQL_UPDATE_NOT_HERE, SparqlRefusal, sparqlRefusalOf,
+  SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_FEDERATION_REFUSED, SPARQL_MALFORMED, SPARQL_PATTERN_REFUSED, SPARQL_QUERY_TOO_LARGE, SPARQL_UPDATE_NOT_HERE, SparqlRefusal, sparqlRefusalOf,
   timeoutRefusal,
 } from './sparql-refusal.js';
 
@@ -83,6 +83,20 @@ function parsePosition(message: string): { line?: number; column?: number } {
   };
 }
 
+/**
+ * The refusal of a text the parser threw on: where it stopped, as two numbers read from the parser's words, and nothing else of them (the
+ * words repeat the query's line, which the caller may not want in a body or a log).
+ */
+function malformedRefusal(err: unknown): SparqlCheckRefusal {
+  const where = parsePosition(err instanceof Error ? err.message : '');
+  const line = where.line !== undefined ? ` at line ${Number(where.line)}` : '';
+  const column = where.line !== undefined && where.column !== undefined ? `, column ${Number(where.column)}` : '';
+  return {
+    status: SPARQL_BAD_REQUEST, code: SPARQL_MALFORMED, error: `The query does not parse as SPARQL 1.1${line}${column}`,
+    ...(where.line !== undefined ? { line: where.line } : {}), ...(where.column !== undefined ? { column: where.column } : {}),
+  };
+}
+
 /** The literal text of a term expression, or null when the argument is anything else (a variable, a call). */
 function literalOf(arg: unknown): string | null {
   if (!isRecord(arg) || arg['type'] !== 'expression' || arg['subType'] !== 'term') return null;
@@ -99,10 +113,10 @@ function patternRefusal(node: Record<string, unknown>): { refusal: SparqlCheckRe
   const pattern = literalOf(args[1]);
   const flags = op === 'regex' ? args[2] : args[3];
   const what = op.toUpperCase();
-  if (pattern === null) return refused(400, SPARQL_PATTERN_REFUSED, `${what} takes its pattern as a literal here, never from a variable or a function`);
-  if (flags !== undefined && literalOf(flags) === null) return refused(400, SPARQL_PATTERN_REFUSED, `${what} takes its flags as a literal here, never from a variable or a function`);
-  if (pattern.length > MAX_PATTERN_LENGTH) return refused(400, SPARQL_PATTERN_REFUSED, `${what} takes a pattern of at most ${MAX_PATTERN_LENGTH} characters`);
-  if (hasReDoSRisk(pattern)) return refused(400, SPARQL_PATTERN_REFUSED, `${what}'s pattern has a nested or overlapping quantifier, which can take time exponential in the text it reads`);
+  if (pattern === null) return refused(SPARQL_BAD_REQUEST, SPARQL_PATTERN_REFUSED, `${what} takes its pattern as a literal here, never from a variable or a function`);
+  if (flags !== undefined && literalOf(flags) === null) return refused(SPARQL_BAD_REQUEST, SPARQL_PATTERN_REFUSED, `${what} takes its flags as a literal here, never from a variable or a function`);
+  if (pattern.length > MAX_PATTERN_LENGTH) return refused(SPARQL_BAD_REQUEST, SPARQL_PATTERN_REFUSED, `${what} takes a pattern of at most ${MAX_PATTERN_LENGTH} characters`);
+  if (hasReDoSRisk(pattern)) return refused(SPARQL_BAD_REQUEST, SPARQL_PATTERN_REFUSED, `${what}'s pattern has a nested or overlapping quantifier, which can take time exponential in the text it reads`);
   return null;
 }
 
@@ -115,11 +129,11 @@ function walkRefusal(root: unknown): { refusal: SparqlCheckRefusal } | null {
     const node = stack.pop();
     if (!isRecord(node) || seen.has(node)) continue;
     seen.add(node);
-    if (++visited > WALK_NODES_MAX) return refused(413, SPARQL_QUERY_TOO_LARGE, 'The query is too large to check');
+    if (++visited > WALK_NODES_MAX) return refused(SPARQL_TOO_LARGE, SPARQL_QUERY_TOO_LARGE, 'The query is too large to check');
     const type = node['type'];
-    if (type === 'service') return refused(400, SPARQL_FEDERATION_REFUSED, 'SERVICE is not offered: this endpoint answers from this server\'s own records and never queries another');
+    if (type === 'service') return refused(SPARQL_BAD_REQUEST, SPARQL_FEDERATION_REFUSED, 'SERVICE is not offered: this endpoint answers from this server\'s own records and never queries another');
     if (typeof type === 'string' && UPDATE_OPERATIONS.has(type)) {
-      return refused(400, SPARQL_UPDATE_NOT_HERE, 'This endpoint answers queries only: an update (INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, ADD, MOVE, COPY) is not offered here');
+      return refused(SPARQL_BAD_REQUEST, SPARQL_UPDATE_NOT_HERE, 'This endpoint answers queries only: an update (INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, ADD, MOVE, COPY) is not offered here');
     }
     const pattern = patternRefusal(node);
     if (pattern) return pattern;
@@ -147,16 +161,14 @@ function withDataset(algebra: SparqlAlgebra, dataset: SparqlProtocolDataset): Sp
  */
 export async function checkSparqlAlgebra(text: string, dataset: SparqlProtocolDataset = {}): Promise<{ algebra: SparqlAlgebra } | { refusal: SparqlCheckRefusal }> {
   if (Buffer.byteLength(text, 'utf8') > SPARQL_QUERY_MAX_BYTES) {
-    return refused(413, SPARQL_QUERY_TOO_LARGE, `The query is longer than ${SPARQL_QUERY_MAX_BYTES} bytes`);
+    return refused(SPARQL_TOO_LARGE, SPARQL_QUERY_TOO_LARGE, `The query is longer than ${SPARQL_QUERY_MAX_BYTES} bytes`);
   }
   let algebra: SparqlAlgebra;
   try {
     const explained = await engineOf().explain(text, contextFor(EMPTY_SOURCE), 'parsed');
     algebra = explained.data as SparqlAlgebra;
   } catch (err) {
-    const where = parsePosition(err instanceof Error ? err.message : String(err));
-    const at = where.line !== undefined ? ` at line ${where.line}${where.column !== undefined ? `, column ${where.column}` : ''}` : '';
-    return { refusal: { status: 400, code: SPARQL_MALFORMED, error: `The query does not parse as SPARQL 1.1${at}`, ...where } };
+    return { refusal: malformedRefusal(err) };
   }
   const refusal = walkRefusal(algebra);
   if (refusal) return refusal;
@@ -235,7 +247,7 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
   });
 
   const kind = raw.resultType === 'bindings' ? 'bindings' : raw.resultType === 'boolean' ? 'boolean' : raw.resultType === 'quads' ? 'quads' : null;
-  if (kind === null) { finish(); throw new SparqlRefusal(400, SPARQL_UPDATE_NOT_HERE, 'This endpoint answers queries only'); }
+  if (kind === null) { finish(); throw new SparqlRefusal(SPARQL_BAD_REQUEST,SPARQL_UPDATE_NOT_HERE, 'This endpoint answers queries only'); }
   return {
     kind,
     async rows(limit = Infinity) {
