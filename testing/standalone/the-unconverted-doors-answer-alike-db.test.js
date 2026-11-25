@@ -158,9 +158,19 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
       spaceId: S, types: ['entity', 'fact', 'chrono'].map(kind => ({ kind, type: '*' })), steps: [], source: { kind: 'act' },
     });
     assert.equal(started.ok, true, JSON.stringify(started));
-    return await waitForValue(async () => { const d = await door.runDoc(S); return d && d.state !== 'running' && d.startedAt !== before?.startedAt ? d : null; },
+    const ended = await waitForValue(async () => { const d = await door.runDoc(S); return d && d.state !== 'running' && d.startedAt !== before?.startedAt ? d : null; },
       20_000, 100, undefined, { what: 'the second run to end' });
+    keepStill();
+    return ended;
   }
+
+  /**
+   * End the watcher's timer, which every start of a run arms again. Its tick (every five seconds) removes the item of a record that is gone, so
+   * a tick that landed between the calls of one `alike` (act, router, tool) gave the doors different states: the list said `open: 4` where the act
+   * said `open: 5`, and one door's bulk dismiss met `unconverted_changed` where another's dismissed (Full run 45657134948, cases 17 and 18: the
+   * item of the deleted record p2, left listed by the case before). The state each case asks about is the one the case arranged, never one a timer moved.
+   */
+  const keepStill = () => convert.stopSchemaConvertWatcher();
 
   before(async () => {
     door = await openConvertDoor({ name: 'b284unconv', spaces: [S, OTHER], metaOf: () => META });
@@ -185,6 +195,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     const done = await waitForValue(async () => { const d = await door.runDoc(S); return d && d.state !== 'running' ? d : null; },
       20_000, 100, undefined, { what: 'the run to end' });
     assert.equal(done.state, 'complete', `the fixture run did not complete: ${JSON.stringify(done)}`);
+    keepStill();
 
     // The newest item is c1, then f1, o1, p2, p1: the run writes them in one millisecond, so the order is set here, not left to a tie.
     const rows = await door.itemRows(S);
