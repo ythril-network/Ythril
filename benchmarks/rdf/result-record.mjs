@@ -9,6 +9,8 @@
  *   that was already there, ends in an error and the earlier bytes stay. There is no overwrite mode.
  * - **A truncated record read as a whole one.** The last key is `end`, with a fixed marker, and the writer
  *   checks the text it is about to write ends with it.
+ * - **A run that answered something else reading as a run.** `valid` is required; a Ythril run whose row counts differ
+ *   from Oxigraph's is `valid: false` with `invalidQueries` naming each, and the comparison refuses it.
  * - **A failed query reading as a fast one.** A query holds timings or an `error`, never neither, so an
  *   engine that answered 404 for a query is a row saying so.
  */
@@ -37,6 +39,16 @@ export function buildRecord(input) {
   for (const [name, q] of Object.entries(input.queries)) {
     const timed = typeof q.median === 'number' && typeof q.p95 === 'number';
     if (!timed && !q.error) throw new Error(`query ${name} has neither timings nor an error`);
+  }
+  // Whether the run answered what Oxigraph answered (validity.mjs): the Oxigraph record is the reference and is
+  // valid; a Ythril record that differs names the queries, and a valid one names none.
+  if (typeof input.valid !== 'boolean') throw new Error('result record needs valid: true or false (was the run judged against Oxigraph\'s row counts?)');
+  const invalidQueries = input.invalidQueries;
+  if (input.valid === false && (!Array.isArray(invalidQueries) || invalidQueries.length === 0)) {
+    throw new Error('an invalid result record must name the differing queries in invalidQueries');
+  }
+  if (input.valid === true && invalidQueries !== undefined && invalidQueries.length > 0) {
+    throw new Error('a valid result record has no invalidQueries');
   }
   const hasLoad = typeof input.loadMs === 'number';
   if (!hasLoad && !input.loadRefusal) {

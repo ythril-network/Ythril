@@ -3,7 +3,11 @@
  * Runs the 11 BSBM Explore queries against one engine's SPARQL endpoint and writes one result record.
  *
  *   node benchmarks/rdf/run.mjs --engine oxigraph|ythril --size 1000 [--results <dir>] [--warmups 3] [--runs 20]
- *                               [--ythril-commit <sha>]
+ *                               [--ythril-commit <sha>] [--against <oxigraph record>]
+ *
+ * A Ythril run maps the parameters to the records Ythril minted (ythril-params.mjs) before any run, and is judged
+ * against the Oxigraph record named by `--against` (required): the record's `valid` says whether every query, on
+ * every run, answered Oxigraph's row count; graph answers (Q9, Q12) count their statements by parsing.
  *
  * The endpoint, and for a scratch Ythril its token, come from the state file `load.mjs` wrote. Parameters are the
  * ones the BSBM test driver chose (`params.json`, from `generate.mjs`): run k of every query uses parameter set k,
@@ -20,26 +24,15 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { PIN, REPO_ROOT, TOOLS_SUBDIR, parseArgs, variantOf, workDir } from './env.mjs';
 import { statePath } from './oxigraph.mjs';
+import { countRows } from './answer-rows.mjs';
 import { substitute } from './params.mjs';
 import { acceptFor, loadTemplates } from './queries.mjs';
 import { buildRecord, writeRecord } from './result-record.mjs';
 import { summarize } from './stats.mjs';
+import { judgeValidity } from './validity.mjs';
+import { lookupQueries, mapParameters, parameterAddresses, tableFromBindings } from './ythril-params.mjs';
 
 const REQUEST_TIMEOUT_MS = 120_000;
-
-/**
- * Counts the rows a response carries, to make two engines' answers comparable at a glance. A Turtle graph has no
- * cheap triple count (prefixes, `;` and `,` lists), so its row count is null and `bytes` is the comparison.
- */
-function countRows(text, accept) {
-  if (accept === 'application/n-triples') return text.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
-  try {
-    const j = JSON.parse(text);
-    if (j.results?.bindings) return j.results.bindings.length;
-    if (typeof j.boolean === 'boolean') return 1;
-  } catch { /* not JSON */ }
-  return null;
-}
 
 async function ask(endpoint, token, query, accept) {
   const t0 = performance.now();
@@ -52,7 +45,12 @@ async function ask(endpoint, token, query, accept) {
     });
     const text = await res.text();
     const ms = performance.now() - t0;
-    if (res.status >= 200 && res.status < 300) return { ok: true, ms, rows: countRows(text, accept), bytes: Buffer.byteLength(text) };
+    if (res.status >= 200 && res.status < 300) {
+      // A graph answer is counted by parsing it, on both engines; an answer that does not parse is that query's error.
+      try { return { ok: true, ms, rows: countRows(text, accept), bytes: Buffer.byteLength(text) }; } catch (err) {
+        return { ok: false, error: { code: 'unparsable-answer', status: res.status, message: err.message.slice(0, 300) } };
+      }
+    }
     let code = res.status;
     let message = text.slice(0, 300);
     try { const j = JSON.parse(text); code = j.code ?? j.error?.code ?? res.status; message = j.message ?? j.error?.message ?? j.error ?? message; } catch { /* plain text body */ }
@@ -74,20 +72,43 @@ async function runQueries({ engine, endpoint, token, templates, paramsFile, warm
     let errors = 0;
     let rows = null;
     let bytes = null;
+    const rowsPerRun = [];
     for (let k = 0; k < warmups + runs; k++) {
       const r = await ask(endpoint, token, substitute(t.text, sets[k]), accept);
+      rowsPerRun.push(r.ok ? r.rows : null);
       if (!r.ok) { errors++; firstError ??= r.error; continue; }
       if (k >= warmups) { times.push(r.ms); rows ??= r.rows; bytes ??= r.bytes; }
     }
     queries[name] = times.length
-      ? { ...summarize(times), rows, bytes, errors, ...(firstError ? { error: firstError } : {}) }
+      ? { ...summarize(times), rows, rowsPerRun, bytes, errors, ...(firstError ? { error: firstError } : {}) }
       : { n: 0, errors, error: firstError ?? { code: 'no-measured-run', status: 0, message: 'every request failed' } };
   }
   return queries;
 }
 
+/**
+ * The parameters with the generator's addresses replaced by the records Ythril minted for them, from one lookup per
+ * class asked of the endpoint itself. Throws (the run stops) when an address maps to nothing.
+ */
+async function mapForYthril(endpoint, token, paramsFile) {
+  const rows = [];
+  for (const { class: klass, query } of lookupQueries(parameterAddresses(paramsFile))) {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/sparql-query', accept: 'application/sparql-results+json', authorization: `Bearer ${token}` },
+      body: query,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`the ${klass} address lookup answered ${res.status}: ${text.slice(0, 200)}`);
+    for (const b of JSON.parse(text).results.bindings) rows.push({ o: b.o.value, s: b.s.value });
+  }
+  return mapParameters(paramsFile, tableFromBindings(rows));
+}
+
 function table(record) {
   const lines = [
+    ...(record.valid === false ? [`INVALID: other row counts than Oxigraph on ${record.invalidQueries.map((d) => `${d.query} (${d.oxigraph} vs ${d.ythril})`).join(', ')}`, ''] : []),
     `Engine ${record.engine}, ${record.size} products, outcome ${record.outcome}, ${record.runs} measured runs after ${record.warmups} warm-up`,
     '',
     '| query | median ms | p95 ms | rows | errors |',
@@ -120,8 +141,28 @@ async function main() {
   }
   const templates = loadTemplates(join(work, TOOLS_SUBDIR));
 
+  // The reference a Ythril run is judged against: the Oxigraph record of the same size and bytes.
+  let reference = null;
+  if (engine === 'ythril') {
+    if (!flags.against) throw new Error('--against <oxigraph record> is required for a ythril run: it is judged against Oxigraph\'s row counts');
+    reference = JSON.parse(readFileSync(String(flags.against), 'utf8'));
+    if (reference.engine !== 'oxigraph' || reference.size !== size || reference.dataset?.sha256 !== variant.sha256) {
+      throw new Error(`--against must be the oxigraph record of ${size} products on variant ${variant.sha256}`);
+    }
+  }
+  // Ythril minted its own addresses: the parameters are bound to its records before any run. Oxigraph keeps the generator's.
+  let runParams = paramsFile;
+  let mappedParameters;
+  if (engine === 'ythril') {
+    const m = await mapForYthril(state.url, state.token, paramsFile);
+    runParams = m.file;
+    mappedParameters = m.mapped;
+    console.log(`mapped ${m.mapped} parameter addresses to Ythril's records`);
+  }
+
   const startedAt = new Date();
-  const queries = await runQueries({ engine, endpoint: state.url, token: state.token, templates, paramsFile, warmups, runs });
+  const queries = await runQueries({ engine, endpoint: state.url, token: state.token, templates, paramsFile: runParams, warmups, runs });
+  const verdict = reference ? judgeValidity(reference.queries, queries) : { valid: true, differing: [] };
   const timed = Object.values(queries).filter((q) => typeof q.median === 'number');
   const clean = timed.length === Object.keys(queries).length && timed.every((q) => q.errors === 0);
   const outcome = clean ? 'ok' : timed.length ? 'partial' : 'failed';
@@ -138,6 +179,9 @@ async function main() {
     dataset: { variant: variant.name, triples: variant.triples, sha256: variant.sha256 },
     loadMs: engine === 'ythril' ? (load?.ok ? load.loadMs : null) : state.loadMs,
     ...(engine === 'ythril' && !load?.ok ? { loadRefusal: { status: load?.status ?? 0, code: load?.code ?? 'no-load-recorded', message: load?.message ?? '' } } : {}),
+    valid: verdict.valid, ...(verdict.valid ? {} : { invalidQueries: verdict.differing }),
+    ...(mappedParameters !== undefined ? { mappedParameters } : {}),
+    ...(engine === 'ythril' && load?.chunks ? { loadChunks: load.chunks } : {}),
     warmups, runs, queries,
     startedAt: startedAt.toISOString(), finishedAt: new Date().toISOString(),
     host: { node: process.version, cpus: cpus().length },

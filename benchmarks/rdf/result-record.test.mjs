@@ -19,6 +19,7 @@ function input(over = {}) {
     bsbmSeed: { generator: 53223436, driver: 808080 },
     dataset: { variant: 'ythril-loadable-1', triples: 371000, sha256: 'b'.repeat(64) },
     loadMs: 1234,
+    valid: true,
     warmups: 3,
     runs: 20,
     queries: {
@@ -103,4 +104,17 @@ test('a second write to the same name throws and leaves the earlier file as it w
   assert.throws(() => writeRecord(dir, buildRecord(input()), new Date('2026-11-25T00:45:08Z')), /exists|overwrite/i);
   assert.equal(readFileSync(other, 'utf8'), 'keep me');
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('a record says whether it is valid: a Ythril run whose row counts differ from Oxigraph\'s names the queries', () => {
+  assert.equal(buildRecord(input()).valid, true);
+  assert.throws(() => buildRecord(input({ valid: undefined })), /valid/);
+  assert.throws(() => buildRecord(input({ valid: 'yes' })), /valid/);
+  const differing = [{ query: 'Q1', oxigraph: 10, ythril: 0 }];
+  const bad = buildRecord(input({ engine: 'ythril', valid: false, invalidQueries: differing }));
+  assert.equal(bad.valid, false);
+  assert.deepEqual(bad.invalidQueries, differing);
+  assert.throws(() => buildRecord(input({ valid: false })), /invalidQueries/);
+  assert.throws(() => buildRecord(input({ valid: false, invalidQueries: [] })), /invalidQueries/);
+  assert.throws(() => buildRecord(input({ valid: true, invalidQueries: differing })), /invalidQueries/);
 });

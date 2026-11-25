@@ -13,11 +13,16 @@
  * scratch instance, the image digest and the load time. When the Ythril import refuses the data, the state
  * says so with the status and code instead of a time, and the server is left as it is.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { chunkFile } from './chunk.mjs';
 import { parseArgs, variantOf, workDir } from './env.mjs';
 import { oxigraphDown, oxigraphUp, statePath } from './oxigraph.mjs';
-import { createRdfSpace, deleteSpace, loadInto, spaceCounts, ythrilDown, ythrilUp } from './ythril.mjs';
+import { createRdfSpace, deleteSpace, loadChunks, loadInto, spaceCounts, ythrilDown, ythrilUp } from './ythril.mjs';
+
+/** The import door's body bound (`rdf_bound_exceeded`), and the size a chunk is cut to: well under it. */
+const IMPORT_BODY_BOUND = 1024 ** 3;
+const CHUNK_BYTES = 768 * 1024 ** 2;
 
 async function main() {
   const { flags, positional } = parseArgs(process.argv.slice(2));
@@ -53,7 +58,14 @@ async function main() {
     await createRdfSpace(state, spaceId, flags.base ? String(flags.base) : undefined);
     // --import-query "schema=generate&from=data" adds the door's own parameters (docs 06f-exports.md, RDF import).
     const importQuery = String(flags['import-query'] ?? '');
-    const result = await loadInto(state, spaceId, variant.file, Object.fromEntries(new URLSearchParams(importQuery)));
+    const importParams = Object.fromEntries(new URLSearchParams(importQuery));
+    // A variant over the door's body bound goes in as subject-complete chunks, ends first (chunk.mjs).
+    let result;
+    if (statSync(variant.file).size > IMPORT_BODY_BOUND) {
+      const { files } = chunkFile(variant.file, join(work, 'chunks', String(size)), CHUNK_BYTES);
+      console.log(`the variant is over the import body bound: importing ${files.length} subject-complete chunks`);
+      result = await loadChunks(state, spaceId, files, importParams);
+    } else result = await loadInto(state, spaceId, variant.file, importParams);
     const counts = await spaceCounts(state, spaceId).catch(() => null);
     const out = {
       ...state, size, spaceId, url: `${state.url}/api/brain/spaces/${spaceId}/sparql`, load: result, counts,
