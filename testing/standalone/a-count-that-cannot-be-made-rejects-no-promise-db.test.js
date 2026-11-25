@@ -24,6 +24,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf } from './_rdf-export-doors.mjs';
 import { failCounts, recordProcessFaults, serverDriver } from './_quad-source-faults.mjs';
+import { drainOf } from './_quad-source-fixture.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'qcount';
@@ -73,10 +74,7 @@ describe('a count that cannot be made rejects no promise', { skip }, () => {
     assert.ok(!counted.error, `countQuads rejected: ${counted.error?.code}`);
     assert.equal(counted.n, 1);
     assert.equal(late.failure()?.code, 'sparql_timeout');
-    await assert.rejects(new Promise((resolve, reject) => {
-      const stream = late.match(undefined, RDF_TYPE, THING_CLASS, undefined);
-      stream.on('error', reject); stream.on('data', () => undefined); stream.on('end', resolve);
-    }), (err) => err.code === 'sparql_timeout');
+    await assert.rejects(drainOf(late, late.match(undefined, RDF_TYPE, THING_CLASS, undefined)), (err) => err.code === 'sparql_timeout');
   });
 
   it('a query over a store whose counts fail answers the store refusal, and the engine\'s count handlers raise nothing', async () => {

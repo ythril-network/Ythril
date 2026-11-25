@@ -114,6 +114,18 @@ export const quadText = (q) => `${termText(q.subject)} ${termText(q.predicate)} 
 /** The pattern of `q` under `mask`: bit 8 keeps the subject, 4 the predicate, 2 the object, 1 the graph; a cleared bit is unbound. */
 export const patternOf = (q, mask) => [mask & 8 ? q.subject : undefined, mask & 4 ? q.predicate : undefined, mask & 2 ? q.object : undefined, mask & 1 ? q.graph : undefined];
 
+/**
+ * Every quad a stream of `source` gives; a failure the source recorded for its query ends the read as an error. A match stream whose read
+ * fails ends with no error event (an error raised into the engine's iterators can reach one that no longer listens, which is an uncaught
+ * exception): the query's failure is `source.failure()`, which the engine asks when its result ends, as this does.
+ */
+export async function drainOf(source, stream) {
+  const quads = await drain(stream);
+  const failure = source.failure();
+  if (failure) throw failure;
+  return quads;
+}
+
 /** Every quad a stream gives, or its error. */
 export function drain(stream) {
   return new Promise((resolve, reject) => {

@@ -24,7 +24,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf } from './_rdf-export-doors.mjs';
-import { drain } from './_quad-source-fixture.mjs';
+import { drain, drainOf } from './_quad-source-fixture.mjs';
 import { failFirstBatches, recordProcessFaults, serverDriver } from './_quad-source-faults.mjs';
 import { elapse } from '../_shared/sleep.mjs';
 
@@ -75,10 +75,10 @@ describe('a read its consumer ended is no store failure', { skip }, () => {
     const s = source();
     const restore = failFirstBatches(0, () => new MongoExpiredSessionError());
     try {
-      await assert.rejects(drain(s.match(undefined, RDF_TYPE, THING_CLASS, undefined)), (err) => err.code === 'sparql_store_unavailable' && err.status === 503);
+      await assert.rejects(drainOf(s, s.match(undefined, RDF_TYPE, THING_CLASS, undefined)), (err) => err.code === 'sparql_store_unavailable' && err.status === 503);
     } finally { restore(); }
     assert.equal(s.failure()?.code, 'sparql_store_unavailable', 'a failed read of a stream still listened to is not recorded');
-    await assert.rejects(drain(s.match(undefined, RDF_TYPE, THING_CLASS, undefined)), (err) => err.code === 'sparql_store_unavailable', 'a later match of the query read on past a store failure');
+    await assert.rejects(drainOf(s, s.match(undefined, RDF_TYPE, THING_CLASS, undefined)), (err) => err.code === 'sparql_store_unavailable', 'a later match of the query read on past a store failure');
   });
 
   it('raised no unhandled rejection and no uncaught exception', async () => { await faults.quiet(); });

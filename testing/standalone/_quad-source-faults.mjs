@@ -61,6 +61,41 @@ export function failFirstBatches(delayMs, makeError) {
 }
 
 /**
+ * The first `answered` finds (by the order their first batch is asked for) answer as the store does; every later find's first batch answers
+ * `delayMs` late with `error`: a join whose first pattern read rows and whose bound second pattern then meets the fault, while the query's
+ * own deadline is still far off (a store that ends the find itself, with the maximum time it was given).
+ * @returns the function that puts the driver back.
+ */
+export function failFindsAfter(answered, delayMs, makeError) {
+  const { FindCursor } = serverDriver();
+  const real = FindCursor.prototype.hasNext;
+  const order = new WeakMap();
+  let started = 0;
+  FindCursor.prototype.hasNext = async function answersThenFails(...args) {
+    if (!order.has(this)) order.set(this, ++started);
+    if (order.get(this) <= answered) return real.apply(this, args);
+    await elapse(delayMs, 'simulated latency: the find\'s first batch is on its way for this long');
+    throw makeError();
+  };
+  return () => { FindCursor.prototype.hasNext = real; };
+}
+
+/**
+ * Every find's first batch waits until the epoch millisecond `epochOf()` names and then fails with `makeError()`: the store ending a find at
+ * the very moment a deadline passes (the maximum time a find was given is the time the query had left), whichever of the two lands first.
+ * @returns the function that puts the driver back.
+ */
+export function failFindsAt(epochOf, makeError) {
+  const { FindCursor } = serverDriver();
+  const real = FindCursor.prototype.hasNext;
+  FindCursor.prototype.hasNext = async function failingAt() {
+    await elapse(Math.max(0, epochOf() - Date.now()), 'simulated latency: the find\'s first batch is on its way until its time is out');
+    throw makeError();
+  };
+  return () => { FindCursor.prototype.hasNext = real; };
+}
+
+/**
  * Every find's first batch answers `delayMs` late, with what the store answers.
  * @returns the function that puts the driver back.
  */

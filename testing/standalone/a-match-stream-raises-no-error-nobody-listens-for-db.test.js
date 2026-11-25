@@ -55,7 +55,8 @@ describe('a match stream raises no error nobody listens for', { skip }, () => {
   it('a stream whose read ends with the deadline, with no error listener, raises nothing and closes', async () => {
     const stream = source({ deadline: Date.now() - 1 }).match(undefined, RDF_TYPE, THING_CLASS, undefined);
     const closed = new Promise((resolve) => stream.once('close', resolve));
-    stream.read();
+    // A failed read ends the stream with no error; its end is seen once something reads it on.
+    stream.resume();
     await closed;
     assert.equal(stream.destroyed, true);
   });

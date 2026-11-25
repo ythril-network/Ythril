@@ -28,7 +28,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf } from './_rdf-export-doors.mjs';
-import { drain } from './_quad-source-fixture.mjs';
+import { drain, drainOf } from './_quad-source-fixture.mjs';
 import { recordProcessFaults } from './_quad-source-faults.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
 import { elapse } from '../_shared/sleep.mjs';
@@ -80,15 +80,15 @@ describe('the quad source read is bounded and its estimate is never a false empt
     const all = await drain(s.match(undefined, RDF_TYPE, BULK_CLASS, undefined));
     assert.equal(all.length, ROWS);
     assert.equal(s.recordsRead(), ROWS);
-    await assert.rejects(drain(s.match(named(`${baseOf(BULK)}entity/b-0000`), undefined, undefined, undefined)), (err) => err.code === 'sparql_too_much_read',
+    await assert.rejects(drainOf(s, s.match(named(`${baseOf(BULK)}entity/b-0000`), undefined, undefined, undefined)), (err) => err.code === 'sparql_too_much_read',
       'a second match of the same query read past the cap without the error');
   });
 
   it('the read of record cap+1 ends the stream with sparql_too_much_read (413), never a normal end', async () => {
     const s = source({ maxRecordsRead: ROWS - 1 });
-    await assert.rejects(drain(s.match(undefined, RDF_TYPE, BULK_CLASS, undefined)), (err) => err.code === 'sparql_too_much_read' && err.status === 413);
+    await assert.rejects(drainOf(s, s.match(undefined, RDF_TYPE, BULK_CLASS, undefined)), (err) => err.code === 'sparql_too_much_read' && err.status === 413);
     const walk = source({ maxRecordsRead: 10 });
-    await assert.rejects(drain(walk.match(undefined, undefined, undefined, undefined)), (err) => err.code === 'sparql_too_much_read', 'the walk ended normally past the cap');
+    await assert.rejects(drainOf(walk, walk.match(undefined, undefined, undefined, undefined)), (err) => err.code === 'sparql_too_much_read', 'the walk ended normally past the cap');
   });
 
   it('an ORDER BY that must read past the cap is refused through the engine', async () => {
@@ -120,7 +120,7 @@ describe('the quad source read is bounded and its estimate is never a false empt
     // A count never rejects (the engine's handler for a rejected count raises an unhandled rejection): it answers 1 and the query's failure is the timeout.
     assert.equal(await late.countQuads(undefined, LABEL, undefined, undefined), 1, 'a count after the deadline answered 0, or rejected');
     assert.ok(late.failure()?.code === 'sparql_timeout' && late.failure()?.status === 503, 'the count after the deadline did not record sparql_timeout');
-    await assert.rejects(drain(late.match(undefined, RDF_TYPE, BULK_CLASS, undefined)), (err) => err.code === 'sparql_timeout');
+    await assert.rejects(drainOf(late, late.match(undefined, RDF_TYPE, BULK_CLASS, undefined)), (err) => err.code === 'sparql_timeout');
   });
 
   it('a narrowed find holds a cursor while read, and destroying its stream closes it at once', async () => {
