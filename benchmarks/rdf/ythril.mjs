@@ -11,10 +11,12 @@
  * - **A second copy of the file.** A `202` means the import runs on and lands by itself; `loadInto` polls the
  *   import's status and never sends the file again.
  */
+import { spawnSync } from 'node:child_process';
 import { createReadStream, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dockerOk, dockerPlain, pinnedImage, sleep } from './env.mjs';
 import { ensureImage, statePath } from './oxigraph.mjs';
+import { limitsOf, withLimits } from './sparql-limits.mjs';
 
 const NET = 'b271-bench-net';
 export const ythrilNames = () => ({ mongo: 'b271-ythril-mongo', app: 'b271-ythril', config: 'b271-ythril-config', data: 'b271-ythril-data', mongoData: 'b271-ythril-mongo-data' });
@@ -68,6 +70,30 @@ export function ythrilDown() {
   dockerPlain(['rm', '-f', n.mongo]);
   for (const v of [n.config, n.data, n.mongoData]) dockerPlain(['volume', 'rm', '-f', v]);
   dockerPlain(['network', 'rm', NET]);
+}
+
+/** Runs `docker exec` in the scratch instance's container (no container is started, so nothing is booked). */
+function execInApp(app, args, input) {
+  const r = spawnSync('docker', ['exec', ...(input !== undefined ? ['-i'] : []), app, ...args], { encoding: 'utf8', input, maxBuffer: 1 << 26 });
+  if (r.status !== 0) throw new Error(`docker exec ${app} ${args.join(' ').slice(0, 60)} failed (${r.status}): ${r.stderr || r.stdout}`);
+  return r.stdout;
+}
+
+const CONFIG_IN_CONTAINER = '/config/config.json';
+
+/** The scratch instance's config, read from its container. */
+export function readInstanceConfig(app = ythrilNames().app) {
+  return JSON.parse(execInApp(app, ['cat', CONFIG_IN_CONTAINER]));
+}
+
+/**
+ * Sets `sparql.timeoutMs`, `sparql.maxRecordsRead` and `sparql.maxResults` in the scratch instance's config (the server
+ * reads them live) and answers the limits now in effect, read back. Values the server would refuse are refused first.
+ */
+export function setSparqlLimits(limits, app = ythrilNames().app) {
+  const next = withLimits(readInstanceConfig(app), limits);
+  execInApp(app, ['sh', '-c', `cat > ${CONFIG_IN_CONTAINER}`], `${JSON.stringify(next, null, 2)}\n`);
+  return limitsOf(readInstanceConfig(app));
 }
 
 async function api(state, method, path, { body, headers = {}, raw } = {}) {

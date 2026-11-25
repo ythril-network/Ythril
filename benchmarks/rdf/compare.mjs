@@ -7,9 +7,11 @@
  *
  * ## What this prevents
  *
- * - **A ratio between different answers.** A record whose run answered other row counts than Oxigraph on any query is
- *   `valid: false` (see validity.mjs) and is refused, naming those queries, unless `--show-invalid` asks to see it; the
- *   table then opens with an `INVALID` line. A record with no `valid` field was never judged and is refused as well.
+ * - **A ratio between different answers.** Each query is judged on its own (comparability.mjs): a ratio is shown only
+ *   for a query that answered Oxigraph's row counts on every run; any other query shows its reason (`data-not-held`,
+ *   `system-statements`, `rows-differ`) and no time and no ratio. A record with a `rows-differ` query is `valid: false`
+ *   and is refused, naming those queries, unless `--show-invalid` asks to see it; the table then opens with an
+ *   `INVALID` line. A record with no `valid` field was never judged and is refused as well.
  * - **A comparison of two different data sets.** The records must name the same size, the same variant and the
  *   same variant sha256; anything else is refused, because a ratio between engines that loaded different triples
  *   says nothing about the engines.
@@ -20,14 +22,19 @@
  */
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { REASONS } from './comparability.mjs';
+import { shortName } from './query-shape.mjs';
 
 const queryNumber = (name) => Number(/^Q(\d+)$/.exec(name)?.[1] ?? Number.MAX_SAFE_INTEGER);
 const timed = (q) => q !== undefined && typeof q.median === 'number' && typeof q.p95 === 'number';
 const ratio = (a, b) => (b > 0 ? a / b : null);
+/** Both engines answered nothing on every run: the time is the time of an empty answer. */
+const emptyEverywhere = (b, o) => [b, o].every((q) => Array.isArray(q?.rowsPerRun) && q.rowsPerRun.length > 0 && q.rowsPerRun.every((n) => n === 0));
 
 const rowsText = (n) => (Number.isInteger(n) ? `${n} row${n === 1 ? '' : 's'}` : 'no answer');
 const countText = (n) => (Number.isInteger(n) ? String(n) : 'no answer');
-const differingText = (list) => list.map((d) => `${d.query} (Oxigraph ${rowsText(d.oxigraph)}, Ythril ${countText(d.ythril)}${Number.isInteger(d.run) ? `, on run ${d.run}` : ''})`).join(', ');
+const countsOf = (d) => `Oxigraph ${rowsText(d.oxigraph)}, Ythril ${countText(d.ythril)}${Number.isInteger(d.run) ? `, on run ${d.run}` : ''}`;
+const differingText = (list) => list.map((d) => `${d.query} (${countsOf(d)})`).join(', ');
 
 function assertValid(record, showInvalid) {
   if (typeof record.valid !== 'boolean') throw new Error(`the ${record.engine} record has not been judged for validity (no valid field): run it again`);
@@ -50,9 +57,21 @@ function assertComparable(base, other, { showInvalid = false } = {}) {
 }
 
 /**
- * Compares two records. Returns `{ rows, slower, noAnswer }`: one row per query (number order) with both
- * engines' median and p95, the two ratios (Ythril over Oxigraph; `null` where either side has no timing), `slower`
- * (median ratio above `factor`) and a `note` for a row without a ratio; `slower` and `noAnswer` list the names.
+ * The verdict of one query of a Ythril record: its own `comparable` (and `reason`, `predicates`, `differing`) when the
+ * record carries it; for a record from before per-query judgement, comparable unless `invalidQueries` names it.
+ */
+function verdictOf(record, name) {
+  const q = record.queries[name];
+  if (q?.comparable === false) return { comparable: false, reason: q.reason, predicates: q.predicates, differing: q.differing };
+  if (q?.comparable === undefined && (record.invalidQueries ?? []).some((d) => d.query === name)) return { comparable: false, reason: 'rows-differ' };
+  return { comparable: true };
+}
+
+/**
+ * Compares two records. Returns `{ rows, slower, noAnswer, notComparable }`: one row per query (number order) with both
+ * engines' median and p95, the two ratios (Ythril over Oxigraph; `null` where either side has no timing or the query
+ * is not comparable), `comparable` and its `reason`, `slower` (median ratio above `factor`) and a `note` for a row
+ * without a ratio; `slower`, `noAnswer` and `notComparable` list the names.
  */
 export function compareRecords(base, other, { factor = 10, showInvalid = false } = {}) {
   assertComparable(base, other, { showInvalid });
@@ -60,8 +79,13 @@ export function compareRecords(base, other, { factor = 10, showInvalid = false }
   const rows = names.map((query) => {
     const b = base.queries[query];
     const o = other.queries[query];
-    const row = { query, base: timed(b) ? b : null, other: timed(o) ? o : null, ratioMedian: null, ratioP95: null, slower: false, note: '' };
-    if (row.base && row.other) {
+    const verdict = verdictOf(other, query);
+    const row = { query, base: timed(b) ? b : null, other: timed(o) ? o : null, ratioMedian: null, ratioP95: null, slower: false, note: '', ...verdict, empty: emptyEverywhere(b, o) };
+    if (!verdict.comparable) {
+      // Not the same answer: no time and no ratio, only the reason.
+      row.base = null;
+      row.other = null;
+    } else if (row.base && row.other) {
       row.ratioMedian = ratio(o.median, b.median);
       row.ratioP95 = ratio(o.p95, b.p95);
       row.slower = row.ratioMedian !== null && row.ratioMedian > factor;
@@ -71,12 +95,25 @@ export function compareRecords(base, other, { factor = 10, showInvalid = false }
     else row.note = `oxigraph error ${b.error?.code ?? 'unknown'}`;
     return row;
   });
-  return { factor, rows, slower: rows.filter((r) => r.slower).map((r) => r.query), noAnswer: rows.filter((r) => r.note).map((r) => r.query) };
+  return {
+    factor, rows,
+    slower: rows.filter((r) => r.slower).map((r) => r.query),
+    noAnswer: rows.filter((r) => r.note).map((r) => r.query),
+    notComparable: rows.filter((r) => !r.comparable).map((r) => r.query),
+  };
 }
 
 const ms = (q) => q.median.toFixed(2);
 const p95 = (q) => q.p95.toFixed(2);
 const times = (r) => (r === null ? '-' : `${r.toFixed(1)}x`);
+const LIMIT_KEYS = ['timeoutMs', 'maxRecordsRead', 'maxResults'];
+
+/** What follows a reason: the predicates of data-not-held, the first differing counts of rows-differ, else nothing. */
+function reasonDetail(r) {
+  if (r.reason === 'data-not-held' && r.predicates?.length) return ` (${r.predicates.map(shortName).join(', ')})`;
+  if (r.reason === 'rows-differ' && r.differing) return ` (${countsOf(r.differing)})`;
+  return '';
+}
 
 /** The markdown comparison of two records (see `compareRecords`). */
 export function renderComparison(base, other, options = {}) {
@@ -89,18 +126,27 @@ export function renderComparison(base, other, options = {}) {
     ...(invalid ? [`INVALID: the ${invalid.engine} run answered other row counts than Oxigraph on ${differingText(invalid.invalidQueries ?? [])}; its times are not times for the same answers`, ''] : []),
     `BSBM Explore, ${base.size} products, variant ${d.variant} (${d.triples} triples, sha256 ${d.sha256})`,
     `${load(base, 'Oxigraph')}; ${load(other, 'Ythril')}`,
+    ...(other.sparqlLimits ? [`Ythril SPARQL limits: ${LIMIT_KEYS.map((k) => `${k} ${other.sparqlLimits[k]}`).join(', ')}`] : []),
+    ...(other.embedQueue ? [`Ythril embed queue: waited ${other.embedQueue.waitedMs} ms, ${other.embedQueue.pending} pending, ${other.embedQueue.drained ? 'drained' : 'not drained'}`] : []),
     '',
     '| query | Oxigraph median ms | Oxigraph p95 ms | Ythril median ms | Ythril p95 ms | median ratio | p95 ratio | Oxigraph rows | Ythril rows | |',
     '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|',
   ];
+  const rowsOf = (rec, name) => (Number.isInteger(rec.queries[name]?.rows) ? String(rec.queries[name].rows) : '-');
   for (const r of cmp.rows) {
     const o = r.other ? [ms(r.other), p95(r.other)] : [r.note.startsWith('ythril error') ? r.note.replace('ythril ', '') : '-', '-'];
     const b = r.base ? [ms(r.base), p95(r.base)] : ['-', '-'];
-    const last = r.slower ? `**>${f}x slower**` : r.note;
-    const rows = (rec) => (Number.isInteger(rec?.rows) ? String(rec.rows) : '-');
-    lines.push(`| ${r.query} | ${b[0]} | ${b[1]} | ${o[0]} | ${o[1]} | ${times(r.ratioMedian)} | ${times(r.ratioP95)} | ${rows(r.base)} | ${rows(r.other)} | ${last} |`);
+    const last = !r.comparable ? `not comparable: ${r.reason}${reasonDetail(r)}`
+      : [r.slower ? `**>${f}x slower**` : '', r.note, r.empty ? 'empty answer on every run' : ''].filter(Boolean).join('; ');
+    lines.push(`| ${r.query} | ${b[0]} | ${b[1]} | ${o[0]} | ${o[1]} | ${times(r.ratioMedian)} | ${times(r.ratioP95)} | ${rowsOf(base, r.query)} | ${rowsOf(other, r.query)} | ${last} |`);
   }
-  lines.push('', `Queries more than ${f}x slower than Oxigraph: ${cmp.slower.length ? cmp.slower.join(', ') : 'none'} (${cmp.slower.length} of ${cmp.rows.length}), by median.`);
+  const comparable = cmp.rows.filter((r) => r.comparable);
+  lines.push('', `Comparable queries: ${comparable.length} of ${cmp.rows.length}.`);
+  for (const reason of REASONS) {
+    const named = cmp.rows.filter((r) => !r.comparable && r.reason === reason);
+    if (named.length) lines.push(`Not comparable, ${reason}: ${named.map((r) => `${r.query}${reasonDetail(r)}`).join('; ')}.`);
+  }
+  lines.push(`Queries more than ${f}x slower than Oxigraph: ${cmp.slower.length ? cmp.slower.join(', ') : 'none'} (${cmp.slower.length} of ${comparable.length} comparable), by median.`);
   if (cmp.noAnswer.length) lines.push(`Queries with no ratio: ${cmp.noAnswer.join(', ')}.`);
   return `${lines.join('\n')}\n`;
 }

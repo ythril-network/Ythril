@@ -88,8 +88,9 @@ The run is reproducible from `tier0.mjs` (`prepare`, `record`, `score`, `judge-e
 Benchmark's data at three sizes (1 000, 5 000 and 20 000 products; Ythril takes only the sizes its import accepts,
 1 000 and the largest under its 200-types-per-kind cap), loads each into a scratch Ythril and into a pinned
 Oxigraph, binds the query parameters to the records Ythril minted, runs the 11 Explore queries against both SPARQL
-endpoints (3 warm-up and 20 measured runs each) and writes one result record per run, marked valid only when every
-query answered Oxigraph's row count. Everything it fetches is pinned (archive by sha256, images by digest) and
+endpoints (3 warm-up and 20 measured runs each) and writes one result record per run, in which each query is judged
+on its own: comparable when it answered Oxigraph's row count on every run, otherwise not, with the reason. Only
+comparable queries get a ratio. Everything it fetches is pinned (archive by sha256, images by digest) and
 everything it generates lives outside the repository.
 
 ```text
