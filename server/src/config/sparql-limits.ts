@@ -9,9 +9,15 @@
  *
  * ## The default of `maxRecordsRead`: measured, not chosen (r2 R6)
  *
- * Two concurrent `SELECT ?s ?n WHERE { ?s rdfs:label ?n } ORDER BY ?n` queries, each reading 200 000 records (the cap) and sorting every
- * row, were measured in the runner container (node 24, an own MongoDB, bundle-271 S1): see {@link SPARQL_LIMIT_DEFAULTS} for the figure. The
- * rule is that two such queries stay under 512 MB of heap beyond the server's own, so the default is the cap the measurement held under it.
+ * The rule: two concurrent queries at the cap stay under 512 MB of heap beyond the server's own. Measured in the runner container (node 24,
+ * an own MongoDB, bundle-271 S1, 2026-11-25): two concurrent `SELECT ?s ?n WHERE { ?s rdfs:label ?n } ORDER BY ?n`, each reading 200 000
+ * entities (the cap) and sorting every row before its first 10 001 rows were taken, in 23-29 s.
+ *
+ * - Unbounded heap: base 166 MB, sampled peak 726 MB (561 MB extra). That peak is garbage V8 had not yet collected: at 150 000 records the
+ *   peak was the same (556 MB extra), so it measures the collector's slack, not what the queries hold.
+ * - Heap held to base + 512 MB (`--max-old-space-size=678`): both queries finished, peak 517 MB (352 MB extra), rss 298 MB extra.
+ *
+ * The rule holds at 200 000, so the design's figure stands.
  *
  * A leaf module: the loader imports it.
  */
@@ -32,11 +38,7 @@ export interface SparqlLimitsConfig {
 /** The limits in effect, every key set. */
 export interface SparqlLimits { timeoutMs: number; maxRecordsRead: number; maxResults: number }
 
-/**
- * The defaults. `maxRecordsRead`: 200 000. Measured (R6): two concurrent ORDER BY queries over 200 000 records each, reading the cap, held
- * the heap figure written in the bundle-271 S1 return beside this line; the rule (under 512 MB beyond the server's own) held, so the design's
- * figure stands.
- */
+/** The defaults; `maxRecordsRead` is the measured one (the module's docblock gives the measurement). */
 export const SPARQL_LIMIT_DEFAULTS: Readonly<SparqlLimits> = Object.freeze({ timeoutMs: 30_000, maxRecordsRead: 200_000, maxResults: 10_000 });
 
 /** The bounds each key is held to, inclusive. */
