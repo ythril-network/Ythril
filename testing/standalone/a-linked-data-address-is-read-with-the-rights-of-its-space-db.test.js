@@ -5,7 +5,7 @@
  * ## The rules
  *
  * 1. **The twin of each read door.** A record address needs `knowledge: read`; a file address needs `files: read` as well (a knowledge-only
- *    token gets the file as not found); a schema version (`/ld/<space>/schema/<fp>`) and a vocabulary term (`/ld/<space>/vocab/...`) need
+ *    token gets the file as not found); a schema version (`/ld/<space>/schema/<fp>`), a vocabulary term (`/ld/<space>/vocab/...`) and a SHACL shape (`/ld/<space>/schema/shape/...`) need
  *    `schema: read`, as `GET /api/spaces/:id/schema-rdf` does.
  * 2. **Alike when not readable.** No right on the space, a space no base covers and a record that is not there answer the same `404` problem
  *    body, byte for byte: an answer never tells a caller which of the three it met.
@@ -17,7 +17,7 @@
  *    `Vary: Accept`.
  *
  * The routes it drives: `GET /ld/:spaceId/:kind/:id`, `GET /ld/:spaceId/file/*path`, `GET /ld/:spaceId/agent/:id`,
- * `GET /ld/:spaceId/schema/:fp` and `GET /ld/:spaceId/vocab/*path`.
+ * `GET /ld/:spaceId/schema/:fp`, `GET /ld/:spaceId/vocab/*path` and `GET /ld/:spaceId/schema/shape/*path`.
  *
  * ## Seen red
  *
@@ -119,7 +119,7 @@ describe('a linked data address is read with the rights of its space', { skip },
     const fp = meta.body?.schemaFingerprint;
     assert.match(String(fp), /^[0-9a-f]{64}$/, `the space's fingerprint: ${meta.text.slice(0, 200)}`);
     const missing = await get(`/ld/${S}/entity/nope`, 'application/n-quads', keys.knowledgeOnly);
-    for (const path of [`/ld/${S}/schema/${fp}`, `/ld/${S}/vocab/entity/Person`]) {
+    for (const path of [`/ld/${S}/schema/${fp}`, `/ld/${S}/vocab/entity/Person`, `/ld/${S}/schema/shape/entity/Person`]) {
       const allowed = await get(path, 'application/n-quads', keys.schemaReader);
       assert.equal(allowed.status, 200, `${path} with schema read: ${fmt(allowed)}`);
       assert.ok((await parseRdf('nquads', allowed.text)).length > 0, `${path}: an empty answer`);
