@@ -32,7 +32,7 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { SPARQL_QUERY_MAX_BYTES } from '../../rdf/sparql-engine.js';
 import { SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_QUERY_TOO_LARGE, SPARQL_UPDATE_NOT_HERE } from '../../rdf/sparql-refusal.js';
 import {
-  answerSparql, prepareSparql, renderSparql, headerList, CallerGone, SPARQL_UNSUPPORTED_MEDIA_TYPE, SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS,
+  answerSparql, prepareSparql, renderSparql, headerList, CallerGone, SPARQL_NO_QUERY, SPARQL_UNSUPPORTED_MEDIA_TYPE, SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS,
   type SparqlAnswerRefusal, type SparqlQueryInput, type PreparedSparql,
 } from '../../rdf/sparql-answer.js';
 
@@ -70,19 +70,29 @@ function sendRefusal(res: Response, r: SparqlAnswerRefusal): void {
   });
 }
 
-/** Parse a POST body with `parser`; a body past its limit is the act's `413 sparql_query_too_large`, never the parser's bare answer. */
+/** Parse a POST body with `parser`; every refusal of the parser is a SPARQL refusal with a code (`parserRefusal`), never the app's bare answer. */
 function parsed(parser: express.RequestHandler) {
   return (req: Request, res: Response, next: NextFunction): void => {
     parser(req, res, (err?: unknown) => {
       if (!err) { next(); return; }
-      const type = (err as { type?: unknown }).type;
-      if (type === 'entity.too.large') {
-        sendRefusal(res, { status: SPARQL_TOO_LARGE, code: SPARQL_QUERY_TOO_LARGE, error: `The query is longer than ${SPARQL_QUERY_MAX_BYTES} bytes` });
-        return;
-      }
-      next(err);
+      sendRefusal(res, parserRefusal((err as { type?: unknown } | null)?.type));
     });
   };
+}
+
+/**
+ * The refusal of a body parser, by the `type` it gives its error: a body or a form past a limit (`entity.too.large`, `parameters.too.many`) is
+ * the act's own `413 sparql_query_too_large`; a charset or a content encoding it does not read is `415 sparql_unsupported_media_type`; any other
+ * (a broken stream, an aborted request) is `400 sparql_no_query`. The words are fixed: the parser's message is never repeated.
+ */
+function parserRefusal(type: unknown): SparqlAnswerRefusal {
+  if (type === 'entity.too.large' || type === 'parameters.too.many') {
+    return { status: SPARQL_TOO_LARGE, code: SPARQL_QUERY_TOO_LARGE, error: `The query is longer than ${SPARQL_QUERY_MAX_BYTES} bytes, or the form holds more parameters than a query takes` };
+  }
+  if (type === 'charset.unsupported' || type === 'encoding.unsupported') {
+    return { status: SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS, code: SPARQL_UNSUPPORTED_MEDIA_TYPE, error: 'The body is in a charset or a content encoding this endpoint does not read: send the query as UTF-8, uncompressed' };
+  }
+  return { status: SPARQL_BAD_REQUEST, code: SPARQL_NO_QUERY, error: 'The body could not be read as a query: send exactly one `query` parameter (or the body of an application/sparql-query POST)' };
 }
 
 const updateRefusal: SparqlAnswerRefusal = {
