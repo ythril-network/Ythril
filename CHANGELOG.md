@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Operations:** `ythril_write_group_aborts_total{reason}` counts write groups that landed nothing: the all-or-nothing writer a SPARQL Update will use (no door reaches it yet; the save and bulk doors are unchanged).
 - **Schema:** every schema violation row carries a stable `code` and its `params` beside its `reason` on every REST door and MCP tool, and the web app words it in your language; a bulk warning row gains `warning`. The integration guide lists the codes; an older unconverted item has none.
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.
 - **Schema:** the schema versions a space uses are kept privately in `<space>_schema_snapshots`, named by their fingerprint, with what each was built from (own types, network layers). A database backup carries them.
