@@ -10,8 +10,9 @@
  *   left a caller unable to tell what to change); a schema refusal's sentence, which quotes values, is never shown. The audit row takes
  *   counts only.
  * - **A refusal named for the wrong cause.** A record that lacks a required field is `missing-required-field` with the field, never the
- *   generic `plan_refused`; an edge or link refused because a record it ends at was itself refused is `end-refused` naming that end, never
- *   the schema violation its dangling end reads as (bundle-271: 30 503 records and 60 000 edges of the benchmark were named for neither).
+ *   generic `plan_refused`; an edge or link refused because every record it ends at that is missing was itself refused is `end-refused` naming
+ *   that end, never the schema violation its dangling end reads as (bundle-271: 30 503 records and 60 000 edges of the benchmark were named for
+ *   neither); one that also holds a link to a record that does not exist is `stored-link-dangling`, and never quotes that stored id.
  * - **An answer as large as the file.** At most {@link RDF_IMPORT_REASONS_NAMED_MAX} reasons are named, each with at most
  *   {@link STATEMENTS_PER_REASON_MAX} statements; every reason is counted (`reasonCount`, `reasonsByCode`), and a refusing reason past the cap
  *   still refuses.
@@ -54,6 +55,12 @@ export const MISSING_REQUIRED_FIELD = 'missing-required-field';
 
 /** The code of an edge or link refused under strict linkage because a record it ends at was itself refused in this import (Q-759). */
 export const END_REFUSED = 'end-refused';
+
+/**
+ * The code of a record refused under strict linkage because a link it already holds points at a record that does not exist, and that end is not
+ * one this import refused (Q-759, review F1). The end is the store's, not the file's: its id is never named.
+ */
+export const STORED_LINK_DANGLING = 'stored-link-dangling';
 
 /**
  * A planner's refusal as the report reads it: the planner's code, sentence and schema body, and what names its cause (`ImportRefusal` of
@@ -200,15 +207,23 @@ export class ReportBuilder {
   }
   /**
    * A planner's refusal of the record `subject` states, named by its cause (Q-759): an edge or link whose end this import refused is
-   * {@link END_REFUSED}, naming that end's subject; a missing required field is {@link MISSING_REQUIRED_FIELD} with the field; a schema
+   * {@link END_REFUSED}, naming that end's subject, unless an end it lacks was not refused here ({@link STORED_LINK_DANGLING}, naming none); a missing required field is {@link MISSING_REQUIRED_FIELD} with the field; a schema
    * refusal is its body's own code; any other carries the planner's code and sentence. {@link PLAN_REFUSED} only when the planner gave neither.
    */
   planner(kind: string, subject: string, refusal: PlannerRefusal): void {
     if (refusal.seededId !== undefined) this.refusedSubjects.set(refusal.seededId, subject);
-    const end = refusal.missingEnds?.map(id => this.refusedSubjects.get(id)).find(s => s !== undefined);
     const base = { outcome: 'refused' as const, kind, subject, statements: [], statementCount: 0 };
-    if (end !== undefined) {
-      this.add({ ...base, code: END_REFUSED, end, message: `The ${kind} this subject states ends at a record that was refused in this import; the end named is that record's subject.` });
+    const missing = refusal.missingEnds ?? [];
+    if (missing.length > 0) {
+      // Fixing the refused end is enough only when EVERY missing end was refused here; one that was not (a link the stored record already holds)
+      // is what stays, and its id, the store's own, is neither named nor quoted from the planner's sentence.
+      const refused = missing.map(id => this.refusedSubjects.get(id));
+      const end = refused[0];
+      if (end !== undefined && refused.every(s => s !== undefined)) {
+        this.add({ ...base, code: END_REFUSED, end, message: `The ${kind} this subject states ends at a record that was refused in this import; the end named is that record's subject.` });
+      } else {
+        this.add({ ...base, code: STORED_LINK_DANGLING, message: 'A link this record already holds points at a record that does not exist; remove that link or turn strict linkage off.' });
+      }
       return;
     }
     // The planner's own sentence wherever it gave one; the generic one names only the code.
