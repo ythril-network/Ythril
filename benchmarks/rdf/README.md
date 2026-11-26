@@ -210,6 +210,18 @@ Everything goes to `<work>/embed-meaning/`: each arm's record, the queries with 
 file of `report`. The meanings and the templates were written by one author, which can favour arm B; a template never
 holds the label's words, but the entity names can (`Review17`).
 
+Measured on 2026-11-26 (main aae46da89, `nomic-ai/nomic-embed-text-v1.5`, 204 queries per seed, 81 548 edges):
+
+| arm | seed 1 | seed 2 | seed 3 | mean |
+|---|---|---|---|---|
+| A recall@10 | 0.5980 | 0.5637 | 0.6324 | 0.5980 |
+| B recall@10 | 0.5735 | 0.5637 | 0.5980 | 0.5784 |
+| A MRR@10 | 0.4695 | 0.4543 | 0.5019 | 0.4752 |
+| B MRR@10 | 0.5004 | 0.5076 | 0.5243 | 0.5108 |
+
+The meaning moved the target up when it was found (MRR +0.036) but found it less often (recall@10 -1.96 points), so
+the flag was not shipped and `edgeEmbedText` is unchanged.
+
 ## Tests
 
 `stats`, `params`, `queries`, `result-record`, `prepare`, `compare`, `ythril` (the refusal wording), `ythril-params`,
