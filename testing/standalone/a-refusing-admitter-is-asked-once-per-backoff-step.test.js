@@ -24,6 +24,8 @@ const HOUR = 60 * MIN;
 
 let door;
 let asks = 0;
+/** What the door answers: a 403 refusal, or a 200 whose layer the reader refuses whole (a validation mode that does not exist). */
+let answer = 'forbidden';
 let fetchNetworkLayer;
 
 before(async () => {
@@ -32,8 +34,13 @@ before(async () => {
   door = await listenOnPrivateAddress(http.createServer((req, res) => {
     if (!String(req.url).startsWith('/api/sync/meta')) { res.statusCode = 404; res.end(); return; }
     asks += 1;
-    res.statusCode = 403;
     res.setHeader('content-type', 'application/json');
+    if (answer === 'malformed') {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ meta: { validationMode: 'sideways' }, network: { validationMode: 'sideways' }, networkSeeded: true }));
+      return;
+    }
+    res.statusCode = 403;
     res.end(JSON.stringify({ error: 'the token may not read this space\'s schema', code: 'schema_rung' }));
   }), privateHostAddress());
   mock.timers.enable({ apis: ['Date'], now: Date.now() });
@@ -51,6 +58,8 @@ const ask = (net, memberId, space) => fetchNetworkLayer({
 });
 
 describe('a member that refuses the network\'s schema', { skip }, () => {
+  before(() => { answer = 'forbidden'; });
+
   it('is asked once, not again within ten minutes, and again after them', async () => {
     asks = 0;
     await ask('net-f8-a', 'm1', 'space-1');
@@ -95,5 +104,28 @@ describe('a member that refuses the network\'s schema', { skip }, () => {
     assert.equal(asks, 4);
     await ask('net-f8-d', 'm1', 'space-1');
     assert.equal(asks, 4, 'the refused member and space were asked again at once');
+  });
+});
+
+describe('a member that answers with a layer the reader refuses whole', { skip }, () => {
+  before(() => { answer = 'malformed'; });
+  after(() => { answer = 'forbidden'; });
+
+  it('is asked again after ten minutes, then after twenty, never at once, and the wait doubles', async () => {
+    asks = 0;
+    await ask('net-n5-a', 'm1', 'space-1');
+    assert.equal(asks, 1, 'the first ask must go out');
+    mock.timers.tick(MIN);
+    await ask('net-n5-a', 'm1', 'space-1');
+    assert.equal(asks, 1, 'a refused layer was asked again after one minute');
+    mock.timers.tick(10 * MIN);
+    await ask('net-n5-a', 'm1', 'space-1');
+    assert.equal(asks, 2, 'the first backoff ended and the member was not asked');
+    mock.timers.tick(10 * MIN);
+    await ask('net-n5-a', 'm1', 'space-1');
+    assert.equal(asks, 2, 'a malformed layer was asked again after ten minutes the second time: the wait never doubled');
+    mock.timers.tick(10 * MIN);
+    await ask('net-n5-a', 'm1', 'space-1');
+    assert.equal(asks, 3, 'the second backoff (twenty minutes) ended and the member was not asked');
   });
 });

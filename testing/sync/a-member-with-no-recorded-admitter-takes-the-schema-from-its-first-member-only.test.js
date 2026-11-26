@@ -6,7 +6,7 @@
  * inviter) is the source when nothing is recorded; no other member's answer is taken.
  *
  * A club of A, B and C (B knows A first, then C). B loses its layer, its mark and its admitter, and A's container is stopped.
- * C has not healed either (a decoy layer, no mark). Cycles later B holds no layer: C was not asked. With A started again, B heals from A.
+ * C holds a decoy layer as seeded, so it answers the door (`networkSeeded: true`). Cycles later B holds no layer: C was not asked. With A started again, B heals from A.
  *
  * Run: node --test testing/sync/a-member-with-no-recorded-admitter-takes-the-schema-from-its-first-member-only.test.js
  */
@@ -39,10 +39,11 @@ before(async () => {
       if (s) { delete s.meta; delete s.ownMeta; }    `);
     await reloadConfig(INSTANCES.b, tokenOf('b'));
   }
-  // C has not healed either: its layer is a decoy and its mark is gone, as a member of an older build holds it.
+  // C answers the door with a decoy it holds as SEEDED: any member-answers rule would take it (a decoy C marks unseeded says so and is never
+  // taken whatever rule is in force, which is how this spec once passed under the old any-member rule).
   patchContainerNetwork('ythril-c', club.networkId, `
-    delete n.schemaLayerSeeded;
-    n.schemaLayers[${S}] = { purpose: 'a decoy from a member that has not healed' };
+    n.schemaLayerSeeded = { [${S}]: 'layer' };
+    n.schemaLayers[${S}] = { purpose: 'a decoy from a member that is not the first' };
   `);
   await reloadConfig(INSTANCES.c, tokenOf('c'));
   // A stops answering: stopped, not made unreachable by an address, which a gossip from C would write back.
@@ -64,6 +65,17 @@ describe('a member with no recorded admitter', () => {
   it('starts with the first member being the inviter A (the premise)', () => {
     assert.equal(networkOn('b', club.networkId).members[0].instanceId, idA);
     assert.equal(networkOn('b', club.networkId).admittedVia, undefined);
+  });
+
+  it('says at its door whether it holds the whole schema: a member that has not healed false, a seeded one true', async () => {
+    const door = (x) => get(INSTANCES[x], tokenOf(x), `/api/sync/meta?spaceId=${club.space}&networkId=${club.networkId}`);
+    const b = await door('b');
+    assert.equal(b.status, 200, JSON.stringify(b.body));
+    assert.equal(b.body.networkSeeded, false, 'B, which holds no layer and no mark, said its schema is the whole one');
+    assert.equal(holdsSchema(b.body.network), false, 'B served a schema it does not hold as the network\'s');
+    const c = await door('c');
+    assert.equal(c.status, 200, JSON.stringify(c.body));
+    assert.equal(c.body.networkSeeded, true, 'C, which holds its layer as seeded, did not say so');
   });
 
   it('takes nothing from another member while the first is stopped', async () => {
