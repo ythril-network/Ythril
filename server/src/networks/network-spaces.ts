@@ -38,6 +38,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 import type { SpaceCreator } from '../spaces/lifecycle.js';
 import { localToRemote, remoteToLocal, recordSpaceAlias, reverseSpaceMap, isSpaceId } from '../sync/space-map.js';
 import { clearSettledProposals, takeSpaceOutOfNetwork } from './take-space-out-of-network.js';
+import { markLayerSeeded } from './schema-standing.js';
 
 // The pure cleanup lives in a leaf (the config loader's proxy migration shares it and must not import this module); re-exported for the callers that always imported it here.
 export { forgetPendingOffer, takeSpaceOutOfNetwork } from './take-space-out-of-network.js';
@@ -495,8 +496,11 @@ export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, wh
       // Q-60: the round carries the space's schema, since a voted network has no meta pull — kept as the layer.
       if (result.added.includes(entry.localId) && round.pendingMeta && !round.proposedHere) {
         const { acceptNetworkLayer } = await import('../sync/space-meta-pull.js');
-        acceptNetworkLayer(net.id, entry.localId, round.pendingMeta, `space_addition round ${round.roundId}`);
+        acceptNetworkLayer(net.id, entry.localId, round.pendingMeta, `space_addition round ${round.roundId}`, 'layer');
       }
+      // Q-966: the proposer stores no layer: the definitions it proposed are its own and ARE the network's, so the heal must never take its
+      // admitter's copy of them (a layer outranks own definitions, and would shadow every later edit of them).
+      if (result.added.includes(entry.localId) && round.proposedHere) markLayerSeeded(net.id, entry.localId, 'own');
       return done({ ok: true, added: result.added });
     })().then(resolve, (err: unknown) => {
       log.error(`space_addition side-effect (${peerText(where)}): ${peerText(err)}`);

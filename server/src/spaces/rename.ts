@@ -273,6 +273,10 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
         net.schemaLayerUnread[newId] = net.schemaLayerUnread[oldId]!;
         delete net.schemaLayerUnread[oldId];
       }
+      if (net.schemaLayerSeeded?.[oldId] !== undefined && net.schemaLayerSeeded[newId] === undefined) {
+        net.schemaLayerSeeded[newId] = net.schemaLayerSeeded[oldId]!;
+        delete net.schemaLayerSeeded[oldId];
+      }
       if (net.spaceOrigins?.[oldId] !== undefined && net.spaceOrigins[newId] === undefined) {
         net.spaceOrigins[newId] = net.spaceOrigins[oldId]!;
         delete net.spaceOrigins[oldId];
