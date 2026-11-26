@@ -103,7 +103,7 @@ export async function beginTripleIndexBuild(spaceId: string, opts: { leaseMs?: n
   const termsIndex = TRIPLE_INDEX_INDEXES.find(ix => ix.part === 'rdfTerms');
   if (termsIndex === undefined) throw new Error('the triple index declares no index on its dictionary');
   const target = buildCollectionsOf(spaceId, buildId);
-  await buildDeclaredIndexOn(target.terms, termsIndex);
+  await buildDeclaredIndexOn(spaceId, termsIndex, target.terms);
   return { spaceId, buildId, formKey: formKeyOf(meta), startCap, startedAt, leaseMs, target };
 }
 
