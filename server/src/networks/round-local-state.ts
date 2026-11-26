@@ -26,6 +26,7 @@ import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
 import { isSpaceActRound, roundDeadlineBeyondCap, roundPastDeadline } from './round-state.js';
 import { publishesOn } from './network-role.js';
+import { roundKindNeverOpenedOn } from './round-decider.js';
 import { hasRoundShape, canonicalRoundWipeTypes } from './round-shape.js';
 import { DEFAULT_STAMP_SKEW_WARN_MINUTES } from '../brain/stamp-skew.js';
 
@@ -51,9 +52,15 @@ export function openRoundHere(net: NetworkConfig, round: VoteRound): VoteRound {
   return round;
 }
 
-/** Why a round a peer served is not adopted — a short phrase, counted per pass and said once as a debug line. */
+/**
+ * Why a round a peer served is not adopted — a short phrase, counted per pass and said as one debug line. The one reason said at warn
+ * (once per network, member and window, by the sync pass) is {@link NEVER_OPENED_REFUSAL}: no honest member serves such a round.
+ */
 export type AdoptionRefusal = 'past its deadline or undatable' | 'deadline beyond what a network allows' | 'already recorded here'
-  | 'proposed by a subscriber' | 'malformed';
+  | 'proposed by a subscriber' | typeof NEVER_OPENED_REFUSAL | 'malformed';
+
+/** The refusal of a round of a kind the network's type never opens (`roundKindNeverOpenedOn`): a peer's forgery, never an older release's honest round. */
+export const NEVER_OPENED_REFUSAL = 'a kind this network type never opens' as const;
 
 /**
  * Does the round's `openedAt` lie ahead of this instance's clock by more than the one clock tolerance the server names (X11)? Such a
@@ -80,9 +87,12 @@ export function adoptionRefusal(net: NetworkConfig, peerRound: VoteRound, now: n
   if (roundPastDeadline(peerRound, now)) return 'past its deadline or undatable';
   if (roundDeadlineBeyondCap(peerRound)) return 'deadline beyond what a network allows';
   if ((net.roundOutcomes ?? []).some(e => e.roundId === peerRound.roundId)) return 'already recorded here';
-  // D-40: on pub/sub a subscriber's deletion or wipe is its own local act. A publisher holds no round it did not open of those two
-  // types — every other instance there is a subscriber — decided from this instance's role, never from a field a relayer could set.
-  if (isSpaceActRound(peerRound.type) && publishesOn(net)) return 'proposed by a subscriber';
+  // Q-968: a join or removal on a club or pub/sub, which admit and remove members directly, is a peer's forgery whoever serves it.
+  if (roundKindNeverOpenedOn(net, peerRound.type)) return NEVER_OPENED_REFUSAL;
+  // D-40, Q-968: on pub/sub every other member is a subscriber, so a round a publisher did not open is a subscriber's, of EVERY kind: its
+  // deletion or wipe is its own local act, and its schema change or space addition is not its to decide. A publisher holds none of them,
+  // decided from this instance's role, never from a field a relayer could set; no verdict is ever adopted from a peer.
+  if (publishesOn(net)) return 'proposed by a subscriber';
   return null;
 }
 

@@ -17,6 +17,8 @@ export const NETWORK_REFUSAL_CODES = [
   'space_name_in_use',
   /** A cast on a round whose deadline has passed: the round closed by the clock, and the body's `deadline` says when. */
   'round_expired',
+  /** A pub/sub publisher's cast on a round a subscriber opened: the publisher decides only the rounds it opened (Q-968). */
+  'round_not_opened_here',
 ] as const;
 
 export type NetworkRefusalCode = typeof NETWORK_REFUSAL_CODES[number];

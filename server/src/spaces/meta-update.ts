@@ -50,6 +50,8 @@ import {
   stripServerOwnedMeta, stripServerOwnedSpace,
 } from './body-schemas.js';
 import type { TypeSchemasZ, ParsedSpaceMeta } from './body-schemas.js';
+import { actsLocallyOn } from '../networks/network-role.js';
+import { commitOwnMetaEdit, layersFor } from './effective-meta.js';
 import { metaFieldKind } from './meta-fields.js';
 import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
@@ -358,6 +360,16 @@ export function planSpaceMetaUpdate(input: {
     if (!writeBase) {
       return { ok: false, refusal: { status: 400, body: { error: `Network '${targetNetwork}' does not carry space '${spaceId}'` } } };
     }
+    // Q-968: a pub/sub subscriber proposes nothing to that network (its edit opens no round there, and is the instance's own), so a proposal aimed
+    // at it would fall through to the local write below: merged over the publisher's layer and stored as this instance's own definitions, copying the
+    // publisher's types into them (or, with no layer held, replacing them) and answered "applied". Refused whole, before anything is merged.
+    const target = getConfig().networks.find(n => n.id === targetNetwork);
+    if (target && actsLocallyOn(target)) {
+      return { ok: false, refusal: { status: 400, body: {
+        error: `Network '${peerText(target.label, { max: NAME_QUOTED })}' is a pub/sub network this instance subscribes to: its schema layer is the publisher's, so it takes no proposal from here. Edit the space without targetNetwork to change this instance's own definitions.`,
+        code: 'network_layer_is_the_publishers',
+      } } };
+    }
   }
   const base: Partial<SpaceMeta> = writeBase ?? {};
 
@@ -503,8 +515,11 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
 
   // Network voting: a networked space PROPOSES a meta change rather than applying it.
   if (mergedMeta !== undefined) {
-    // F-39.5: a proposal to one network opens its round there alone; any other edit, on every network carrying it.
-    const networkedIn = cfg.networks.filter(n => n.spaces.includes(id) && (plan.targetNetwork === undefined || n.id === plan.targetNetwork));
+    // F-39.5: a proposal to one network opens its round there alone; any other edit, on every network carrying it — but never on a pub/sub
+    // network this instance subscribes to (Q-968; owner, 2026-11-26): a subscriber's schema edit is its own, lands in its own definitions
+    // below, and the publisher's layer outranks it. A network-wide change is the publisher's to make. A round opened there passed on the
+    // subscriber's own yes and, adopted by the publisher, changed the network's schema for every member.
+    const networkedIn = cfg.networks.filter(n => n.spaces.includes(id) && !actsLocallyOn(n) && (plan.targetNetwork === undefined || n.id === plan.targetNetwork));
     if (networkedIn.length > 0) {
       const rounds: RoundAnswer[] = [];
       const layers: LayerOutcome[] = [];
@@ -512,7 +527,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
       for (const net of networkedIn) {
         /*
          * Opened, signed and EVALUATED through the one open path (`proposeRound`), because the proposer's yes may already be
-         * enough (`Q-49`): on club and pub/sub one yes passes a round, and a closed network with no other member needs only ours.
+         * enough (`Q-49`): on a club the proposer's yes passes a round, on pub/sub the publisher's (Q-968), and a closed network with no
+         * other member needs only ours.
          * The round stays in the list either way, concluded or not, so peers learn of it exactly as before — and the members are
          * told `meta_change_pending` from the same module every opener tells them through.
          */
@@ -584,14 +600,24 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // `unknownWriteFields` was applied above for every request, so it leaves the spread too: exactly one site writes it. All three leave in this
   // ONE destructure, whatever their spelling: `record-ttl-buckets.test.js` holds the RULE (a partial TTL write through `applySpaceMetaUpdate`
   // never clears a bucket it did not name), not this text.
-  const { documentExtraction: _rawMode, recordTtlDays: _rawTtl, unknownWriteFields: _rawUnknownWriteFields, ...storablePatch } = patchData;
+  const {
+    documentExtraction: _rawMode, recordTtlDays: _rawTtl, unknownWriteFields: _rawUnknownWriteFields,
+    // The meta is written below from the merged result (as the own definitions or as the space's meta), never from the body's fragment.
+    meta: _fragment, ...storablePatch
+  } = patchData;
   // F-39.2: a space in no network has no layer, so its own definitions ARE the edited meta — kept in step, or a stale
-  // `ownMeta` would come back the next time a network sends this space a layer.
+  // `ownMeta` would come back the next time a network sends this space a layer. A pub/sub subscriber's edit (Q-968) reaches here too, on a
+  // space that holds its publisher's layer: the edit is its own definitions, and the space runs on them laid under every layer, so the
+  // publisher's layer outranks the edit and stays in the meta (written as the edit alone, the layer's types would leave the space).
   const held = getConfig().spaces.find(s => s.id === id);
-  if (held?.ownMeta && mergedMeta !== undefined) held.ownMeta = replicatedMetaOf(mergedMeta) as SpaceMeta;
+  const layeredEdit = held?.ownMeta !== undefined && layersFor(getConfig(), id).length > 0 ? mergedMeta : undefined;
+  const layered = layeredEdit !== undefined;
+  // Layered: the one writer of own definitions sets them and rebuilds the meta from them and the layers; the rest of the patch follows.
+  if (layeredEdit !== undefined && !commitOwnMetaEdit(id, () => layeredEdit)) return { outcome: 'not_found' };
+  if (!layered && held?.ownMeta && mergedMeta !== undefined) held.ownMeta = replicatedMetaOf(mergedMeta) as SpaceMeta;
   const updated = updateSpace(id, {
     ...storablePatch,
-    meta: mergedMeta,
+    ...(layered ? {} : { meta: mergedMeta }),
     ...(plan.hasDocExtraction ? { documentExtraction: plan.documentExtraction } : {}),
   });
   // The stored vectors follow the flag, which is what the userguide has always said happens: `updateSpace` asks for

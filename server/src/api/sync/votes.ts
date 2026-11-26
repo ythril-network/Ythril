@@ -99,8 +99,9 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
      * `callerPeerId ?? body.instanceId`, so a caller with no peer id became the cast's own instance: the
      * reporter and the voter were the same value by construction, `acceptVoteCast` took the own-cast path
      * every time, and a network with `requireSignedVotes` accepted an unsigned cast attributed to any
-     * instance. On any round — and the rounds include `remove`, `space_deletion` and `space_wipe`, which
-     * pass on a single yes with no veto for `club` and `pubsub`.
+     * instance. On any round — and the rounds include `space_deletion` and `space_wipe`, which pass on a
+     * single yes with no veto for a `club`, and for `pubsub` on the publisher's yes alone (Q-968: before it,
+     * any subscriber's own yes passed a round there; a `remove` is a round neither type opens).
      *
      * The relay is authorised above, so `admin` is a caller this route has established rather than the
      * shape of a token it could not identify. `members.ts` asks the same question through the same predicate.

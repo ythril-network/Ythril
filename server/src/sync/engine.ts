@@ -28,7 +28,7 @@ import type { SyncHeldSpace, SyncDeclinedSpace } from './history.js';
 import { log, peerText } from '../util/log.js';
 import { emptyExchange, exchangeSpacesWithMember, type MemberExchange } from './space-exchange.js';
 import { liftDeclinesFromAnnounce } from './space-exchange-set.js';
-import { takeServedRounds } from './served-rounds.js';
+import { takeServedRounds, sayRefusedRounds } from './served-rounds.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
 import { mergePeerRoster, revokeRemoved, pairIntroduced } from '../networks/member-introductions.js';
@@ -533,9 +533,7 @@ async function propagateVotesWithPeer(
     // Evidence, adoptions and merged casts: what this list changes here (`sync/served-rounds.ts`).
     const { changed, refused } = takeServedRounds(freshNet, peerRounds, member, now);
 
-    if (refused.size > 0) {
-      log.debug(`Vote gossip: did not adopt ${peerText([...refused].map(([why, n]) => `${n} round(s) ${why}`).join(', '))} from ${peerText(member.label)}`);
-    }
+    sayRefusedRounds(freshNet, member, refused, refusedGovernancePull);
 
     if (changed) {
       // Re-evaluate every undecided round — new votes may carry one — and apply what concluded, through the one settle step (design

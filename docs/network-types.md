@@ -50,7 +50,7 @@ Regardless of type, every governance vote is **cryptographically signed**. Each 
 
 ## Closed network
 
-All members must vote yes for any join or removal, and for every other round: a space deletion, a wipe, a schema change. That includes each member deciding for itself, so no member applies a round to its own data until it has voted yes itself. A single no blocks it. For a solo member (one device), every action is instant self-approval. On a club or pub/sub network the proposer's own yes carries the round, so it passes at once.
+All members must vote yes for any join or removal, and for every other round: a space deletion, a wipe, a schema change. That includes each member deciding for itself, so no member applies a round to its own data until it has voted yes itself. A single no blocks it. For a solo member (one device), every action is instant self-approval. On a club the proposer's own yes carries the round, so it passes at once. On pub/sub only the publisher's yes carries a round: a subscriber's schema edit stays its own and opens no round, and a subscriber's deletion or wipe is a local act (see [Pub/Sub](#pubsub-network)).
 
 ```mermaid
 graph LR
@@ -557,13 +557,21 @@ Regardless of network type:
   round is something each instance records for the rounds it opened itself; a round arriving from a peer cannot claim
   that another member proposed it.
 
-  **Read your network type before relying on that.** On `club` and `pubsub` a round passes on a single
-  yes with no veto, so one member can empty the space everywhere. On pub/sub only the publisher's wipe or deletion reaches the subscribers; a subscriber's is its own. On `closed` and `braintree`
-  every listed member has to agree, and on `democratic` it is a majority.
+  **Read your network type before relying on that.** On `club` a round passes on a single
+  yes with no veto, so one member can empty the space everywhere. On `pubsub` only the publisher's cast decides a round
+  (`Q-968`): only the publisher's wipe or deletion reaches the subscribers, a subscriber's is its own, and a subscriber's
+  schema edit stays on the subscriber. On `closed` and `braintree` every listed member has to agree, and on `democratic`
+  it is a majority. No network type passes a round of a kind it never opens: a club and a pub/sub
+  network admit and remove members directly (and a pub/sub network adds spaces directly), so such a round is a forgery
+  and is refused. A pub/sub publisher takes no cast on a round a subscriber opened on an older release
+  (`409 round_not_opened_here`): it ends at its deadline.
 
   > This bullet read *"Force-delete does not exist. There is no mechanism to delete data from another
-  > member's instance"*. The mechanism is the wipe vote, and on club and pub/sub it needs one
-  > participant.
+  > member's instance"*. The mechanism is the wipe vote, and on a club it needs one participant, on pub/sub
+  > the publisher.
+  >
+  > Before 6.5.7 the pub/sub rule was "any yes", like the club's: a subscriber's own yes passed its schema change on
+  > every member, and a forged join, removal or space addition a subscriber served passed on the publisher.
 
 - What someone does with their local copy after leaving is not governable.
 - A departed member may found their own new network from their copy of the data.
