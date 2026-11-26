@@ -93,6 +93,9 @@ export const SPACE_COLLECTIONS = {
   rdfQuads: 'rdf_quads',
   rdfRecords: 'rdf_records',
   rdfState: 'rdf_state',
+  // Its write journal (S2, `rdf/triple-index/journal.ts`): one row per record write the follower does not see by position, cleared by the
+  // follower after it read the record again. Local and derived like the rest of the index.
+  rdfDirty: 'rdf_dirty',
 } as const;
 
 export type SpacePart = keyof typeof SPACE_COLLECTIONS;

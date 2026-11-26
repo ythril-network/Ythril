@@ -86,9 +86,10 @@ const EXEMPT_COLLECTIONS = new Map([
   ['rdf_quads', 'the triple index\'s statements, derived from the records by its follower: never landed or restored by an act'],
   ['rdf_records', 'the triple index\'s statement ids per record, derived from the records by its follower: never landed or restored by an act'],
   ['rdf_state', 'the triple index\'s follower state and lease: bookkeeping of a derivation, no record'],
+  ['rdf_dirty', 'the triple index\'s write journal: a row per unpositioned record write, written beside the write the gate already admitted, cleared by the follower; no record'],
 ]);
-/** The fewest exemption rows: the eight derived or bookkeeping collections of bundle-266, and the two of the conversion run (bundle-284), and the four of the triple index (bundle-273). Fewer means a row was dropped, not that a collection became covered. */
-const EXEMPT_COLLECTIONS_FLOOR = 14;
+/** The fewest exemption rows: the eight derived or bookkeeping collections of bundle-266, and the two of the conversion run (bundle-284), and the five of the triple index (bundle-273). Fewer means a row was dropped, not that a collection became covered. */
+const EXEMPT_COLLECTIONS_FLOOR = 15;
 
 /** The per-space collection suffixes, read from the registry the server builds every space collection name from. */
 const { SPACE_COLLECTIONS } = await import('../../server/dist/db/space-collection.js');

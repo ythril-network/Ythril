@@ -271,7 +271,13 @@ export async function removeFileLinksThisInstanceWrote(
 export async function removeFileLinkRowsLocally(spaceId: string, froms: readonly string[]): Promise<void> {
   const links = col<LinkDoc>(spaceCollection(spaceId, 'links'));
   await admitSpaceWrite(spaceId, 'links', async () => {
-    for (const part of inChunks([...froms], READ_CHUNK)) await links.deleteMany(asFilter<LinkDoc>({ spaceId, fromKind: 'file', from: { $in: part } }));
+    for (const part of inChunks([...froms], READ_CHUNK)) {
+      // The ids first (bundle-273, design-r2 R6): the triple index's journal names each link the delete removes; a filter on `from` names none,
+      // and would send the space's index to a rebuild. The delete keeps the filter, so a row that changed meanwhile is judged again.
+      const byFrom = { spaceId, fromKind: 'file', from: { $in: part } };
+      const ids = (await links.find(asFilter<LinkDoc>(byFrom), { projection: { _id: 1 } }).toArray()).map(l => String(l._id));
+      if (ids.length > 0) await links.deleteMany(asFilter<LinkDoc>({ _id: { $in: ids }, ...byFrom }));
+    }
   });
 }
 

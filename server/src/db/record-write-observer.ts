@@ -41,6 +41,10 @@
  * It answers *"which record collections did this process just write to or delete from"*. It does not decide
  * what to do about it — that is the listener's question, and a db-layer module that knew about search indexes
  * would make every reader of a collection depend on the index lifecycle.
+ *
+ * The same door also keeps a write JOURNAL when one is registered ({@link RecordWriteJournal}, bundle-273): asked before a
+ * write and told after it, so the rows naming what a write may change exist before the change does. What the rows
+ * mean is the journal's question (`rdf/triple-index/journal.ts`), not this file's.
  */
 import type { Collection, Db } from 'mongodb';
 import {
@@ -135,6 +139,40 @@ export const UNBOUNDED_DB_METHODS: Readonly<Record<string, string>> = {
 };
 
 export type RecordWriteListener = (collectionName: string, effect: MethodEffect) => void;
+
+/**
+ * What a write journal hands back from {@link RecordWriteJournal.before}: whatever it needs to finish the rows it wrote. Opaque here.
+ */
+export type JournalTicket = object;
+
+/**
+ * A journal kept BESIDE a write at this door (bundle-273, Q-764 S2: the triple index's `rdf/triple-index/journal.ts`). Unlike a listener,
+ * which hears a write after it settled, a journal is asked BEFORE it runs, and the write waits for its answer: a row that names what the
+ * write may change has to exist before the change does, or a crash between the two leaves a change nothing names.
+ *
+ *  - `before` answers `null` (synchronously, so the write starts in the same tick) when the write needs no row, or a promise of the ticket
+ *    of the rows it wrote. A promise that rejects fails the write unsent: a write the journal cannot name is not made.
+ *  - `after` is told once the write settled, success or failure alike: at once outside a transaction (the write answers after the promise
+ *    it returns), and when the session ENDS inside one, as the listener is.
+ *
+ * One journal per process ({@link setRecordWriteJournal}); `wants` names the collections it keeps. The db layer knows nothing of what the
+ * rows mean: that is the journal's question.
+ */
+export interface RecordWriteJournal {
+  wants(collectionName: string): boolean;
+  before(collectionName: string, method: string, args: readonly unknown[]): Promise<JournalTicket | null> | null;
+  after(ticket: JournalTicket): Promise<void> | void;
+}
+
+let journal: RecordWriteJournal | null = null;
+
+/** Register the process's write journal (`null` removes it). Every collection handed out after this asks it. */
+export function setRecordWriteJournal(given: RecordWriteJournal | null): void {
+  journal = given;
+}
+
+/** The bulk-op builders: they write at `execute`, with operations added after the builder was handed out, so the journal is asked there. */
+const BULK_BUILDERS: ReadonlySet<string> = new Set(['initializeOrderedBulkOp', 'initializeUnorderedBulkOp']);
 
 /**
  * The collection name a listener receives when EVERY collection changed at once — `reportDatabaseReplaced()` in
@@ -256,13 +294,13 @@ export function observeRecordWrites(db: Db, isObserved: (name: string) => boolea
       if (prop !== 'collection') return Reflect.get(target, prop, receiver);
       return (name: string, options?: object) =>
         observeCollection(target.collection(name, options as never), name, isObserved(name) ? listener : null,
-          { collection: name, serverOperations });
+          { collection: name, serverOperations }, journal !== null && journal.wants(name) ? journal : null);
     },
   });
 }
 
 function observeCollection<T extends object>(
-  coll: Collection<T>, name: string, listener: RecordWriteListener | null, boundTarget: CollectionTarget,
+  coll: Collection<T>, name: string, listener: RecordWriteListener | null, boundTarget: CollectionTarget, kept: RecordWriteJournal | null = null,
 ): Collection<T> {
   return new Proxy(coll, {
     get(target, prop, receiver) {
@@ -271,9 +309,10 @@ function observeCollection<T extends object>(
       const bounded = BOUNDED_OPTIONS_ARGUMENT[prop] !== undefined;
       const classified = COLLECTION_METHOD_EFFECT[prop];
       const reports = listener !== null && classified !== 'read';
-      if (!bounded && !reports) return value;
+      const journaled = kept !== null && classified !== 'read';
+      if (!bounded && !reports && !journaled) return value;
       const effect = classified === 'read' ? UNKNOWN_EFFECT : classified ?? UNKNOWN_EFFECT;
-      return (...given: unknown[]) => {
+      const write = (...given: unknown[]): unknown => {
         const call = (a: unknown[]): unknown => (value as (...x: unknown[]) => unknown).apply(target, a);
         let out: unknown;
         if (bounded) {
@@ -305,7 +344,41 @@ function observeCollection<T extends object>(
         report();
         return out;
       };
+      if (!journaled || kept === null) return write;
+      const keeper = kept;
+      return (...given: unknown[]) => {
+        if (BULK_BUILDERS.has(prop)) {
+          // The builder is handed out at once; its write, and so the journal's question, is at `execute`.
+          const out = write(...given) as { execute?: (...a: unknown[]) => Promise<unknown> } | null;
+          const exec = out?.execute;
+          if (out && typeof exec === 'function') {
+            out.execute = (...a: unknown[]) => Promise.resolve(journaledWrite(keeper, name, prop, [], () => exec.apply(out, a)));
+          }
+          return out;
+        }
+        return journaledWrite(keeper, name, prop, given, () => write(...given));
+      };
     },
+  });
+}
+
+/**
+ * Run `run` (a write of `method` with `given` on `name`) with its journal rows: written before it, finished after it settled (when the
+ * session ends, inside a transaction). A write the journal needs no row for starts in the same tick. A failure to finish the rows after
+ * the write is the journal's to log: the write stands, and the row stays outstanding (the follower clears it once it is old).
+ */
+function journaledWrite(keeper: RecordWriteJournal, name: string, method: string, given: readonly unknown[], run: () => unknown): unknown {
+  const pending = keeper.before(name, method, given);
+  if (pending === null) return run();
+  return pending.then((ticket) => {
+    const out = run();
+    if (ticket === null) return out;
+    const session = transactionSessionOf(given as unknown[]);
+    const finish = async (): Promise<void> => {
+      if (session) { reportWhenEnded(session, () => { void Promise.resolve().then(() => keeper.after(ticket)).catch(() => undefined); }); return; }
+      await Promise.resolve().then(() => keeper.after(ticket)).catch(() => undefined);
+    };
+    return Promise.resolve(out).then(async (r) => { await finish(); return r; }, async (err: unknown) => { await finish(); throw err; });
   });
 }
 

@@ -142,6 +142,9 @@ export async function rollBackPositions(db: Db, { log, discardUnresolvedForks = 
       counterAfter = Math.max(counterBefore, highest);
       await counters.updateOne({ _id: spaceId }, { $set: { seq: counterAfter, positionsOwed: 'repair' }, $unset: { positionsReadyAt: '' } }, { upsert: true });
     }
+    // The 5.6 build that runs next writes records with no journal and no position (bundle-273, Q-764 S2): the space's triple index, if it
+    // has one, is stale from here, and the 6.x start after it rebuilds it. On `db`, the rollback's own client: never through the door.
+    await db.collection(spaceCollection(spaceId, 'rdfState')).updateOne({ _id: 'state' as never }, { $set: { status: 'stale' } });
     done.push({ spaceId, rowsCleared, counterBefore, counterAfter });
     log(`${spaceId}: ${rowsCleared} rows cleared, counter ${counterBefore ?? 'none'} -> ${counterAfter ?? 'none'}`);
   }
