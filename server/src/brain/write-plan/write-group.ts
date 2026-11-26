@@ -130,6 +130,11 @@ export class GroupAborted extends Error {
   }
 }
 
+/** The codes a group answers of its own, each the `code` of the class that carries it (a door maps a refusal by them, never by retyping them). */
+export const WRITE_GROUP_RECORD_PLANNED_TWICE = 'write_group_record_planned_twice';
+export const WRITE_GROUP_TOO_LARGE = 'write_group_too_large';
+export const WRITE_GROUP_OUTCOME_UNKNOWN = 'write_group_outcome_unknown';
+
 /** Which ceiling a group passed. */
 export type GroupCeiling = 'records' | 'operations' | 'bytes';
 
@@ -140,7 +145,7 @@ export type GroupCeiling = 'records' | 'operations' | 'bytes';
  */
 export class WriteGroupRecordPlannedTwice extends Error {
   readonly status = 409;
-  readonly code = 'write_group_record_planned_twice';
+  readonly code = WRITE_GROUP_RECORD_PLANNED_TWICE;
   constructor(readonly recordKind: PlanKind, readonly recordId: string) {
     super(`the write plans the ${recordKind} '${recordId}' twice; one write changes a record once — nothing was written`);
     this.name = 'WriteGroupRecordPlannedTwice';
@@ -150,7 +155,7 @@ export class WriteGroupRecordPlannedTwice extends Error {
 /** A group over one of its ceilings, refused before a session opened: `413 write_group_too_large`, naming the ceiling, its limit and the size. */
 export class WriteGroupTooLarge extends Error {
   readonly status = 413;
-  readonly code = 'write_group_too_large';
+  readonly code = WRITE_GROUP_TOO_LARGE;
   constructor(readonly ceiling: GroupCeiling, readonly limit: number, readonly size: number) {
     super(`the write is too large to apply as one: it would write ${size} ${ceiling === 'bytes' ? 'bytes' : ceiling}, `
       + `and one write applies at most ${limit}; nothing was written — split it`);
@@ -163,7 +168,7 @@ export class WriteGroupTooLarge extends Error {
  * retryable on every door), with its own code; the cause is the commit's error. A caller reads back before it retries.
  */
 export class WriteGroupOutcomeUnknown extends StoreTimeout {
-  readonly code = 'write_group_outcome_unknown';
+  readonly code = WRITE_GROUP_OUTCOME_UNKNOWN;
   constructor(options?: { cause?: unknown }) {
     super('the write', options);
     this.name = 'WriteGroupOutcomeUnknown';
@@ -557,7 +562,7 @@ function assertOneGroup(spaceId: string, plans: readonly WritePlan[]): void {
  * writes ONE record, converged in place, and the delete would remove what the converge writes. Only an edge: the other kinds' identities are
  * not their content, and two plans of one such record stay a refusal (`assertOneGroup`).
  */
-function droppedDeletes(plans: readonly WritePlan[]): Set<number> {
+export function droppedDeletes(plans: readonly WritePlan[]): Set<number> {
   const converged = new Set(plans.filter(p => p.kind === 'edge' && p.op === 'converge').map(p => p.id));
   return new Set(plans.flatMap((p, i) => (p.kind === 'edge' && p.op === 'delete' && converged.has(p.id) ? [i] : [])));
 }

@@ -119,7 +119,8 @@ export async function runTrade(args, { runs = BUNDLE_130, cutover = SHAS.cutover
   if (holdLock) writeFileSync(lock, JSON.stringify({ pid: process.pid })); // this process is alive: its lock is not stale
   writeFileSync(fixture, JSON.stringify(fixtureOf(runs, { cutover, descends, unplaceable, budgetEndsAfterApiCalls, commonDir })));
   writeFileSync(log, '');
-  const given = { ...(server ? { YTHRIL_TEST_RUNS_URL: server.url, YTHRIL_TEST_RUNS_TOKEN: server.token } : {}), ...env };
+  // `--record` refuses a run without GH_TOKEN; the fake `gh` reads none, so a placeholder stands in (a case passes `GH_TOKEN: undefined` to run without).
+  const given = { GH_TOKEN: 'fake-token-for-the-fake-gh', ...(server ? { YTHRIL_TEST_RUNS_URL: server.url, YTHRIL_TEST_RUNS_TOKEN: server.token } : {}), ...env };
   const childEnv = cleanEnv({ FAKE_GH_GIT_FIXTURE: fixture, FAKE_GH_GIT_LOG: log, ...given });
   for (const [k, v] of Object.entries(given)) if (v === undefined) delete childEnv[k];
   try {

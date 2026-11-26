@@ -48,7 +48,11 @@ import { schemaFingerprintOf } from './schema-stamp.js';
 import { consumeHeavyToolCall, HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
 import { takeSlot } from '../util/slots.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import { commitWriteGroup, GroupAborted, WriteGroupOutcomeUnknown, WriteGroupTooLarge, type GroupCommitted } from '../brain/write-plan/write-group.js';
+import {
+  commitWriteGroup, droppedDeletes, GroupAborted, WriteGroupOutcomeUnknown, WriteGroupRecordPlannedTwice, WriteGroupTooLarge,
+  WRITE_GROUP_OUTCOME_UNKNOWN, WRITE_GROUP_RECORD_PLANNED_TWICE, WRITE_GROUP_TOO_LARGE, type GroupCommitted,
+} from '../brain/write-plan/write-group.js';
+import { RECORD_VERSION_AT_CEILING } from '../brain/write-precondition.js';
 import type { WritePlan } from '../brain/write-plan/types.js';
 import { rdfSpaceState, type FingerprintOf, type RdfCaller } from '../rdf/rdf-space-state.js';
 import { evaluateSparqlUpdate, type SparqlUpdateChanges } from '../rdf/sparql-update-eval.js';
@@ -85,9 +89,6 @@ export const SPARQL_UPDATE_SHUTTING_DOWN = 'shutting_down';
 export const ENDPOINT_REMOVED = 'endpoint_removed';
 /** The outcome of an Update that threw: counted and audited under this name, not an answer's code. */
 const UPDATE_FAILED = 'failed';
-export const RECORD_VERSION_AT_CEILING = 'record_version_at_ceiling';
-export const WRITE_GROUP_OUTCOME_UNKNOWN = 'write_group_outcome_unknown';
-export const WRITE_GROUP_TOO_LARGE = 'write_group_too_large';
 
 /**
  * The most addresses one of `using-graph-uri` and `using-named-graph-uri` lists. Only the space's own graph may be named, so a longer list
@@ -103,7 +104,7 @@ const USING_WORDS = `\`using-graph-uri\` and \`using-named-graph-uri\` are lists
 export const SPARQL_UPDATE_ACT_CODES: readonly string[] = Object.freeze([
   SPARQL_NO_UPDATE, SPARQL_UPDATE_REFUSED, SPARQL_UPDATE_REFERENCED, SPARQL_UPDATE_CONFLICT, SPARQL_UPDATE_CASCADE_INCOMPLETE,
   SPARQL_UPDATE_RATE_LIMITED, SPARQL_UPDATE_SHUTTING_DOWN, ENDPOINT_REMOVED, RECORD_VERSION_AT_CEILING, WRITE_GROUP_OUTCOME_UNKNOWN,
-  WRITE_GROUP_TOO_LARGE,
+  WRITE_GROUP_TOO_LARGE, WRITE_GROUP_RECORD_PLANNED_TWICE,
 ]);
 
 type Counts = Record<KnowledgeType, number>;
@@ -265,7 +266,12 @@ function groupFailure(err: unknown): GroupFailure | null {
     if (err.reason === 'stale' || err.reason === 'duplicate_key') return { lost: { by: err.reason, record } };
     if (err.reason === 'referenced') return { status: CONFLICT_STATUS, code: SPARQL_UPDATE_REFERENCED, error: err.message, body: { backlinks: err.blockers ?? [] } };
     if (err.reason === 'version_ceiling') return { status: CONFLICT_STATUS, code: RECORD_VERSION_AT_CEILING, error: err.message, body: {} };
+    // More link rows to remove than the ceilings counted before the session opened: the group's own too-large answer, as before a session.
+    if (err.reason === 'too_large') return { status: SPARQL_TOO_LARGE, code: WRITE_GROUP_TOO_LARGE, error: err.message, body: record ? { record } : {} };
     return { status: CONFLICT_STATUS, code: SPARQL_UPDATE_CONFLICT, error: err.message, body: record ? { record } : {} };
+  }
+  if (err instanceof WriteGroupRecordPlannedTwice) {
+    return { status: CONFLICT_STATUS, code: WRITE_GROUP_RECORD_PLANNED_TWICE, error: err.message, body: { record: { kind: err.recordKind, id: err.recordId } } };
   }
   if (err instanceof WriteGroupTooLarge) return { status: SPARQL_TOO_LARGE, code: WRITE_GROUP_TOO_LARGE, error: err.message, body: { ceiling: err.ceiling, limit: err.limit, size: err.size } };
   if (err instanceof WriteGroupOutcomeUnknown) {
@@ -351,7 +357,11 @@ export async function sparqlUpdateAct(input: SparqlUpdateInput): Promise<SparqlU
         const refused = refusedAnswer(planned);
         return refuse(REFUSED_STATUS, SPARQL_UPDATE_REFUSED, refused.error, refused.body);
       }
-      const plans = knobs.afterPlan ? await knobs.afterPlan(planned.plans) : planned.plans;
+      // The writes the group makes: a delete of an edge the same batch converges is dropped by the group, so it is no record changed, no
+      // destructive call and no delete that landed (`seqs` reports it 0). The count and the answer are of what the group writes.
+      const given = knobs.afterPlan ? await knobs.afterPlan(planned.plans) : planned.plans;
+      const dropped = droppedDeletes(given);
+      const plans = dropped.size === 0 ? given : given.filter((_, i) => !dropped.has(i));
       if (plans.length > maxRecordsChanged) {
         return refuse(SPARQL_TOO_LARGE, SPARQL_TOO_MANY_CHANGES, `The Update changes ${plans.length} records, more than ${maxRecordsChanged} (sparql.maxRecordsChanged): nothing was written — split it`,
           { cap: maxRecordsChanged, records: plans.length });
