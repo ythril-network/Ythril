@@ -8,6 +8,11 @@
  * the export's own mapper (`recordTriples`, so a statement here is the statement the export writes), become RDF/JS quads in the member's
  * graph, and are filtered to the pattern. The answer streams; finds start on the first read.
  *
+ * A member whose triple index may be read now (`triple-index/read.ts` `indexVerdict`: ready, of the member's form, caught up; bundle-273,
+ * Q-764 S3) is answered from the index instead, with the same statements: one find of `rdf_quads` per pattern, or per hundred bindings of a
+ * join (`batch-bind-join.ts` through {@link batchMatcherOf}), its rows counted against `sparql.maxIndexRowsRead`. The decision is made
+ * once per member and query; `index: false` (an Update's evaluation) and `narrow: false` read the records alone.
+ *
  * ## What it prevents
  *
  * - **A read outside the caller's scope or rights.** The members are the spaces the door's guard accepted, read through `rdfMembers`: a
@@ -53,7 +58,11 @@ import { xsd } from './literals.js';
 import { rdfKindCollection, rdfMembers, rdfRowFilter, type RdfMember } from './rdf-members.js';
 import { isBound, quadCandidates, type CandidateFind, type PatternSlot, type PatternTerm, type QuadPattern } from './quad-candidates.js';
 import { toRdfJs } from './rdf-js-terms.js';
-import { SPARQL_RETRY_AFTER_SECONDS, SPARQL_STORE_UNAVAILABLE, SPARQL_UNAVAILABLE, SparqlRefusal, sparqlRefusalOf, timeoutRefusal, tooMuchReadRefusal } from './sparql-refusal.js';
+import {
+  SPARQL_RETRY_AFTER_SECONDS, SPARQL_STORE_UNAVAILABLE, SPARQL_TOO_LARGE, SPARQL_TOO_MUCH_READ, SPARQL_UNAVAILABLE, SparqlRefusal, sparqlRefusalOf,
+  timeoutRefusal, tooMuchReadRefusal,
+} from './sparql-refusal.js';
+import { IndexRead, indexVerdict } from './triple-index/read.js';
 import type { RdfCaller, FingerprintOf } from './rdf-space-state.js';
 
 /** The longest server deadline one find carries, in milliseconds, whatever time the query has left (as `brain/query.ts`). */
@@ -79,8 +88,13 @@ export interface QuadSourceOptions {
   deadline: number;
   /** The most records the query may read; `sparql.maxRecordsRead` when absent. */
   maxRecordsRead?: number;
-  /** `false`: every pattern walks every kind (the answer each narrowing rule is held to). Default true. */
+  /** `false`: every pattern walks every kind (the answer each narrowing rule is held to); every member is read from its records. Default true. */
   narrow?: boolean;
+  /**
+   * `false`: every member is read from its records, never from its triple index (an Update's evaluation, which plans on the records and seqs
+   * it read; the equal-answers spec's other path). Default true: a member whose index may be read now (`triple-index/read.ts`) is.
+   */
+  index?: boolean;
   /** Ends every read when the caller goes away. */
   signal?: AbortSignal;
 }
@@ -107,6 +121,29 @@ export interface QuadSource {
   readRecords(): ReadRecord[];
   /** The first record read at two different seqs by this query, or null: the record changed while the query read it. */
   lostRace(): LostRace | null;
+  /** Each member read so far and where from: its triple index or its records (decided once per query and member). */
+  readPaths(): Array<{ space: string; path: 'index' | 'records' }>;
+  /** Statement rows read from the triple indexes so far, every match together (bounded by `sparql.maxIndexRowsRead`). */
+  indexRowsRead(): number;
+}
+
+/** A pattern of a join's right side with one binding of its left side put in: subject, predicate, object, graph. */
+export type BoundPattern = readonly [PatternSlot, PatternSlot, PatternSlot, PatternSlot];
+
+/**
+ * What the batched bind join (`batch-bind-join.ts`) asks of a quad source: the statements of up to {@link BATCH_PATTERNS} patterns at once,
+ * per pattern in order. A failed read answers no statement and is recorded as the query's ({@link QuadSource.failure},
+ * {@link QuadSource.defect}), as a match stream's is: no error reaches the engine's iterators.
+ */
+export interface BatchMatcher { matchBatch(patterns: readonly BoundPattern[]): Promise<N3.Quad[][]> }
+/** The most patterns one batch holds: one find of an index answers them. */
+export const BATCH_PATTERNS = IndexRead.BATCH;
+
+/** The quad sources of the queries running now, each with its batch reader (a weak map: a source the engine let go is forgotten). */
+const batchers = new WeakMap<object, BatchMatcher>();
+/** The batch reader of `source` when it is a quad source of this module, else undefined (the join then binds one binding at a time). */
+export function batchMatcherOf(source: unknown): BatchMatcher | undefined {
+  return typeof source === 'object' && source !== null ? batchers.get(source) : undefined;
 }
 
 /** The query one find sends: where, which rows, which fields, in what order and how many. */
@@ -287,8 +324,11 @@ class MatchStream extends Readable {
 /** The quad source of `scope` for one query. */
 export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): QuadSource {
   const { members, leftOut } = rdfMembers(scope.members, scope.caller, scope.fingerprintOf);
-  const cap = opts.maxRecordsRead ?? sparqlLimits(getConfig()).maxRecordsRead;
+  const limits = sparqlLimits(getConfig());
+  const cap = opts.maxRecordsRead ?? limits.maxRecordsRead;
   const narrow = opts.narrow !== false;
+  /** A query may read its members' indexes: not one that walks every kind (`narrow: false`), not one held to its records (`index: false`). */
+  const mayReadIndex = narrow && opts.index !== false;
   const graphs = new Map(members.map(m => [m.space, DataFactory.namedNode(graphIri(m.meta))]));
   const counts = new Map<string, number>();
   let read = 0;
@@ -342,6 +382,31 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     throw mapped;
   };
 
+  /** The query's reads of its members' indexes: one row count against `sparql.maxIndexRowsRead`, one term cache. */
+  const indexCap = limits.maxIndexRowsRead;
+  const indexRead = new IndexRead({
+    cap: indexCap, deadline: opts.deadline,
+    check: () => { checkCaller(); findMs(); },
+    tooMuch: () => new SparqlRefusal(SPARQL_TOO_LARGE, SPARQL_TOO_MUCH_READ,
+      `The query reads more than ${indexCap} statements of its spaces' indexes (sparql.maxIndexRowsRead), so nothing of it is answered: bind more of its patterns`),
+  });
+  /** Where each member is read from, decided once per query (`triple-index/read.ts` gives the rule). */
+  const verdicts = new Map<string, Promise<'index' | 'records'>>();
+  const paths = new Map<string, 'index' | 'records'>();
+  const pathOf = (member: RdfMember): Promise<'index' | 'records'> => {
+    let p = verdicts.get(member.space);
+    if (p === undefined) {
+      const verdict = mayReadIndex
+        ? indexVerdict(member.space, member.meta, opts.deadline).then(v => v.read)
+        : Promise.resolve('records' as const);
+      p = verdict.then((path) => { paths.set(member.space, path); return path; });
+      verdicts.set(member.space, p);
+    }
+    return p;
+  };
+  /** The subject, predicate and object of `pattern`. */
+  const triple = ([s, p, o]: QuadPattern): readonly [PatternSlot, PatternSlot, PatternSlot] => [s, p, o];
+
   /** The finds of `pattern` in `member` the caller may read. */
   const findsOf = (pattern: QuadPattern, member: RdfMember): CandidateFind[] =>
     quadCandidates(pattern, member, narrow).filter(f => f.kind !== 'file' || member.files);
@@ -388,6 +453,13 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
       for (const member of members) {
         const graph = graphs.get(member.space)!;
         if (!fits(g, graph)) continue;
+        if (await pathOf(member) === 'index') {
+          // The index holds each statement once with its counts, so neither the agent nor the edge rule below is needed.
+          for await (const quad of indexRead.match(member.space, member.files, graph, triple(pattern))) {
+            if (fits(s, quad.subject) && fits(p, quad.predicate) && fits(o, quad.object)) yield quad;
+          }
+          continue;
+        }
         const agentsSeen = new Set<string>();
         const statements = new Set<string>();
         for (const find of findsOf(pattern, member)) {
@@ -431,7 +503,46 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     return n;
   }
 
-  return {
+  /** The records path of one batch: each pattern read as its own match, at most {@link RECORD_MATCHES_AT_ONCE} at once (the engine's own). */
+  async function recordsBatch(patterns: ReadonlyArray<readonly [BoundPattern, number]>, graph: N3.NamedNode, out: N3.Quad[][]): Promise<void> {
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < patterns.length) {
+        const [[s, p, o], i] = patterns[next++]!;
+        for await (const quad of quadsOf([s, p, o, graph], new HeldCursors())) out[i]!.push(quad);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(RECORD_MATCHES_AT_ONCE, patterns.length) }, worker));
+  }
+
+  /** The statements of each pattern of a join's batch, per pattern ({@link BatchMatcher}): a member read from its index answers them with one find. */
+  async function matchBatch(patterns: readonly BoundPattern[]): Promise<N3.Quad[][]> {
+    const out = patterns.map((): N3.Quad[] => []);
+    try {
+      throwWhenFailed();
+      for (const member of members) {
+        const graph = graphs.get(member.space)!;
+        const here = patterns.map((p, i) => [p, i] as const).filter(([p]) => fits(p[3], graph));
+        if (here.length === 0) continue;
+        if (await pathOf(member) !== 'index') { await recordsBatch(here, graph, out); continue; }
+        for (let at = 0; at < here.length; at += BATCH_PATTERNS) {
+          const part = here.slice(at, at + BATCH_PATTERNS);
+          const found = await indexRead.matchMany(member.space, member.files, graph, part.map(([p]) => triple(p)));
+          part.forEach(([[s, p, o], i], k) => {
+            for (const quad of found[k] ?? []) if (fits(s, quad.subject) && fits(p, quad.predicate) && fits(o, quad.object)) out[i]!.push(quad);
+          });
+        }
+      }
+      return out;
+    } catch (err) {
+      // The query's refusal or defect is recorded (as a match stream's is); the engine reads it when the result ends. A read the caller
+      // ended is no failure of the query.
+      if (!(err instanceof ReadAborted)) { try { fail(err); } catch { /* recorded by `fail` */ } }
+      return patterns.map(() => []);
+    }
+  }
+
+  const source: QuadSource = {
     match(s, p, o, g) {
       const cursors = new HeldCursors();
       return new MatchStream(quadsOf([s, p, o, g], cursors), cursors);
@@ -450,6 +561,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
           // A bound subject or object names few statements: the engine is told 1, with no store call.
           if (isBound(s) || isBound(o)) continue;
           findMs();
+          if (await pathOf(member) === 'index') { sum += await indexRead.estimate(member.space, member.files, triple(pattern)); continue; }
           for (const find of finds) sum += await estimate(member, find);
         }
         if (!any) return 0;
@@ -470,7 +582,14 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     defect: () => defect,
     readRecords: () => [...reads.values()].map(r => ({ ...r })),
     lostRace: () => (lost ? { ...lost, seqs: [lost.seqs[0], lost.seqs[1]] } : null),
+    readPaths: () => [...paths].map(([space, path]) => ({ space, path })),
+    indexRowsRead: () => indexRead.rowsRead(),
   };
+  batchers.set(source, { matchBatch });
+  return source;
 }
+
+/** How many record matches of one batch run at once: the engine's own bind join runs four (asynciterator's default buffer). */
+const RECORD_MATCHES_AT_ONCE = 4;
 
 export type { PatternTerm };

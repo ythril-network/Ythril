@@ -36,14 +36,23 @@ export interface SparqlLimitsConfig {
     maxResultBytes?: number;
     /** The most records one SPARQL Update may change (insert, converge or delete); more is 413 `sparql_too_many_changes`. Default 1 000. */
     maxRecordsChanged?: number;
+    /**
+     * The most statement rows one query may read from the triple indexes of its members, every match together; the next row ends it with
+     * 413 `sparql_too_much_read`. Default {@link INDEX_ROWS_PER_RECORD} times the `maxRecordsRead` in effect (a record states about that many).
+     */
+    maxIndexRowsRead?: number;
   };
 }
 
+/** How many index rows a query may read per record it may read: the default of `maxIndexRowsRead` (bundle-273, Q-764 S3). */
+export const INDEX_ROWS_PER_RECORD = 20;
+
 /** The limits in effect, every key set. */
-export interface SparqlLimits { timeoutMs: number; maxRecordsRead: number; maxResults: number; maxResultBytes: number; maxRecordsChanged: number }
+export interface SparqlLimits { timeoutMs: number; maxRecordsRead: number; maxResults: number; maxResultBytes: number; maxRecordsChanged: number; maxIndexRowsRead: number }
 
 /** The defaults; `maxRecordsRead` is the measured one (the module's docblock gives the measurement). */
-export const SPARQL_LIMIT_DEFAULTS: Readonly<SparqlLimits> = Object.freeze({ timeoutMs: 30_000, maxRecordsRead: 200_000, maxResults: 10_000, maxResultBytes: 64 * 1024 * 1024, maxRecordsChanged: 1_000 });
+const RECORDS_READ_DEFAULT = 200_000;
+export const SPARQL_LIMIT_DEFAULTS: Readonly<SparqlLimits> = Object.freeze({ timeoutMs: 30_000, maxRecordsRead: RECORDS_READ_DEFAULT, maxResults: 10_000, maxResultBytes: 64 * 1024 * 1024, maxRecordsChanged: 1_000, maxIndexRowsRead: INDEX_ROWS_PER_RECORD * RECORDS_READ_DEFAULT });
 
 /** The bounds each key is held to, inclusive. */
 const TIMEOUT_MS_MIN = 1_000;
@@ -64,6 +73,7 @@ export const SPARQL_LIMIT_BOUNDS: Readonly<Record<keyof SparqlLimits, { min: num
   maxResults: { min: 1, max: RESULTS_MAX },
   maxResultBytes: { min: RESULT_BYTES_MIN, max: RESULT_BYTES_MAX },
   maxRecordsChanged: { min: 1, max: RECORDS_CHANGED_MAX },
+  maxIndexRowsRead: { min: RECORDS_READ_MIN, max: INDEX_ROWS_PER_RECORD * RECORDS_READ_MAX },
 });
 
 const KEYS = Object.keys(SPARQL_LIMIT_BOUNDS) as (keyof SparqlLimits)[];
@@ -95,9 +105,11 @@ export function validateSparqlLimits(cfg: SparqlLimitsConfig): void {
 /** The SPARQL limits in effect, read live: each key the config sets, else its default. */
 export function sparqlLimits(cfg: SparqlLimitsConfig): SparqlLimits {
   const s = cfg.sparql ?? {};
+  const maxRecordsRead = s.maxRecordsRead ?? SPARQL_LIMIT_DEFAULTS.maxRecordsRead;
   return {
     timeoutMs: s.timeoutMs ?? SPARQL_LIMIT_DEFAULTS.timeoutMs,
-    maxRecordsRead: s.maxRecordsRead ?? SPARQL_LIMIT_DEFAULTS.maxRecordsRead,
+    maxRecordsRead,
+    maxIndexRowsRead: s.maxIndexRowsRead ?? INDEX_ROWS_PER_RECORD * maxRecordsRead,
     maxResults: s.maxResults ?? SPARQL_LIMIT_DEFAULTS.maxResults,
     maxResultBytes: s.maxResultBytes ?? SPARQL_LIMIT_DEFAULTS.maxResultBytes,
     maxRecordsChanged: s.maxRecordsChanged ?? SPARQL_LIMIT_DEFAULTS.maxRecordsChanged,

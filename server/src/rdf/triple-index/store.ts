@@ -30,6 +30,8 @@
  * - **A batch written by a follower that lost its lease.** The lease is read inside the transaction; another owner's lease aborts the batch.
  */
 import { Binary, type ClientSession } from 'mongodb';
+import type { SpaceMeta } from '@ythril-network/schema';
+import { canonicalJsonHash } from '../../util/canonical-json.js';
 import { col, asFilter, asUpdate, asBulk } from '../../db/mongo.js';
 import { spaceCollection, parseSpaceCollection, SPACE_COLLECTIONS, type SpacePart } from '../../db/space-collection.js';
 import { inBoundedTransaction } from '../../db/bounded-transaction.js';
@@ -58,6 +60,20 @@ const PREDICATE_AT = TERM_ID_BYTES;
 const OBJECT_AT = PREDICATE_AT + TERM_ID_BYTES;
 /** The most rows one bulk command sends. */
 const ROWS_PER_COMMAND = 1_000;
+
+/**
+ * The version of the record form the index is built for: raised when `recordTriples` or the term key changes what it writes, so every
+ * index built before reads as another form (`stale`) and is rebuilt.
+ */
+export const RDF_FORM_VERSION = 1;
+
+/**
+ * The key of the form `meta` gives: equal metas, equal keys. It lives here, beside the state that stores it, so the follower that writes
+ * it and the reader that compares it both import it from the store and never from each other.
+ */
+export function formKeyOf(meta: SpaceMeta): string {
+  return canonicalJsonHash({ formVersion: RDF_FORM_VERSION, meta });
+}
 
 /** How far the index is: being filled (`catching-up`), caught up (`ready`), or built for a form the space no longer has (`stale`). */
 export type TripleIndexStatus = 'catching-up' | 'ready' | 'stale';

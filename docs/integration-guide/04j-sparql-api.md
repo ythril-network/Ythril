@@ -79,8 +79,24 @@ never a short `200`.
 | `sparql.maxRecordsRead` | 200 000 | Records one query may read, every pattern together. |
 | `sparql.maxResults` | 10 000 | Rows (or statements) one answer may hold. |
 | `sparql.maxResultBytes` | 67 108 864 (64 MiB) | Bytes of values (every term of every row or statement) one answer may hold, from 1 MiB to 1 GiB. |
+| `sparql.maxIndexRowsRead` | 4 000 000 | Statements one query may read from its spaces' triple indexes, every pattern together; by default 20 times `sparql.maxRecordsRead`, from 1 000 to 200 000 000. |
 
 An answer is read while the records change: it is not a point-in-time snapshot, so a record written while the query runs may or may not be in it.
+
+### The triple index, and when a query reads the records
+
+Each space with RDF on keeps a triple index: its statements, stored once each in the space's own collections and brought up to date
+before a write's answer is sent. A query reads a space from its index when the index is ready, was built for the space's schema as it is
+now, and is caught up: no record or deletion stands beyond what it holds, and no write outside the record positions (a raw database
+write, the journal's case) is still to be applied. When it is behind by at most 2 000 records, the query lets it catch up for up to a
+quarter of the time it has left. Otherwise that space is read from its records, which answer the same statements (more slowly), and the
+index catches up in the background. A space whose index is stale (its schema changed, or a write the index cannot name) is read from its
+records until the index is rebuilt.
+
+Either way the answer is the same: the same statements, the same rights (without `files: read` no file statement is read from either),
+and the same refusals. A read from the index counts statements against `sparql.maxIndexRowsRead`; a read from the records counts records
+against `sparql.maxRecordsRead`; either bound passed is `413 sparql_too_much_read`. A join over an index looks its bindings up a hundred at
+a time. A SPARQL Update always evaluates its patterns over the records.
 
 The keys are read live. At most two queries run at once on an instance and one per token (`503 sparql_busy` with `Retry-After`).
 `SERVICE` (federation), `LOAD` and SPARQL Update are refused: this endpoint reads this server's own records and never reaches the network.
@@ -108,7 +124,7 @@ text, and a `503` adds `retryAfterSeconds` and `Retry-After`.
 | 413 | `sparql_query_too_large` | The text is over 64 KiB, or a form holds more parameters than a query takes. |
 | 413 | `sparql_too_many_results` | The answer holds more than `sparql.maxResults` rows, or more than `limit`. |
 | 413 | `sparql_answer_too_large` | The answer holds more than `sparql.maxResultBytes` bytes of values, however few rows: a record may be 10 MB. |
-| 413 | `sparql_too_much_read` | The query reads more than `sparql.maxRecordsRead` records. |
+| 413 | `sparql_too_much_read` | The query reads more than `sparql.maxRecordsRead` records, or more than `sparql.maxIndexRowsRead` statements of its spaces' triple indexes. |
 | 415 | `sparql_unsupported_media_type` | A POST that is neither `application/sparql-query` nor a form, or whose charset or `Content-Encoding` is not read. |
 | 503 | `sparql_timeout` | The query ran past `sparql.timeoutMs`. |
 | 503 | `sparql_store_unavailable` | The store did not answer a read. |
