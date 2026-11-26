@@ -12,6 +12,7 @@
  *    reads them, never as the view's owner had them, never as the instance.
  * 3. **The cap.** A CONSTRUCT that would produce more than 50 000 statements is refused with `413 view_construct_too_large` on each door,
  *    with no statement of it: never a cut answer.
+ *    Exactly 50 000 statements are answered whole (the export and the address; the SPARQL endpoint's own `maxResults` bounds what it answers).
  * 4. **The address is the owner's.** Another token's SPARQL view, and a plain view, have no Linked Data address: `404 ld_not_found`.
  *
  * ## Seen red on 9f5d8d295
