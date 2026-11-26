@@ -16,7 +16,7 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { rdfExportAct, RDF_EXPORT_LIMIT_MAX, RDF_EXPORT_CURSOR_MAX, RDF_EDGE_DETAILS, RDF_EXPORT_REFUSAL_CODES } from '../../rdf/export-act.js';
 import { RDF_FORMATS } from '../../rdf/serialize.js';
 import { EXPORT_SLOTS_INSTANCE, EXPORT_SLOTS_PER_CALLER } from '../../export/export-slots.js';
-import { viewReadOfCall } from '../../spaces/read-scope.js';
+import { viewConstructOfCall, viewReadOfCall } from '../../spaces/read-scope.js';
 import { toolRefusalOfAct } from '../../util/errors.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { KEYSET_PAGER } from '../../brain/result-budget.js';
@@ -32,6 +32,8 @@ export const RDF_EXPORT_OUTPUT_SCHEMA = {
     format: { type: 'string', enum: [...RDF_FORMATS] }, mediaType: { type: 'string' }, edgeDetails: { type: 'string', enum: [...RDF_EDGE_DETAILS] },
     version: { type: ['string', 'null'] }, records: { type: 'integer' }, counts: { type: 'object', additionalProperties: { type: 'integer' } },
     complete: { type: 'boolean' }, nextAfter: { type: 'string' },
+    // A SPARQL view's export (Q-762): the statements its CONSTRUCT made; `records` and `counts` are then 0.
+    statements: { type: 'integer' },
     skippedValues: {
       type: 'object',
       properties: {
@@ -88,7 +90,7 @@ export const export_rdfTool: ToolHandler = {
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { format, edgeDetails, after, limit, maxChars, maxBytes, maxTokens } = ctx.args;
     const r = await rdfExportAct({
-      spaceId: ctx.callSpace, viewMembers: viewReadOfCall(ctx, ctx.callSpace),
+      spaceId: ctx.callSpace, viewMembers: viewReadOfCall(ctx, ctx.callSpace), viewConstruct: viewConstructOfCall(ctx, ctx.callSpace),
       params: { format, edgeDetails, after, limit, maxChars, maxBytes, maxTokens },
       caller: ctx.callerRecord ?? { rights: ctx.rights ?? null }, callerKey: ctx.rateKey, transport: ctx.transport, fingerprintOf: schemaFingerprintOf,
     });

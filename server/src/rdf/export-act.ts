@@ -40,7 +40,7 @@ import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { takeExportSlot, EXPORT_RETRY_AFTER_SECONDS, EXPORT_SLOTS_INSTANCE, EXPORT_SLOTS_PER_CALLER, type ExportSlot } from '../export/export-slots.js';
 import {
-  EXPORT_OK, EXPORT_BAD_REQUEST, EXPORT_FORBIDDEN, EXPORT_NOT_ACCEPTABLE, EXPORT_CONFLICT, EXPORT_BUSY, EXPORT_UNAVAILABLE,
+  EXPORT_OK, EXPORT_BAD_REQUEST, EXPORT_BUSY, EXPORT_UNAVAILABLE,
 } from '../export/export-statuses.js';
 import { blank, iri, plain, quad, stdIri, typed, xsd, type Quad, type EdgeDetails, type LeftOutReason } from './literals.js';
 import { RDF_READ_FIELDS, SKIPPED_VALUES_NAMED_MAX, recordTriples, createSkippedLog, type RdfRecordKind, type SkippedValue } from './record-triples.js';
@@ -52,6 +52,9 @@ import {
 } from './rdf-space-state.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 import { MIN_TRANSFER_BYTES_PER_SECOND } from '../util/pace-window.js';
+import { SPARQL_GRAPH_FORMATS } from './sparql-answer.js';
+import { VIEW_CONSTRUCT_TOO_LARGE } from './view-construct.js';
+import { constructPage } from './export-construct.js';
 
 /** The most records one page holds. */
 export const RDF_EXPORT_LIMIT_MAX = 10_000;
@@ -91,6 +94,7 @@ export const RDF_EXPORT_INCOMPLETE = 'rdf_export_incomplete';
 export const RDF_EXPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   RDF_BAD_FORMAT, 'rdf_format_not_acceptable', RDF_BAD_EDGE_DETAILS, RDF_BAD_AFTER, RDF_BAD_LIMIT, RDF_BAD_BUDGET,
   RDF_NOT_ENABLED, 'rdf_base_conflict', RDF_BASE_SHARED, RDF_BASE_NESTED, 'rdf_term_clash', RDF_UNWRITABLE, RDF_EXPORT_BUSY, RDF_EXPORT_INCOMPLETE,
+  VIEW_CONSTRUCT_TOO_LARGE,
 ]);
 
 /** The edge forms, by their parameter value. */
@@ -125,64 +129,9 @@ const REASON_WORDS: Readonly<Record<LeftOutReason, string>> = {
   'key-has-no-address': 'a key with no address',
 };
 
-/** One left-out value, with the space it was read in. */
-export interface NamedSkippedValue extends SkippedValue { space: string }
-
-/** What a page says about itself: the summary MCP answers in `structuredContent` and as its second block. */
-export interface RdfExportSummary {
-  space: string;
-  members: string[];
-  membersWithoutRdf?: string[];
-  membersInConflict?: string[];
-  format: RdfFormat;
-  mediaType: string;
-  edgeDetails: EdgeDetails;
-  version: string | null;
-  records: number;
-  counts: Record<RdfRecordKind, number>;
-  /** Whether the document is whole, as its `ythril:complete` says: true on every page answered; `nextAfter` says whether more is left. */
-  complete: boolean;
-  nextAfter?: string;
-  skippedValues: { count: number; named: NamedSkippedValue[]; unnamed: number };
-  fileTriplesWithheld: boolean;
-  truncated: boolean;
-  budgetChars: number;
-  budgetBytes: number | null;
-  charsReturned: number;
-  bytesReturned: number;
-  budgetBoundBy?: string[];
-}
-
-/**
- * A view's members the caller reads that the export leaves out, by why: RDF off (`withoutRdf`), or names not settled (`inConflict`: a
- * contested or shared base, a term clash, an address no document can carry). Only members the guard accepted for the caller are ever here.
- */
-export interface MembersLeftOut { withoutRdf: string[]; inConflict: string[] }
-
-/** A finished page: its text in pieces, its summary, what each door puts on its wire, and the slot to release when it is sent. */
-export interface RdfExportPage {
-  status: typeof EXPORT_OK;
-  kind: 'page';
-  chunks: string[];
-  summary: RdfExportSummary;
-  contentType: string;
-  disposition: string;
-  /** The records the named left-out values belong to, each once (the REST door spells them into its trailer). */
-  skippedRecords: string[];
-  /** The audit row's changes (scalars only, cut to the operation's allowlist by the middleware). */
-  auditChanges: Array<{ field: string; to: string | number | boolean }>;
-  /** The view's members, for `Ythril-View-Members`; absent for a space. */
-  viewMembers?: string[];
-  slot: ExportSlot;
-}
-
-export interface RdfExportRefusal {
-  status: typeof EXPORT_BAD_REQUEST | typeof EXPORT_FORBIDDEN | typeof EXPORT_NOT_ACCEPTABLE | typeof EXPORT_CONFLICT | typeof EXPORT_BUSY | typeof EXPORT_UNAVAILABLE;
-  error: string;
-  code: string;
-  detail?: Record<string, unknown>;
-  retryAfterSeconds?: number;
-}
+/** A page, its summary and a refusal: shared with the SPARQL view's page (`export-construct.ts`) through a module of types alone. */
+export type { NamedSkippedValue, RdfExportSummary, MembersLeftOut, RdfExportPage, RdfExportRefusal } from './export-shapes.js';
+import type { NamedSkippedValue, RdfExportSummary, MembersLeftOut, RdfExportPage, RdfExportRefusal } from './export-shapes.js';
 
 /**
  * The whole scope as one stream (REST with no `limit`, `after` or size ceiling): the text a store page at a time, the slot to release when
@@ -216,6 +165,11 @@ export interface RdfExportInput {
   spaceId: string;
   /** The members the door's guard accepted for the caller's own view (`viewReadOfRequest` / `viewReadOfCall`); absent for a space. */
   viewMembers?: readonly string[] | undefined;
+  /**
+   * The CONSTRUCT of the caller's own SPARQL view (`viewConstructOfRequest` / `viewConstructOfCall`, Q-762): the export is then the
+   * CONSTRUCT's statements over `viewMembers` as the caller reads them, one graph in one document (`constructPage`).
+   */
+  viewConstruct?: string | undefined;
   /** The caller's parameters as sent (a REST query's strings are read as their numbers). */
   params: Record<string, unknown>;
   /** The REST `Accept` header; MCP has none. */
@@ -350,7 +304,9 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
   // good).
   let handedOver = false;
   try {
-    const answer = input.whole === true ? streamWhole(p) : await buildPage(p);
+    const answer = input.viewConstruct !== undefined ? await constructPage(p, input.viewConstruct)
+      : input.whole === true ? streamWhole(p) : await buildPage(p);
+    if ('error' in answer) return answer;
     handedOver = true;
     return answer;
   } catch (err) {
@@ -381,8 +337,15 @@ function prepareExport(input: Omit<RdfExportInput, 'whole'>): PreparedExport | R
   const first = scope.leftOut[0];
   if (first && exported.length === 0) return { status: first.status, error: first.error, code: first.code, ...(first.detail ? { detail: first.detail } : {}) };
 
-  const choice = chooseRdfFormat({ format: parsed.data.format, accept: input.accept, members: exported.length });
+  // A SPARQL view's export is its CONSTRUCT's statements: one graph, in the formats a CONSTRUCT answers in, and one document (no cursor).
+  const construct = input.viewConstruct !== undefined;
+  const choice = construct
+    ? chooseRdfFormat({ format: parsed.data.format, accept: input.accept, members: 1, offered: SPARQL_GRAPH_FORMATS })
+    : chooseRdfFormat({ format: parsed.data.format, accept: input.accept, members: exported.length });
   if (!choice.ok) return { status: choice.status, error: choice.error, code: choice.code, detail: { formats: choice.formats } };
+  if (construct && parsed.data.after !== undefined) {
+    return { status: EXPORT_BAD_REQUEST, error: 'after: the export of a SPARQL view is one document, with no next page', code: RDF_BAD_AFTER };
+  }
   const format = choice.format;
   if (format === 'jsonld' && parsed.data.edgeDetails === 'rdf12') {
     return { status: EXPORT_BAD_REQUEST, error: 'JSON-LD 1.1 has no triple term, so it carries edge details only in the classic form: leave edgeDetails out or send reification', code: RDF_BAD_EDGE_DETAILS };

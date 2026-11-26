@@ -74,6 +74,11 @@ export interface ToolContext {
    */
   viewReads: ReadonlyMap<string, readonly string[]>;
   /**
+   * The CONSTRUCT of each SPARQL view among `viewReads` (Q-762), by view id: only a tool that reads one (`VIEW_CONSTRUCT_TOOLS`) is handed
+   * such a view at all. Read with `viewConstructOfCall`.
+   */
+  viewConstructs?: ReadonlyMap<string, string>;
+  /**
    * Who a rate limit counts against: the calling token's id, or the IP when there is none — the key `callTool` uses
    * for `heavy` tools, handed on so a shared module that holds its own rail (`beginIngest`) counts the same caller.
    */

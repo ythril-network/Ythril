@@ -60,7 +60,8 @@ function derived() {
   for (const v of Object.values(consts(answer))) if (CODE_SHAPE.test(v) && /^(sparql|rdf)_/.test(v)) found.add(v);
   for (const { module, names } of imports(answer, ANSWER)) {
     const table = consts(code(module));
-    for (const n of names) if (table[n] && CODE_SHAPE.test(table[n]) && /^(sparql|rdf)_/.test(table[n])) found.add(table[n]);
+    // `view_`: a SPARQL view's CONSTRUCT is run by the answer module (`view-construct.ts`, Q-762), and its cap is the endpoint's refusal too.
+    for (const n of names) if (table[n] && CODE_SHAPE.test(table[n]) && /^(sparql|rdf|view)_/.test(table[n])) found.add(table[n]);
   }
   const state = code(STATE);
   const union = state.match(/code: (typeof \w+(?: \| typeof \w+)+);/)?.[1] ?? '';

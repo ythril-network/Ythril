@@ -10,6 +10,7 @@
 import { startTripleIndexRebuild, tripleIndexStatusOf } from '../../rdf/triple-index/rebuild.js';
 import type { ToolContext, ToolHandler, ToolResult, ToolSchemas } from './types.js';
 import { toolErrorResult } from '../tool-error-text.js';
+import { viewReadOfCall } from '../../spaces/read-scope.js';
 
 export const space_rdf_rebuildTool: ToolHandler = {
   name: 'space_rdf_rebuild',
@@ -47,7 +48,11 @@ export const space_rdf_indexTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const out = await tripleIndexStatusOf(ctx.callSpace);
+    // A personal view is a read like any other here (knowledge read): it answers its one read member as that member does, and several as
+    // `{ spaces: [...] }`. The view's id is never a collection name (found by `a-personal-view-reads-alike-on-every-door-db`, bundle-273).
+    const members = viewReadOfCall(ctx, ctx.callSpace);
+    const statuses = members ? await Promise.all(members.map(m => tripleIndexStatusOf(m))) : null;
+    const out = !statuses ? await tripleIndexStatusOf(ctx.callSpace) : statuses.length === 1 ? statuses[0] : { spaces: statuses };
     return { content: [{ type: 'text' as const, text: JSON.stringify(out) }], structuredContent: out as unknown as Record<string, unknown> };
   },
 };

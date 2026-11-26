@@ -17,7 +17,21 @@ import type { TokenRights } from '../config/rights-shape.js';
 /** The request half: who is asking, and the view the guard accepted for this request. */
 export interface ReadRequest {
   authToken?: unknown;
-  viewRead?: { id: string; spaces: readonly string[] } | undefined;
+  viewRead?: { id: string; spaces: readonly string[]; construct?: string | undefined } | undefined;
+}
+
+/**
+ * The CONSTRUCT of the caller's own SPARQL view the guard accepted for `spaceId` (Q-762), or `undefined` for a space and a plain view: the
+ * RDF doors read such a view as the CONSTRUCT's statements over its members (`rdf/view-construct.ts`). Only a door that reads one is ever
+ * handed one; the guard refuses it at every other.
+ */
+export function viewConstructOfRequest(req: ReadRequest, spaceId: string): string | undefined {
+  return req.viewRead && req.viewRead.id === spaceId ? req.viewRead.construct : undefined;
+}
+
+/** The same for a tool call. */
+export function viewConstructOfCall(ctx: Pick<ReadCall, 'viewConstructs'>, space: string): string | undefined {
+  return ctx.viewConstructs?.get(space);
 }
 
 /** The spaces the request reads for `spaceId`: the accepted view's members, or `[spaceId]` when the caller reaches it, else `[]`. */
@@ -53,6 +67,7 @@ export function readSpacesOfRequestAcross(req: ReadRequest, spaceIds: readonly s
 /** The tool half: what the dispatcher resolved for this call. */
 export interface ReadCall {
   viewReads: ReadonlyMap<string, readonly string[]>;
+  viewConstructs?: ReadonlyMap<string, string> | undefined;
   accessibleSpaceIds: readonly string[];
 }
 

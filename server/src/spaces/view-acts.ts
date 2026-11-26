@@ -32,6 +32,7 @@ import { unknownSpaceSentence } from './unknown-space.js';
 import { dropSpaceData } from './lifecycle.js';
 import { NAME_QUOTED, peerText } from '../util/log.js';
 import { z } from 'zod';
+import { checkViewSparql } from '../rdf/view-construct.js';
 
 /**
  * The bounds a view's `members` are held to, on every door: both doors' acts parse with these (a create must send members, an update
@@ -56,6 +57,20 @@ export interface ViewAnswer {
   readable: string[];
   createdAt: string;
   migratedFrom?: string;
+  /** The SPARQL CONSTRUCT the view stands for (Q-762); absent on a plain view. */
+  sparql?: { query: string };
+}
+
+/**
+ * The `sparql` a door was sent for a view: `undefined` when it sent none, `null` to make the view a plain one, else the checked CONSTRUCT.
+ * Judged before the config write (the check parses, which is asynchronous), by the one check both doors share (`checkViewSparql`).
+ * @throws ViewRefusal for anything that is no CONSTRUCT the readers will run
+ */
+async function checkedSparql(raw: unknown): Promise<{ query: string } | null | undefined> {
+  if (raw === undefined || raw === null) return raw;
+  const checked = await checkViewSparql(raw);
+  if ('problem' in checked) throw new ViewRefusal(checked.problem, checked.message);
+  return { query: checked.query };
 }
 
 /** Whether the holder of `rights` (bound to `peerId`, or none) may have `spaceId` listed in a view: the one admission rule, `memberAdmissible`. */
@@ -74,6 +89,7 @@ export function viewAnswer(actor: ViewActor, view: ViewRecord, config: Config = 
   return {
     id: view.id, name: view.name, members: [...view.members], readable, createdAt: view.createdAt,
     ...(view.migratedFrom ? { migratedFrom: view.migratedFrom } : {}),
+    ...(view.sparql ? { sparql: { query: view.sparql.query } } : {}),
   };
 }
 
@@ -117,26 +133,33 @@ const tooManyViews = (): ViewRefusal =>
   new ViewRefusal('tooManyViews', `This token already has ${MAX_VIEWS_PER_OWNER} personal views, the most one owner may hold; delete one first`, { limit: MAX_VIEWS_PER_OWNER });
 
 /** Create the caller's own view. @throws ViewRefusal */
-export function createView(actor: ViewActor, input: { name: unknown; members: unknown }): { view: ViewAnswer; ownerKey: string; memberCount: number } {
+export async function createView(actor: ViewActor, input: { name: unknown; members: unknown; sparql?: unknown }): Promise<{ view: ViewAnswer; ownerKey: string; memberCount: number }> {
   const owner = ownerOrRefuse(actor);
   if (peerBoundTo(actor.record)) throw new ViewRefusal('peerBound', 'A token bound to a peer instance cannot own a personal view');
   const name = checkedName(input.name);
+  const sparql = await checkedSparql(input.sparql);
   let made!: ViewRecord;
   mutateConfig(cfg => {
     const mine = viewsOfOwner(owner, cfg);
     const members = checkedMembers(input.members, ViewCreateInput.safeParse({ members: input.members }).success, admissibleFor(actor.rights, peerBoundTo(actor.record), cfg));
     if (mine.some(v => v.name === name)) throw new ViewRefusal('nameTaken', `You already have a view named '${name}'`);
     if (mine.length >= MAX_VIEWS_PER_OWNER) throw tooManyViews();
-    made = { id: viewIdOf(name), name, ownerId: owner, members, createdAt: new Date().toISOString() };
+    made = { id: viewIdOf(name), name, ownerId: owner, members, createdAt: new Date().toISOString(), ...(sparql ? { sparql } : {}) };
     cfg.views = [...(cfg.views ?? []), made];
   });
   return { view: viewAnswer(actor, made), ownerKey: owner, memberCount: made.members.length };
 }
 
-/** Rename and/or re-member the caller's own view; only what was sent is validated. @throws ViewRefusal */
-export function updateView(actor: ViewActor, id: string, input: { name?: unknown; members?: unknown }): { view: ViewAnswer; ownerKey: string; memberCount: number } {
+/**
+ * Rename, re-member and/or re-query the caller's own view; only what was sent is validated. `sparql: null` makes it a plain view again.
+ * @throws ViewRefusal
+ */
+export async function updateView(actor: ViewActor, id: string, input: { name?: unknown; members?: unknown; sparql?: unknown }): Promise<{ view: ViewAnswer; ownerKey: string; memberCount: number }> {
   const owner = ownerOrRefuse(actor);
-  if (input.name === undefined && input.members === undefined) throw new ViewRefusal('nothingToChange', 'Send `name`, `members`, or both');
+  if (input.name === undefined && input.members === undefined && input.sparql === undefined) {
+    throw new ViewRefusal('nothingToChange', 'Send `name`, `members`, `sparql`, or more than one');
+  }
+  const sparql = await checkedSparql(input.sparql);
   let updated!: ViewRecord;
   mutateConfig(cfg => {
     const view = resolveOwnView(owner, id, cfg);
@@ -149,6 +172,8 @@ export function updateView(actor: ViewActor, id: string, input: { name?: unknown
     if (input.members !== undefined) {
       view.members = checkedMembers(input.members, ViewUpdateInput.safeParse({ members: input.members }).success, admissibleFor(actor.rights, peerBoundTo(actor.record), cfg));
     }
+    if (sparql === null) delete view.sparql;
+    else if (sparql !== undefined) view.sparql = sparql;
     updated = view;
   });
   return { view: viewAnswer(actor, updated), ownerKey: owner, memberCount: updated.members.length };
@@ -244,17 +269,28 @@ export function copyViewTo(actor: ViewActor, id: string, toTokenId: unknown, fro
     const earlier = mine.find(v => v.copiedFrom === key);
     if (earlier) {
       earlier.members = kept;
+      // A refresh carries the source's query too (Q-762): the copy is of the view, its query included, or of a plain view.
+      if (from.sparql) earlier.sparql = { query: from.sparql.query }; else delete earlier.sparql;
       result = { view: earlier, created: false };
       return;
     }
     if (mine.length >= MAX_VIEWS_PER_OWNER) throw tooManyViews();
     const name = freeViewName(from.name, new Set(mine.map(v => v.name)));
-    const copy: ViewRecord = { id: viewIdOf(name), name, ownerId: receiverOwner, members: kept, createdAt: new Date().toISOString(), copiedFrom: key };
+    const copy: ViewRecord = {
+      id: viewIdOf(name), name, ownerId: receiverOwner, members: kept, createdAt: new Date().toISOString(), copiedFrom: key,
+      ...(from.sparql ? { sparql: { query: from.sparql.query } } : {}),
+    };
     cfg.views = [...(cfg.views ?? []), copy];
     result = { view: copy, created: true };
   });
   // Answered as the RECEIVER's view (its id may carry a collision suffix); `readable` is empty: it is the receiver's to read.
-  return { view: { id: result.view.id, name: result.view.name, members: [...result.view.members], readable: [], createdAt: result.view.createdAt }, created: result.created, ownerKey: source.ownerId, memberCount: source.members.length };
+  return {
+    view: {
+      id: result.view.id, name: result.view.name, members: [...result.view.members], readable: [], createdAt: result.view.createdAt,
+      ...(result.view.sparql ? { sparql: { query: result.view.sparql.query } } : {}),
+    },
+    created: result.created, ownerKey: source.ownerId, memberCount: source.members.length,
+  };
 }
 
 // ── The instance admin's three doors ───────────────────────────────────────────────────────────────────────────────

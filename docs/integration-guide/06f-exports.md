@@ -82,6 +82,8 @@ A property holds one plain value; structure is edges and links ([decision record
 
 Name your own [personal view](06d-personal-views.md) as the space to export several spaces in one file, one named graph each. A view exports what you could read by naming each member: a member you may not read is not in the answer at all (no graph, no name, no count), exactly as `recall` and `filter` over the view answer. `Ythril-View-Members` (REST, exposed to browsers) and `members` (MCP) name the spaces covered. A member you read whose RDF is off is left out and named (`membersWithoutRdf` on MCP, `Ythril-View-Members-Without-Rdf` on REST, and the closing comment); one whose RDF names are not settled (a contested or shared base, a term clash, an address no document can carry) likewise (`membersInConflict`, `Ythril-View-Members-In-Conflict`). A view none of whose read members has RDF on is `409 rdf_not_enabled`; a view with no member you read answers an empty document that says why.
 
+A view [defined by a SPARQL CONSTRUCT](06d-personal-views.md#a-view-defined-by-a-sparql-construct) exports the statements its CONSTRUCT makes over the members you read, in one graph and one document: Turtle (the default), N-Quads or JSON-LD, no report node, no `Link` and no `after` (`400 rdf_bad_after`). A page (MCP, or REST with a size ceiling) whose document passes its budget, and a CONSTRUCT that makes more than 50 000 statements, are `413 view_construct_too_large`: nothing of it is sent.
+
 ### Rights
 
 The export needs `knowledge: read`. File statements need `files: read` on their space as well: without it they are left out, and the answer says only that some were withheld (`Ythril-File-Triples: withheld`, `fileTriplesWithheld: true`), never how many or which. An edge or a link is written with its ends as [`filter`](04-brain-api.md) shows them at `knowledge: read`. Every export is audited as `rdf.export`, with its scope, format, counts and the values it left out, whether or not reads are logged.
@@ -105,6 +107,7 @@ At most two exports run at once on the instance, one per token; another answers 
 | 409 | `rdf_base_shared` | Another space of this instance holds the same base, so the addresses are not the space's own (`<base>schema` would name two ontologies): one of them needs another base. The other space is named only to a caller who may read its schema. The save doors refuse to make such a pair with the same code ([RDF names](#rdf-names-metardf-and-iri)); a pair that already exists is refused here |
 | 409 | `rdf_base_nested` | The space's base starts the base of another space of this instance, or is started by it, so the addresses of one would be read as the other's (an address under `<base>` belongs to the space with the longest base that starts it): one of them needs a base that neither starts nor is started by another's. The other space is named only to a caller who may read its schema. The save doors refuse to make such a pair with the same code; a pair that already exists is refused here |
 | 409 | `rdf_base_conflict` | A network the space is shared in contests its base. The network, member and offered base are named only to a caller who may read that network |
+| 413 | `view_construct_too_large` | A SPARQL view whose CONSTRUCT makes more than 50 000 statements, or (on a page) whose document passes the page's budget |
 | 429 | `rdf_export_busy` | Two exports run, or one of yours |
 | 503 | `rdf_export_incomplete` | The store did not answer a page |
 
@@ -292,6 +295,8 @@ The address resolves by its base, never by the space id in the path: the instanc
 | `<base>schema/<fingerprint>` | `schema: read` | that schema version as OWL and SHACL (a peer-bound token has only the versions the sync door serves it) |
 | `<base>vocab/<kind>/<type>` (and any other term under the vocab) | `schema: read` | the term's statements in the current schema, its properties' (`#<property>`) with it. A type records use and the schema does not declare answers `rdf:type rdfs:Class` (an edge label `owl:ObjectProperty`) and `rdfs:label` its name, to a token that also holds `knowledge: read`; a type no record uses is `404` |
 
+Your own [SPARQL view](06d-personal-views.md#a-view-defined-by-a-sparql-construct) has an address: `/ld/@<name>/` answers the statements its CONSTRUCT makes over the members you read, in a query slot under the query bounds and the view's cap of 50 000 statements, audited as `ld.read` with the kind `view`. It is yours alone: another token, and a plain view, get `404 ld_not_found`.
+
 A record's answer is read while the records change: it is not a point-in-time snapshot, so a record written while the read runs may or may not be in it, and a record's own statements and the statements pointing at it, which are two reads, are not one snapshot either.
 
 A fragment never travels in a request, so an address with one (`#start`, `#<property>`) is read at its document. The namespaces `<base>vocab/` and `<base>vocab/<kind>/` are no address and answer `404`.
@@ -308,5 +313,6 @@ Every refusal of the door itself is a problem body (`application/problem+json`, 
 | 413 | `sparql_too_many_results` | The address has more statements of its own than `sparql.maxResults` |
 | 413 | `sparql_answer_too_large` | Its own statements hold more than `sparql.maxResultBytes` bytes of values |
 | 413 | `sparql_too_much_read` | Reading its own statements passed `sparql.maxRecordsRead` (an agent's are read over every record) |
+| 413 | `view_construct_too_large` | `/ld/@<name>/`: your SPARQL view's CONSTRUCT makes more than 50 000 statements |
 | 503 | `sparql_timeout`, `sparql_store_unavailable` | The read passed `sparql.timeoutMs`, or the store failed; `Retry-After` |
 | 503 | `sparql_busy` | As many reads and queries run as the instance or this token may run at once; `Retry-After` |

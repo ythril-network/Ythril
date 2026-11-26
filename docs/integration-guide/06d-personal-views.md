@@ -65,7 +65,34 @@ MCP argument it is written `@team`.
 `members`: a list of space ids, or exactly `["*"]`. A listed member must exist and be readable by the caller when the
 view is made or changed: a `read` rung in an area a view is read in, so a space the token holds only a schema rung on is
 refused (`view_member_unknown`), as it would be read by no door. A member may not be a view. Duplicates in the list are collapsed. `PATCH` sends only what
-changes, and an empty body is `400` (`view_nothing_to_change`).
+changes, and an empty body is `400` (`view_nothing_to_change`). Both also take `sparql` (below).
+
+## A view defined by a SPARQL CONSTRUCT
+
+A view may carry `sparql: { "query": "<a SPARQL CONSTRUCT>" }` (`POST /api/views`, `PATCH /api/views/:id`, `view_create`,
+`view_update`). The query is checked when it is saved: only a CONSTRUCT is taken (`400 view_sparql_not_construct` for a
+SELECT, ASK, DESCRIBE or an Update), it must parse (`400 view_sparql_invalid`, also for a `sparql` that is no `{ "query": "<text>" }`),
+and it is at most 16 KB (`400 view_sparql_too_large`). `sparql: null` on `PATCH` or `view_update` makes the view a plain one again.
+`GET /api/views`, `GET /api/views/:id`, `view_list` and `view_get` show the query; a copy (`view_copy`) carries it.
+
+```json
+{ "name": "people", "members": ["research", "crm"],
+  "sparql": { "query": "CONSTRUCT { ?s ?p ?o } WHERE { ?s a <https://w3id.org/ythril/ns#Entity> ; ?p ?o }" } }
+```
+
+**Who reads it.** The RDF doors read such a view as the statements its CONSTRUCT makes over its members, **as you read
+them now**: a member you cannot read contributes nothing, exactly as on a plain view.
+
+- the RDF export (`GET /api/brain/spaces/{spaceId}/export/rdf` with the view's id, `export_rdf`): those statements in one graph and one document
+  ([Exports](06f-exports.md#several-spaces-at-once-a-personal-view));
+- the SPARQL query endpoint (`GET /api/brain/spaces/{spaceId}/sparql`, `sparql_query`): a query reads those statements, not the
+  members' ([SPARQL API](04j-sparql-api.md#a-sparql-view));
+- the view's Linked Data address, `/ld/@people/`: those statements, to you alone.
+
+The CONSTRUCT may make at most 50 000 statements: more is `413 view_construct_too_large` on each door, and nothing of it is
+answered. **Every other door refuses the view** with `409 view_is_construct`: `recall`, `filter`, `graph_traverse` and the
+other reads, and every write, SPARQL Update included (a view of computed statements has nothing to write into). The
+query lives in `config.json` with the rest of the view: it is not synced and not in a database backup.
 
 ## Reading through a view
 
@@ -200,7 +227,11 @@ until it is purged. `GET /api/spaces` lists `retiredSpaceIds` to instance admins
 | `view_member_is_view` | `400` | a member is itself a view |
 | `view_owner_unknown` | `403` | an OIDC session with no `sub` cannot own a view |
 | `view_peer_bound` | `403` | a peer-bound token creating or receiving a view |
-| `view_nothing_to_change` | `400` | `PATCH` with neither `name` nor `members` |
+| `view_nothing_to_change` | `400` | `PATCH` with none of `name`, `members` and `sparql` |
+| `view_sparql_not_construct` | `400` | `sparql.query` is a SELECT, ASK, DESCRIBE or an Update |
+| `view_sparql_invalid` | `400` | `sparql.query` does not parse, or `sparql` is no `{ "query": "<text>" }` |
+| `view_sparql_too_large` | `400` | `sparql.query` is over 16 KB |
+| `view_is_construct` | `409` | a door other than the RDF export, the SPARQL query endpoint and the view's Linked Data address names a SPARQL view |
 | `view_copy_forbidden` | `403` | the receiver is not a token you may manage |
 | `view_copy_nothing_readable` | `400` | the receiver reads none of the members |
 | `view_copy_needs_mfa` | `403` | MCP `view_copy` where REST would ask for MFA |

@@ -18,7 +18,7 @@
  * (`MCP_ACT_OPERATIONS`).
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { readSpacesOfCall, viewReadOfCall } from '../../spaces/read-scope.js';
+import { readSpacesOfCall, viewConstructOfCall, viewReadOfCall } from '../../spaces/read-scope.js';
 import { toolRefusalOfAct, type ToolRefusalStatus } from '../../util/errors.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { applyBudget, budgetBoundBy, defaultBudgetChars, resolveBudget, ROW_PAGER, type ResolvedBudget, type BudgetOutcome } from '../../brain/result-budget.js';
@@ -145,7 +145,7 @@ export const sparql_queryTool: ToolHandler = {
     if (!budget.ok) throw new Error(budget.error);
     const spaces = readSpacesOfCall(ctx, ctx.callSpace);
     const input: SparqlQueryInput = {
-      spaceId: ctx.callSpace, spaces, view: viewReadOfCall(ctx, ctx.callSpace) !== undefined,
+      spaceId: ctx.callSpace, spaces, view: viewReadOfCall(ctx, ctx.callSpace) !== undefined, construct: viewConstructOfCall(ctx, ctx.callSpace),
       query: a['query'], limit: a['limit'], defaultGraphUri: a['default-graph-uri'], namedGraphUri: a['named-graph-uri'], accept: undefined,
       caller: ctx.callerRecord ?? { rights: ctx.rights ?? null }, callerKey: ctx.rateKey, fingerprintOf: schemaFingerprintOf,
     };

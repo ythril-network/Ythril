@@ -28,7 +28,7 @@ declare global {
        * The personal view a path-scoped READ door accepted for this caller, and the spaces it reads (`viewReadMembers`, in the route's area, at
        * request time). Set by the space guards; a handler reads its member loop from here and never from the view record.
        */
-      viewRead?: { id: string; spaces: string[] };
+      viewRead?: { id: string; spaces: string[]; construct?: string };
       /**
        * The spaces a body-scoped route was AUTHORISED for, resolved once by `requireBodyScopedSpace`.
        *

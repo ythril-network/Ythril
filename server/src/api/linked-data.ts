@@ -66,6 +66,16 @@ import { SPARQL_BUSY, SPARQL_TOO_MANY_RESULTS, SPARQL_ANSWER_TOO_LARGE, SPARQL_T
 import { rdfSpaceState, RDF_NOT_ENABLED, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_BASE_CONFLICT, RDF_TERM_CLASH, RDF_UNWRITABLE, type RdfCaller } from '../rdf/rdf-space-state.js';
 import { getConfig } from '../config/loader.js';
 import { sendProblem } from './problem-body.js';
+import { isViewId, resolveOwnView, viewOwnerOf, viewReadMembers, type ViewOwnerSource } from '../config/views.js';
+import type { ViewRecord } from '../config/types.js';
+import { peerBoundTo } from '../auth/peer-bound.js';
+import { takeSlot } from '../util/slots.js';
+import { busyRefusal, sparqlRefusalOf } from '../rdf/sparql-refusal.js';
+import { sparqlLimits } from '../config/sparql-limits.js';
+import { createQuadSource } from '../rdf/quad-source.js';
+import { readAcrossSwaps } from '../rdf/read-across-swaps.js';
+import { fromRdfJs } from '../rdf/rdf-js-terms.js';
+import { constructStatements, VIEW_CONSTRUCT_TOO_LARGE } from '../rdf/view-construct.js';
 
 /** An address no reader of this caller may read, of any kind: one code for all of them. */
 export const LD_NOT_FOUND = 'ld_not_found';
@@ -82,6 +92,7 @@ export const LD_TRUNCATED_HEADER = 'X-Ythril-Truncated';
 export const LD_CODES: readonly string[] = Object.freeze([
   LD_NOT_FOUND, RDF_FORMAT_NOT_ACCEPTABLE, RDF_NOT_ENABLED, RDF_BASE_CONFLICT, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_TERM_CLASH, RDF_UNWRITABLE,
   SPARQL_TOO_MANY_RESULTS, SPARQL_ANSWER_TOO_LARGE, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT, SPARQL_STORE_UNAVAILABLE, SPARQL_BUSY,
+  VIEW_CONSTRUCT_TOO_LARGE,
 ]);
 
 /** The record kinds `/ld/:spaceId/:kind/:id` answers; a file, an agent, a schema version and a term have routes of their own. */
@@ -297,6 +308,69 @@ async function answerSchema(req: Request, res: Response, kind: 'schema' | 'vocab
   res.end(outcome.text);
 }
 
+/** The caller's own SPARQL view the base root's segment names (Q-762), or null: a space, a plain view and another token's view go on. */
+function ownConstructView(req: Request): (ViewRecord & { sparql: { query: string } }) | null {
+  const id = String(req.params['spaceId'] ?? '');
+  if (!isViewId(id)) return null;
+  const view = resolveOwnView(viewOwnerOf(req.authToken as ViewOwnerSource), id);
+  return view?.sparql ? { ...view, sparql: view.sparql } : null;
+}
+
+/**
+ * The address of the caller's own SPARQL view (`/ld/@<name>/`, Q-762): the statements its CONSTRUCT makes over its members as the caller
+ * reads them (the members `viewReadMembers` accepts in the knowledge area, each read again with the caller's rights by the quad source), in
+ * a slot of family `sparql`, under the query bounds and the view's cap of statements. Its owner's alone: any other caller, and a plain view,
+ * get the one not-found answer, by the routes after this one.
+ */
+function constructViewFirst(req: Request, res: Response, next: NextFunction): void {
+  const view = ownConstructView(req);
+  if (!view) { next(); return; }
+  answered('GET /ld/:spaceId/', (rq, rs) => answerConstructView(rq, rs, view))(req, res);
+}
+
+async function answerConstructView(req: Request, res: Response, view: ViewRecord & { sparql: { query: string } }): Promise<void> {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Access-Control-Expose-Headers', 'Retry-After');
+  const choice = chooseRdfFormat({ accept: req.headers['accept'], members: 1, offered: SPARQL_GRAPH_FORMATS });
+  if (!choice.ok) { sendProblem(res, { status: choice.status, title: 'Not acceptable', detail: choice.error, code: choice.code, extra: { formats: choice.formats } }); return; }
+  const token = req.authToken as { rights?: TokenRights | null; peerInstanceId?: unknown } | undefined;
+  const members = viewReadMembers({ rights: token?.rights ?? undefined, view, area: 'knowledge', needs: 'read', peerId: peerBoundTo(token ?? {}) });
+  req.authorisedSpaces = members;
+  const slot = takeSlot('sparql', slotCallerKey(req));
+  if (!slot) {
+    const busy = busyRefusal('sparql');
+    sendLdRefusal(res, { status: busy.status, code: busy.code, title: 'Busy', detail: busy.error, retryAfterSeconds: busy.retryAfterSeconds });
+    return;
+  }
+  const signal = abortWhenClientGoes(res);
+  let statements;
+  try {
+    const { timeoutMs, maxResultBytes } = sparqlLimits(getConfig());
+    const deadline = Date.now() + timeoutMs;
+    statements = await readAcrossSwaps(
+      recordsFor => createQuadSource({ members, caller: callerOf(req), fingerprintOf: schemaFingerprintOf },
+        { deadline, signal, ...(recordsFor.length > 0 ? { recordsFor } : {}) }),
+      source => constructStatements(view.sparql.query, source, { deadline, maxBytes: maxResultBytes, signal }),
+    );
+  } catch (err) {
+    if (signal.aborted) return;
+    const refused = sparqlRefusalOf(err);
+    if (!refused) throw err;
+    sendLdRefusal(res, {
+      status: refused.status, code: refused.code, title: 'Not answered', detail: refused.message,
+      ...(refused.retryAfterSeconds !== undefined ? { retryAfterSeconds: refused.retryAfterSeconds } : {}),
+    });
+    return;
+  } finally {
+    slot.release();
+  }
+  const rendered = renderGraph(choice.format, statements.map(fromRdfJs));
+  if ('code' in rendered) { sendProblem(res, { status: rendered.status, title: 'Not writable', detail: rendered.error, code: rendered.code }); return; }
+  req.auditChangesExplicit = [{ field: 'kind', to: 'view' }, { field: 'statements', to: statements.length }, { field: 'truncated', to: false }];
+  res.status(EXPORT_OK).setHeader('Content-Type', rendered.contentType);
+  res.end(rendered.body);
+}
+
 /** A handler that answers a failure nobody named as a problem body, logged. */
 function answered(route: string, handle: (req: Request, res: Response) => Promise<void>) {
   return (req: Request, res: Response): void => {
@@ -314,7 +388,8 @@ const kindParam = (req: Request): LdKind => String(req.params['kind']) as LdKind
 const fixed = (k: LdKind) => (): LdKind => k;
 
 // GET /ld/:spaceId/ - the base root: the graph the space's records are in, described as the export describes it; knowledge read.
-linkedDataRouter.get('/:spaceId/', baseRootOnly, globalRateLimit, browsersToTheApp(fixed('graph')), requireAuth, requireResolvedRung,
+// The caller's own SPARQL view (`/ld/@<name>/`, Q-762) is answered first, as its CONSTRUCT's statements; any other segment goes on.
+linkedDataRouter.get('/:spaceId/', baseRootOnly, globalRateLimit, browsersToTheApp(fixed('graph')), requireAuth, constructViewFirst, requireResolvedRung,
   answered('GET /ld/:spaceId/', answerGraph));
 // GET /ld/:spaceId/schema - the ontology (the shapes graph's description), schema read.
 linkedDataRouter.get('/:spaceId/schema', globalRateLimit, browsersToTheApp(fixed('ontology')), requireAuth, requireResolvedRung,
