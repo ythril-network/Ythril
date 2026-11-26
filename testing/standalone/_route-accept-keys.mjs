@@ -96,10 +96,13 @@ function localZodKeys(src, name) {
   if (!lit) return null;
   const keys = [];
   let depth = 0;
-  for (const m of lit.matchAll(/\{|\}|(?:^|[,{])\s*['"]?([A-Za-z_$][\w$]*)['"]?\s*:/gm)) {
+  // A quoted key may hold a hyphen (the SPARQL protocol's `using-graph-uri`, Q-761): read without its quotes, a hyphenated key was never
+  // seen, so the route looked as if it did not accept a parameter it parses.
+  for (const m of lit.matchAll(/\{|\}|(?:^|[,{])\s*(?:'([\w$-]+)'|"([\w$-]+)"|([A-Za-z_$][\w$]*))\s*:/gm)) {
     if (m[0] === '{') { depth++; continue; }
     if (m[0] === '}') { depth--; continue; }
-    if (depth === 1 && m[1]) keys.push(m[1]);
+    const key = m[1] ?? m[2] ?? m[3];
+    if (depth === 1 && key) keys.push(key);
   }
   return keys;
 }

@@ -229,6 +229,8 @@ export const ROUTE_RULES: RouteRule[] = [
   // text. The POST only carries the text. MCP `sparql_query` records the same act (`MCP_ACT_OPERATIONS`).
   { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/sparql$/,             operation: 'brain.sparql_query', spaceGroup: 1, writtenWhenCutOff: true },
   { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/sparql$/,             operation: 'brain.sparql_query', spaceGroup: 1, writtenWhenCutOff: true },
+  // Q-761: a SPARQL Update, by the act's counts and outcome (never its text), also when the caller went away. MCP `sparql_update` records it too.
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/sparql\/update$/,     operation: 'brain.sparql_update', spaceGroup: 1, writtenWhenCutOff: true },
   // Q-758: a Linked Data address read, a read like the record reads it is the twin of. No space group: the space is the one whose BASE holds
   // the address (a renamed space keeps its old segment), which the door resolved and handed over as `authorisedSpaces`; the record's id is
   // `entryId`, and `changes` holds counts only.

@@ -481,10 +481,23 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 | `file.created` | A file is written (new or overwrite) by a person or a token on this instance. **A file a peer delivers — its bytes pushed to this instance's upload door, or pulled by the sync engine — fires nothing** (it used to fire for a push, with the peer's token as the actor) |
 | `file.updated` | A file is moved/renamed. A move whose records did not all follow its bytes is finished by a retry or by housekeeping (`TTL sweep: finishing interrupted file moves`), and the event fires when it is finished, once, with `previousPath` — from whichever of the two finishes it, to the token that asked for the move |
 | `file.deleted` | A file is deleted. **A directory delete fires one for each live file it removed**, with that file's path: never one for a conversion sidecar, a derived record (a chunk or a face) or a file an earlier delete had already flagged, and none when no user made the delete. Each file is announced at most once, and a large directory is a burst (see [Delivery Guarantees](#delivery-guarantees)) |
-| `bulk.write` | A bulk write completed (`POST /bulk` or MCP `save_bulk`). Per-item events are **not** fired for bulk; this one summary carries `entry` = `{ inserted, updated, connections, errorCount }` for a workflow to inspect. It fires whenever the call wrote anything — a batch that only converged on existing records (`updated`) or only attached connections counts. `errorCount` counts every row in `errors`, the unknown-field warning rows included (on a space set to `warn`, an item with an unknown field is stored and still counted there), so a warn batch that names unknown fields raises it. |
+| `bulk.write` | A bulk write completed (`POST /bulk` or MCP `save_bulk`). Per-item events are **not** fired for bulk; this one summary carries `entry` = `{ inserted, updated, connections, errorCount }` for a workflow to inspect. It fires whenever the call wrote anything — a batch that only converged on existing records (`updated`) or only attached connections counts. `errorCount` counts every row in `errors`, the unknown-field warning rows included (on a space set to `warn`, an item with an unknown field is stored and still counted there), so a warn batch that names unknown fields raises it. Other writers that land many records at once send the same event, told apart by `entry.source` (below). |
 | `duplicate.detected` | The duplicate scanner found a near-duplicate pair under a `notify` rule (see [Duplicate Scanner](#duplicate-scanner--action-rules)). Payload `entry` = `{ type, score, a: {record}, b: {record} }` |
 | `change_note.received` | A change note arrived from the instance above this one in a network (see [Sync API → A sync can carry a change note](09-sync-api.md#a-sync-can-carry-a-change-note)). Fired once per space the note concerns, or per space the network carries here for a note about the whole network. Payload `entry` = `{ id, networkId, networkLabel, from, author, generated, note, spaces }` |
 | `test.ping` | Synthetic test event sent via the test endpoint, and the probe of a failing subscription, whose `entry` carries `"probe": true` (see [Delivery Guarantees](#delivery-guarantees)). Sent to the one subscription whatever its `events` filter |
+
+### Who sends `bulk.write`: `entry.source`
+
+| `entry.source` | Sent by | `entry` |
+|---|---|---|
+| (absent) | `POST /api/brain/spaces/:spaceId/bulk`, MCP `save_bulk` | `{ inserted, updated, connections, errorCount }` |
+| `rdf.import` | An [RDF import](06f-exports.md#rdf-import) that landed | `{ source, importId, inserted, updated, errorCount: 0 }`, `inserted` and `updated` counted by kind (`entity`, `fact`, `chrono`, `edge`) |
+| `sparql.update` | A [SPARQL Update](04j-sparql-api.md#sparql-update) that landed | `{ source, inserted, updated, deleted, errorCount: 0 }`, each counted by kind (`entity`, `fact`, `chrono`, `edge`); `updated` counts the records it converged, `deleted` the records it removed |
+
+Each is sent once per call that wrote anything. A SPARQL Update also sends one `<kind>.deleted` per record it deleted; no writer here sends
+the per-record `created` or `updated` events. **An unknown `source` is a bulk summary from a writer this page does not list yet:** read the
+counts you know, ignore the keys you do not, and never take it for an error. A key may be added to `entry` (as `deleted` was); a key is
+never removed or changed in meaning.
 
 > Events fire for **both** REST API and MCP (agent) writes — emission lives in the shared
 > brain/file functions, so an agent creating a fact or entity delivers the same events a REST

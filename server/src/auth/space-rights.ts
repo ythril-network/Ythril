@@ -138,6 +138,8 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // ask `files: read` per member inside the act.
   { route: '/api/brain/spaces/:spaceId/sparql', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/sparql', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
+  // Q-761: a SPARQL Update on one space (a write; the schema rung is never asked, so never implied); a view id is no space a write row takes.
+  { route: '/api/brain/spaces/:spaceId/sparql/update', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   // Q-758: a Linked Data address, the twin of the export it is a name in: knowledge read on the space whose BASE holds the address
   // (`resolved`, never the URL segment, DEC-2); a file's address asks `files: read` as well inside the door, as the export does.
   { route: '/ld/:spaceId/:kind/:id', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
@@ -437,6 +439,8 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'export_rdf', area: 'knowledge', needs: 'read' },
   // Q-757: its REST twin's rows.
   { tool: 'sparql_query', area: 'knowledge', needs: 'read' },
+  // Q-761: its REST twin's row.
+  { tool: 'sparql_update', area: 'knowledge', needs: 'write' },
   // Q-753: their REST twins' rows.
   { tool: 'import_rdf', area: 'knowledge', needs: 'write' },
   { tool: 'import_rdf_status', area: 'knowledge', needs: 'write' },

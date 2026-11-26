@@ -211,6 +211,9 @@ describe('upsert validation', () => {
       'server/src/brain/write-connections.ts',
       // bundle-270: the RDF import's planner calls (its dry plan and its commit build one item per operation and validate nothing themselves).
       'server/src/rdf/import-plan.ts',
+      // bundle-272, Q-761: the SPARQL Update's planner calls planEntity/planEdge per record its change set touches, and validates nothing
+      // itself: the planners judge the merged record, as for the import.
+      'server/src/rdf/sparql-update-plan.ts',
     ];
 
     const strip = src => src.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');

@@ -16,7 +16,7 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { INSTANCES, post, patch, put, get, del } from '../sync/helpers.js';
+import { INSTANCES, post, patch, put, del, readCollection, readRecord } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { ownTokens } from '../_shared/own-token.mjs';
 
@@ -80,7 +80,8 @@ async function update(door, space, text) {
   return { status: m.isError ? 'refused' : 200, code: m.isError ? /\(([a-z_]+)\)\s*$/m.exec(t)?.[1] : undefined, text: t };
 }
 
-const entity = async (space, id) => (await get(INSTANCES.a, token, `/api/brain/spaces/${space}/entities/${id}`)).body;
+// A record is read by the filter door (`readRecord`): the by-id GET routes were removed, and answer 404 for every id.
+const entity = async (space, id) => (await readRecord(INSTANCES.a, token, space, 'entities', id)).body;
 const fmt = (a) => `${a.status} ${a.code} ${String(a.text).slice(0, 400)}`;
 
 describe('a SPARQL Update changes records on every door', () => {
@@ -104,9 +105,9 @@ describe('a SPARQL Update changes records on every door', () => {
       it('INSERT DATA makes a record', async () => {
         const a = await update(door, S, `INSERT DATA { <${baseOf(S)}entity/new-one> a <${Y}Entity>, <${baseOf(S)}vocab/entity/person> ; <${LABEL}> "Newcomer ${door}" }`);
         assert.equal(a.status, 200, fmt(a));
-        const found = await get(INSTANCES.a, token, `/api/brain/spaces/${S}/entities?name=${encodeURIComponent(`Newcomer ${door}`)}`);
+        const found = await readCollection(INSTANCES.a, token, S, 'entities', { filter: { name: `Newcomer ${door}` } });
         assert.equal(found.status, 200, JSON.stringify(found.body));
-        assert.ok(JSON.stringify(found.body).includes(`Newcomer ${door}`), 'the inserted record is not stored');
+        assert.equal(found.results.length, 1, 'the inserted record is not stored once');
       });
 
       it('DELETE DATA removes exactly the value it names', async () => {
@@ -130,7 +131,7 @@ describe('a SPARQL Update changes records on every door', () => {
         const note = `${baseOf(S)}vocab/edge/knows#note`;
         const a = await update(door, S, `DELETE DATA { <${at('edge', 'knows')}> <${note}> "old" } ; INSERT DATA { <${at('edge', 'knows')}> <${note}> "new" }`);
         assert.equal(a.status, 200, fmt(a));
-        const k = await get(INSTANCES.a, token, `/api/brain/spaces/${S}/edges/${ids[S].knows}`);
+        const k = await readRecord(INSTANCES.a, token, S, 'edges', ids[S].knows);
         assert.equal(k.body?.properties?.note, 'new', JSON.stringify(k.body));
       });
 

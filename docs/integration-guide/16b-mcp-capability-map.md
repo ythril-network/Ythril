@@ -61,6 +61,8 @@ and the two are identical by construction. The REST routes with no tool are in
 | | `export_rdf` | `POST /api/export_rdf` · legacy: `GET /api/brain/spaces/:spaceId/export/rdf` | read `knowledge` |
 | **Brain — query** | | | |
 | | `sparql_query` | `POST /api/sparql_query` · legacy: `GET /api/brain/spaces/:spaceId/sparql` | read `knowledge` |
+| **Brain — update** | | | |
+| | `sparql_update` | `POST /api/sparql_update` · legacy: `POST /api/brain/spaces/:spaceId/sparql/update` | write `knowledge` |
 | **Brain — import** | | | |
 | | `import_rdf` | `POST /api/import_rdf` · legacy: `POST /api/brain/spaces/:spaceId/import/rdf` | write `knowledge` |
 | | `import_rdf_status` | `POST /api/import_rdf_status` · legacy: `GET /api/brain/spaces/:spaceId/import/rdf/:importId` | write `knowledge` |

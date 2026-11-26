@@ -61,6 +61,7 @@ export const CAPABILITIES = [
   ['Brain — ingest status', 'ingest_status', 'GET /api/brain/spaces/:spaceId/ingest/:runId'],
   ['Brain — export', 'export_rdf', 'GET /api/brain/spaces/:spaceId/export/rdf'],
   ['Brain — query', 'sparql_query', 'GET /api/brain/spaces/:spaceId/sparql'],
+  ['Brain — update', 'sparql_update', 'POST /api/brain/spaces/:spaceId/sparql/update'],
   ['Brain — import', 'import_rdf', 'POST /api/brain/spaces/:spaceId/import/rdf'],
   ['Brain — import', 'import_rdf_status', 'GET /api/brain/spaces/:spaceId/import/rdf/:importId'],
 
