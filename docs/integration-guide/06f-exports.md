@@ -82,7 +82,7 @@ A property holds one plain value; structure is edges and links ([decision record
 
 Name your own [personal view](06d-personal-views.md) as the space to export several spaces in one file, one named graph each. A view exports what you could read by naming each member: a member you may not read is not in the answer at all (no graph, no name, no count), exactly as `recall` and `filter` over the view answer. `Ythril-View-Members` (REST, exposed to browsers) and `members` (MCP) name the spaces covered. A member you read whose RDF is off is left out and named (`membersWithoutRdf` on MCP, `Ythril-View-Members-Without-Rdf` on REST, and the closing comment); one whose RDF names are not settled (a contested or shared base, a term clash, an address no document can carry) likewise (`membersInConflict`, `Ythril-View-Members-In-Conflict`). A view none of whose read members has RDF on is `409 rdf_not_enabled`; a view with no member you read answers an empty document that says why.
 
-A view [defined by a SPARQL CONSTRUCT](06d-personal-views.md#a-view-defined-by-a-sparql-construct) exports the statements its CONSTRUCT makes over the members you read, in one graph and one document: Turtle (the default), N-Quads or JSON-LD, no report node, no `Link` and no `after` (`400 rdf_bad_after`). A page (MCP, or REST with a size ceiling) whose document passes its budget, and a CONSTRUCT that makes more than 50 000 statements, are `413 view_construct_too_large`: nothing of it is sent.
+A view [defined by a SPARQL CONSTRUCT](06d-personal-views.md#a-view-defined-by-a-sparql-construct) exports the statements its CONSTRUCT makes over the members you read, in one graph and one document: Turtle (the default), N-Quads or JSON-LD, no report node, no `Link` and no `after` (`400 rdf_bad_after`). A CONSTRUCT that makes more than 50 000 statements is `413 view_construct_too_large`; a page (MCP, or REST with a size ceiling) whose document passes its budget is `413 rdf_export_budget_exceeded` (raise `maxChars` or `maxBytes`, or ask REST for the whole export); a CONSTRUCT that reads more than `sparql.maxRecordsRead` records is `413 sparql_too_much_read`, as the [SPARQL endpoint](04j-sparql-api.md#a-sparql-view) answers it. Nothing of any of them is sent. A view whose stored query is no CONSTRUCT or no longer parses (a hand-edited `config.json`) is `409 view_sparql_not_construct` or `409 view_sparql_invalid`, on every door. A caller that goes away stops the run and frees the export slot.
 
 ### Rights
 
@@ -107,7 +107,10 @@ At most two exports run at once on the instance, one per token; another answers 
 | 409 | `rdf_base_shared` | Another space of this instance holds the same base, so the addresses are not the space's own (`<base>schema` would name two ontologies): one of them needs another base. The other space is named only to a caller who may read its schema. The save doors refuse to make such a pair with the same code ([RDF names](#rdf-names-metardf-and-iri)); a pair that already exists is refused here |
 | 409 | `rdf_base_nested` | The space's base starts the base of another space of this instance, or is started by it, so the addresses of one would be read as the other's (an address under `<base>` belongs to the space with the longest base that starts it): one of them needs a base that neither starts nor is started by another's. The other space is named only to a caller who may read its schema. The save doors refuse to make such a pair with the same code; a pair that already exists is refused here |
 | 409 | `rdf_base_conflict` | A network the space is shared in contests its base. The network, member and offered base are named only to a caller who may read that network |
-| 413 | `view_construct_too_large` | A SPARQL view whose CONSTRUCT makes more than 50 000 statements, or (on a page) whose document passes the page's budget |
+| 409 | `view_sparql_not_construct`, `view_sparql_invalid` | A SPARQL view whose stored query is no CONSTRUCT, or no longer parses (the save refuses both with `400`; a hand-edited `config.json` can hold one) |
+| 413 | `view_construct_too_large` | A SPARQL view whose CONSTRUCT makes more than 50 000 statements |
+| 413 | `rdf_export_budget_exceeded` | A page of a SPARQL view's export whose document passes the page's budget (the document is one piece: raise `maxChars` or `maxBytes`) |
+| 413 | `sparql_too_much_read`, `sparql_answer_too_large` | A SPARQL view's CONSTRUCT read more than `sparql.maxRecordsRead` records, or made more than `sparql.maxResultBytes` bytes of values |
 | 429 | `rdf_export_busy` | Two exports run, or one of yours |
 | 503 | `rdf_export_incomplete` | The store did not answer a page |
 
@@ -313,6 +316,7 @@ Every refusal of the door itself is a problem body (`application/problem+json`, 
 | 413 | `sparql_too_many_results` | The address has more statements of its own than `sparql.maxResults` |
 | 413 | `sparql_answer_too_large` | Its own statements hold more than `sparql.maxResultBytes` bytes of values |
 | 413 | `sparql_too_much_read` | Reading its own statements passed `sparql.maxRecordsRead` (an agent's are read over every record) |
+| 409 | `view_sparql_not_construct`, `view_sparql_invalid` | `/ld/@<name>/`: your SPARQL view's stored query is no CONSTRUCT, or no longer parses (a hand-edited `config.json`) |
 | 413 | `view_construct_too_large` | `/ld/@<name>/`: your SPARQL view's CONSTRUCT makes more than 50 000 statements |
 | 503 | `sparql_timeout`, `sparql_store_unavailable` | The read passed `sparql.timeoutMs`, or the store failed; `Retry-After` |
 | 503 | `sparql_busy` | As many reads and queries run as the instance or this token may run at once; `Retry-After` |

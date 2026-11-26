@@ -23,6 +23,8 @@ export const VIEW_NAME_PATTERN = /^[a-z0-9-]+$/;
 export const VIEW_NAME_MAX = 40;
 /** Views one owner may hold. A copy counts against the receiver's cap. */
 export const MAX_VIEWS_PER_OWNER = 50;
+/** The longest CONSTRUCT a view may carry, in UTF-8 bytes: a save refuses one past it (`rdf/view-construct.ts`) and a config load refuses a stored one. */
+export const VIEW_SPARQL_MAX_BYTES = 16 * 1024;
 /** Members one view may name; `'*'` counts as one. */
 export const MAX_VIEW_MEMBERS = 1000;
 /** The member that means "every space the caller reads"; a view lists it as the whole list, `[WILDCARD_MEMBER]`. */
@@ -77,8 +79,12 @@ export function validateViews(views: unknown): void {
     }
     if (!Array.isArray(v?.members) || v.members.some(m => typeof m !== 'string')) problems.push(`${where}: members must be a list of space ids`);
     else for (const m of v.members) if (isViewId(m)) problems.push(`${where}: member '${m}' is itself a view; a view lists spaces only`);
-    if (v?.sparql !== undefined && (v.sparql === null || typeof v.sparql !== 'object' || typeof v.sparql.query !== 'string')) {
-      problems.push(`${where}: sparql must be { "query": "<a SPARQL CONSTRUCT>" }`);
+    if (v?.sparql !== undefined) {
+      // The shape a save judges (`checkViewSparql`) apart from the parse, which this module cannot do: a text the readers would refuse for its
+      // size or for being blank is refused at load as it is at save, never stored to fail at every read.
+      const query = v.sparql !== null && typeof v.sparql === 'object' ? v.sparql.query : undefined;
+      if (typeof query !== 'string' || query.trim() === '') problems.push(`${where}: sparql must be { "query": "<a SPARQL CONSTRUCT>" }`);
+      else if (Buffer.byteLength(query, 'utf8') > VIEW_SPARQL_MAX_BYTES) problems.push(`${where}: sparql.query is at most ${VIEW_SPARQL_MAX_BYTES} bytes`);
     }
   }
   if (problems.length > 0) {

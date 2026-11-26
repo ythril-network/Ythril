@@ -38,7 +38,7 @@ import { toolErrorText, toolErrorResult } from './tool-error-text.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
 import { TOOL_RIGHTS, toolTakesAView } from '../auth/space-rights.js';
-import { constructViewRefusal, isViewId, resolveOwnView, viewOwnerOf, viewReadMembers, viewsOfOwner } from '../config/views.js';
+import { constructViewRefusal, isViewId, resolveOwnView, viewIdsOffered, viewOwnerOf, viewReadMembers } from '../config/views.js';
 import { ownViewNamedIn, retiredIdNamedIn, unknownSpaceAnswer } from '../spaces/unknown-space.js';
 import { peerBoundTo, peerTokenToolRefusal } from '../auth/peer-bound.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
@@ -149,6 +149,11 @@ export interface ToolCallRequest {
   name: string;
   args: Record<string, unknown>;
   caller: ToolCaller;
+  /**
+   * Ends when the caller goes away (the MCP connection that carried the call closing). Handed to a tool that holds a run and a slot for
+   * the caller (`export_rdf` on a SPARQL view) so it stops for a caller who left; the REST tool door has none.
+   */
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -207,7 +212,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
   const accessibleSpaces = cfg.spaces.filter(s => accessibleSpaceIds.includes(s.id));
   // The caller's own personal views, offered to the tools that take one (and to no other), and resolved per call below.
   const ownerKey = caller.record ? viewOwnerOf(caller.record) : null;
-  const ownViewIds = viewsOfOwner(ownerKey, cfg).map(v => v.id);
+  const ownViewIds = viewIdsOffered(ownerKey, cfg);
 
   /*
    * The arguments must be an OBJECT, and this is refused before anything reads a field off them.
@@ -591,7 +596,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
       // The arguments the act judges itself are left out of the check (`argumentsJudgedByTheAct`): the handler hands them to it as sent.
       const judgedByTheAct = tool.argumentsJudgedByTheAct ?? [];
       const checked = judgedByTheAct.length === 0 ? a : Object.fromEntries(Object.entries(a).filter(([k]) => !judgedByTheAct.includes(k)));
-      const argErr = validatorFor(accessibleSpaceIds, ownViewIds).validate(tool, checked, { tolerateTopLevel: judgedOperation !== null });
+      const argErr = validatorFor(accessibleSpaceIds, ownViewIds.all, ownViewIds.construct).validate(tool, checked, { tolerateTopLevel: judgedOperation !== null });
       if (argErr) return withUnknownFieldRows(refuse(400, toolErrorText(argErr), callSpace), rows);
     }
     /*
@@ -635,6 +640,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
       ...(caller.record ? { callerRecord: caller.record } : {}),
       viewReads,
       ...(viewConstructs.size > 0 ? { viewConstructs } : {}),
+      ...(req.signal ? { signal: req.signal } : {}),
       actor: { tokenId: caller.tokenId, tokenLabel: caller.tokenLabel },
       auditIdentity: { authMethod: caller.authMethod, oidcSubject: caller.oidcSubject },
       recordChanges: (before, after) => { facts.snapshots = { before, after }; },

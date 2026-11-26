@@ -281,12 +281,13 @@ export type SparqlRow = Record<string, RdfJsLike>;
 /**
  * A query's answer, typed by its kind (so a door narrows by `kind` and never casts): a SELECT's rows, an ASK's boolean, a CONSTRUCT's or
  * DESCRIBE's quads. With `limit`, at most that many rows or quads are read and the engine is stopped (a door asks for one more than it
- * answers, to know there were more). `destroy` stops the engine and releases its reads.
+ * answers, to know there were more). A quad result takes `keep` too: a quad it answers false for is dropped before it is counted against
+ * `limit` or `maxBytes`. `destroy` stops the engine and releases its reads.
  */
 export type SparqlResult =
   | { kind: 'bindings'; rows(limit?: number, maxBytes?: number): Promise<SparqlRow[]>; destroy(): void }
   | { kind: 'boolean'; rows(): Promise<boolean>; destroy(): void }
-  | { kind: 'quads'; rows(limit?: number, maxBytes?: number): Promise<RdfJsLike[]>; destroy(): void };
+  | { kind: 'quads'; rows(limit?: number, maxBytes?: number, keep?: (quad: RdfJsLike) => boolean): Promise<RdfJsLike[]>; destroy(): void };
 
 /** What the engine streams: an asynciterator, ended by `destroy`. */
 interface EngineStream {
@@ -379,7 +380,7 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
    * Collect at most `limit` items of an engine stream, mapping each; with `bytes` (the bytes one mapped item holds, and the bound), the read
    * ends with `413 sparql_answer_too_large` when the items together pass the bound, and the stream is destroyed (lens-2 P1).
    */
-  const collect = <T>(stream: EngineStream, limit: number, map: (item: unknown) => T, bytes?: { of: (item: T) => number; max: number }): Promise<T[]> => new Promise((resolve, reject) => {
+  const collect = <T>(stream: EngineStream, limit: number, map: (item: unknown) => T, bytes?: { of: (item: T) => number; max: number }, keep?: (item: T) => boolean): Promise<T[]> => new Promise((resolve, reject) => {
     const meter = bytes ? new ByteMeter(bytes.max) : null;
     // A stream the engine opened after the query ended (the deadline or an abort landed while it planned) is closed here: `end` destroyed only
     // the streams it knew, and this one holds the source's cursors.
@@ -391,6 +392,8 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
     stream.on('data', (item) => {
       if (done) return;
       const mapped = map(item);
+      // An item the caller does not keep is neither counted toward the limit nor metered: the limit is of what is answered.
+      if (keep && !keep(mapped)) return;
       out.push(mapped);
       if (meter && bytes) {
         try { meter.add(bytes.of(mapped)); } catch (err) { settle(() => reject(err)); stream.destroy(); return; }
@@ -442,7 +445,8 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
     const quads = raw;
     return {
       kind: 'quads', destroy,
-      rows: guarded(async (limit = Infinity, maxBytes = Infinity) => collect(await quads.execute() as unknown as EngineStream, limit, (item) => item as RdfJsLike, { of: termBytes, max: maxBytes })),
+      rows: guarded(async (limit = Infinity, maxBytes = Infinity, keep?: (quad: RdfJsLike) => boolean) =>
+        collect(await quads.execute() as unknown as EngineStream, limit, (item) => item as RdfJsLike, { of: termBytes, max: maxBytes }, keep)),
     };
   }
   if (raw.resultType === 'boolean') {

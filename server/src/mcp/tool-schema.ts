@@ -16,6 +16,7 @@
  */
 import type { ToolSchemas } from './tools/types.js';
 import { toolTakesAView } from '../auth/space-rights.js';
+import { VIEW_CONSTRUCT_TOOLS } from '../config/views.js';
 
 /**
  * The `space` schemas injected into every tool's `inputSchema`.
@@ -63,10 +64,14 @@ export function materialisedSchema(
   accessibleSpaceIds: readonly string[],
   /** The caller's own personal views (`@name`): offered to the tools that take one, and to no other (Q-531). */
   viewIds: readonly string[] = [],
+  /** Among `viewIds`, the ones a SPARQL CONSTRUCT defines: offered to the tools that read one (`VIEW_CONSTRUCT_TOOLS`) and to no other (Q-762). */
+  constructViewIds: readonly string[] = [],
 ): Record<string, unknown> {
   let schema = tool.inputSchema(schemas);
   if (viewIds.length > 0 && accessibleSpaceIds.length > 0 && tool.name !== undefined && toolTakesAView(tool.name)) {
-    schema = withViewsInSpaceEnum(schema, viewIds);
+    // A tool that does not read a SPARQL view refuses it (`view_is_construct`), so it is not offered one: the enum is what the caller may name.
+    const offered = VIEW_CONSTRUCT_TOOLS.has(tool.name) ? viewIds : viewIds.filter(id => !constructViewIds.includes(id));
+    if (offered.length > 0) schema = withViewsInSpaceEnum(schema, offered);
   }
   // The one-space fill counts SPACES only: a view over the one space does not make `space` required.
   if (accessibleSpaceIds.length !== 1) return schema;

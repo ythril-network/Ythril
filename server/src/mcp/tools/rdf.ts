@@ -93,6 +93,7 @@ export const export_rdfTool: ToolHandler = {
       spaceId: ctx.callSpace, viewMembers: viewReadOfCall(ctx, ctx.callSpace), viewConstruct: viewConstructOfCall(ctx, ctx.callSpace),
       params: { format, edgeDetails, after, limit, maxChars, maxBytes, maxTokens },
       caller: ctx.callerRecord ?? { rights: ctx.rights ?? null }, callerKey: ctx.rateKey, transport: ctx.transport, fingerprintOf: schemaFingerprintOf,
+      signal: ctx.signal,
     });
     if ('error' in r) {
       throw toolRefusalOfAct(r.status, r.error, {

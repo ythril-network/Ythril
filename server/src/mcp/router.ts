@@ -16,7 +16,7 @@ import { validatorFor } from './validate-args.js';
 import { spaceScopeSentence } from './space-scope-sentence.js';
 import { callerRecordOf } from './caller-record.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
-import { viewOwnerOf, viewsOfOwner } from '../config/views.js';
+import { viewIdsOffered, viewOwnerOf, VIEW_CONSTRUCT_TOOLS } from '../config/views.js';
 import type { ToolCallerRecord } from './tools/types.js';
 
 /** Create an MCP Server instance with tools operating across all accessible spaces.
@@ -95,14 +95,17 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
   // The validator for this reach: built once per reach, so the schemas advertised here and the ones `callTool` enforces are the same objects (`Q-114`).
   // The caller's own personal views: offered as `space` to the read tools (and no other), named in the instructions, and part of the validator's
   // key so a token that reaches the same spaces without them is never handed this one's schemas.
-  const ownViews = viewsOfOwner(record ? viewOwnerOf(record) : null, cfg);
-  const ownViewIds = ownViews.map(v => v.id);
-  const reach = validatorFor(accessibleSpaceIds, ownViewIds);
+  const ownViews = viewIdsOffered(record ? viewOwnerOf(record) : null, cfg);
+  const ownViewIds = ownViews.all;
+  const reach = validatorFor(accessibleSpaceIds, ownViewIds, ownViews.construct);
+  const plainViewIds = ownViewIds.filter(id => !ownViews.construct.includes(id));
   const spacesLine = accessibleSpaces.length > 0
     ? accessibleSpaces.map(s => s.id + (s.label ? ` ("${s.label.replace(/[\x00-\x1f]/g, '').slice(0, 200)}")` : '')).join(', ')
     : '(none accessible)';
-  const instructions = `Ythril knowledge graph — global mode.\nAvailable spaces: ${spacesLine}.\n${spaceScopeSentence(ALL_TOOLS.filter(t => toolIsVisible(t, rights, peerId)), reach.schemas)} ${ownViewIds.length ? `Your personal views (read lenses over spaces you read; pass one as \`space\` to a read tool): ${ownViewIds.join(', ')}.
-` : ''}Call list_spaces for details. Tool arguments are validated against each tool's inputSchema (from tools/list) — read it before calling.`;
+  // A SPARQL view is read by the RDF tools alone (Q-762): named apart, so no read tool is told to take one it refuses.
+  const viewsLine = (plainViewIds.length ? `Your personal views (read lenses over spaces you read; pass one as \`space\` to a read tool): ${plainViewIds.join(', ')}.\n` : '')
+    + (ownViews.construct.length ? `Your SPARQL views (each defined by a CONSTRUCT; pass one as \`space\` to ${[...VIEW_CONSTRUCT_TOOLS].join(' or ')} only): ${ownViews.construct.join(', ')}.\n` : '');
+  const instructions = `Ythril knowledge graph — global mode.\nAvailable spaces: ${spacesLine}.\n${spaceScopeSentence(ALL_TOOLS.filter(t => toolIsVisible(t, rights, peerId)), reach.schemas)} ${viewsLine}Call list_spaces for details. Tool arguments are validated against each tool's inputSchema (from tools/list) — read it before calling.`;
 
   const server = new Server(
     { name: 'ythril', version: '0.1.0' },
@@ -126,7 +129,7 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
       name: t.name,
       description: t.description,
       // Through `materialisedSchema`, so what is ADVERTISED is what the validator enforces — see B-6.
-      inputSchema: materialisedSchema(t, schemas, accessibleSpaceIds, ownViewIds),
+      inputSchema: materialisedSchema(t, schemas, accessibleSpaceIds, ownViewIds, ownViews.construct),
       ...(t.outputSchema ? { outputSchema: { ...t.outputSchema } } : {}),
     })),
   }));
@@ -148,6 +151,8 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
     const { name, arguments: args } = request.params;
     const outcome = await callTool({
       name,
+      // The connection that carried the call ends when its caller goes away: a tool that holds a run for the caller stops with it (K7).
+      signal: extra.signal,
       args: (args ?? {}) as Record<string, unknown>,
       caller: {
         rights,

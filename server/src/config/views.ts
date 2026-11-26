@@ -54,6 +54,16 @@ export function viewsOfOwner(ownerKey: string | null, config: Config = getConfig
 }
 
 /**
+ * The ids of the caller's own views as a tool's `space` is offered them: every view (`all`), and among them the ones a SPARQL CONSTRUCT defines
+ * (`construct`), which only the tools of {@link VIEW_CONSTRUCT_TOOLS} read. The one list `tools/list` advertises and the dispatcher's validator
+ * enforces, so a tool is never offered a view it refuses with `view_is_construct`.
+ */
+export function viewIdsOffered(ownerKey: string | null, config: Config = getConfig()): { all: string[]; construct: string[] } {
+  const own = viewsOfOwner(ownerKey, config);
+  return { all: own.map(v => v.id), construct: own.filter(v => v.sparql).map(v => v.id) };
+}
+
+/**
  * The owner's view with this id, or `null`. Another owner's view is `null` as well: a caller can never learn that a view exists
  * under someone else's name.
  */
