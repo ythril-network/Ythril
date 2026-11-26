@@ -38,6 +38,7 @@ import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
 import { timingResultsDir } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
 import { CLIENT_RESULTS, clientCommandWritingTo } from './_shared/client-results.mjs';
+import { changelogBase } from './_shared/changelog-base.mjs';
 
 /**
  * `--static`, and nothing else: an unknown argument is refused rather than ignored, because `--statc` falling through
@@ -284,7 +285,11 @@ try { run('npm run todo:check'); } catch {
 // It works locally for the same reason CI can run it: the comparison is against `origin/main`, which is already
 // fetched. Nothing about it needed the runner.
 console.log('\n── CHANGELOG entry for shipped changes ──');
-try { run('node ./scripts/check-changelog.mjs'); } catch {
+// A branch on a release line is compared with that line, never main (scripts/_shared/changelog-base.mjs).
+let trackedUpstream = '';
+try { trackedUpstream = execFileSync('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { /* no upstream: main */ }
+const changelogAgainst = changelogBase({ upstream: trackedUpstream, override: process.env.PREFLIGHT_CHANGELOG_BASE ?? '' });
+try { run(`node ./scripts/check-changelog.mjs ${changelogAgainst}`); } catch {
   failures.push({ name: 'check-changelog', why: 'a file that changes what ships, with no [Unreleased] line' });
 }
 
