@@ -8,7 +8,7 @@
  *    set it, and `sparql: null` takes it off (the view is a plain one again).
  * 2. **Anything else is refused with its reason, saving nothing**, alike on both doors: a SELECT, an ASK or a DESCRIBE is
  *    `400 view_sparql_not_construct`, a SPARQL Update is `400 view_sparql_not_construct`, a text no parser reads is `400 view_sparql_invalid`,
- *    a text over 16 KB is `400 view_sparql_too_large`, and a `sparql` that is no `{ query: <text> }` is `400 view_sparql_invalid`.
+ *    a text over 16 384 bytes is `400 view_sparql_too_large` (16 384 bytes exactly is saved), and a `sparql` that is no `{ query: <text> }` is `400 view_sparql_invalid`.
  * 3. **A copy carries the query.** `view_copy` (and `POST /api/views/:id/copy`) gives the receiver a view with the same `sparql`.
  * 4. **A plain view is answered as before**: no `sparql` key on it.
  *

@@ -37,15 +37,18 @@ describe('the export of a SPARQL view stops when its caller goes away', { skip }
     for (let at = 0; at < BIG_RECORDS; at += 10_000) {
       await d.seed(BIG, 'entity', Array.from({ length: 10_000 }, (_, i) => ({ _id: `b-${at + i}`, name: `Big ${at + i}`, type: 'Thing', createdAt: STAMP, updatedAt: STAMP })));
     }
-    tok = await d.mint('q762k-abort', { [BIG]: d.row({ knowledge: 'read' }) });
-    const made = await d.rest(tok.key, 'POST', '/api/views', { name: 'q762k-slow', members: [BIG], sparql: { query: SLOW } });
-    assert.equal(made.status, 201, `${made.status} ${made.text.slice(0, 300)}`);
     slots = needModule(await loadDistModule('../../server/dist/util/slots.js', import.meta.url), ['takeSlot'], 'the slots');
   });
   after(async () => { faults.stop(); await d?.close(); });
 
-  /** Start `begin(signal)`, let it run and read, take the client away, and hold what the server did after against the run before. */
-  async function goesAway(begin) {
+  /**
+   * A caller of its own (a case that leaves its slot held must not refuse the next case for want of one) with the slow view, then: start
+   * `begin(signal)`, let it run and read, take the client away, and hold what the server did after against the run before.
+   */
+  async function goesAway(name, begin) {
+    tok = await d.mint(name, { [BIG]: d.row({ knowledge: 'read' }) });
+    const made = await d.rest(tok.key, 'POST', '/api/views', { name: 'q762k-slow', members: [BIG], sparql: { query: SLOW } });
+    assert.equal(made.status, 201, `${made.status} ${made.text.slice(0, 300)}`);
     const ctl = new AbortController();
     const pending = begin(ctl.signal).catch(err => ({ aborted: err }));
     const during = await d.door.commandsDuring(() => elapse(1_500, 'absence window: the store is read while the CONSTRUCT runs'));
@@ -60,15 +63,16 @@ describe('the export of a SPARQL view stops when its caller goes away', { skip }
   }
 
   it('a REST client that goes away stops the CONSTRUCT and frees the export slot', async () => {
-    await goesAway(signal => d.sparqlRest(tok.key, 'GET', '/api/brain/spaces/%40q762k-slow/export/rdf?format=nquads', { signal }));
+    await goesAway('q762k-rest', signal => d.sparqlRest(tok.key, 'GET', '/api/brain/spaces/%40q762k-slow/export/rdf?format=nquads', { signal }));
   });
 
   it('an MCP caller that goes away stops the CONSTRUCT and frees the export slot', async () => {
-    await goesAway(signal => fetch(`${d.server.url}/mcp`, {
+    await goesAway('q762k-mcp', signal => fetch(`${d.server.url}/mcp`, {
       method: 'POST', signal,
       headers: { Authorization: `Bearer ${tok.key}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'export_rdf', arguments: { space: '@q762k-slow', format: 'nquads' } } }),
-    }));
+      // The answer's headers arrive at once on a streamed response: the call is over when its body is, and the abort ends the read of it.
+    }).then(r => r.text()));
   });
 
   it('raised no unhandled rejection and no uncaught exception', async () => { await faults.quiet(); });
