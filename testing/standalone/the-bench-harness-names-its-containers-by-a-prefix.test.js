@@ -15,6 +15,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import * as env from '../../benchmarks/rdf/env.mjs';
 import { ythrilNames, ythrilNetwork } from '../../benchmarks/rdf/ythril.mjs';
+import { oxigraphNames } from '../../benchmarks/rdf/oxigraph.mjs';
 
 /** Every name a run of `prefix` creates: its containers, volumes and network. */
 const namesOf = (prefix) => [...Object.values(ythrilNames(prefix)), ythrilNetwork(prefix)];
@@ -36,5 +37,13 @@ describe('the bench harness names its containers by a prefix', () => {
     for (const n of a) assert.match(n, /^b273-/, `${n} carries the run's prefix`);
     assert.deepEqual(a.filter(n => b.includes(n)), [], 'two runs share no container, volume or network');
     assert.deepEqual(namesOf(undefined), namesOf('b271'), 'no prefix is the default one');
+  });
+
+  it('finding H1: the Oxigraph container and volume carry the prefix too, and the default keeps b271', () => {
+    const names = (prefix) => Object.values(oxigraphNames(1000, prefix));
+    for (const n of names('b273')) assert.equal(n, 'b273-oxigraph-1000', 'the name carries the run\'s prefix and its size');
+    assert.deepEqual(names('b273').filter(n => names('q763').includes(n)), [], 'two prefixes share no Oxigraph container or volume');
+    assert.deepEqual(oxigraphNames(1000), oxigraphNames(1000, 'b271'), 'no prefix is the default one');
+    assert.equal(oxigraphNames(1000).container, 'b271-oxigraph-1000', 'the default work folder keeps its b271 names');
   });
 });
