@@ -17,6 +17,10 @@
  * - **A removal that reads an older record.** A removed statement the store does not hold is `stale` (the Update was evaluated on a record
  *   that has changed: the act re-runs it), except under DELETE DATA, where it is a no-op as SPARQL says (`opts.stated`). An inserted statement the
  *   store already holds is a no-op.
+ * - **A relation lost that the Update states.** An inserted relation statement a stored edge holds is a no-op by itself, but the edge it
+ *   asserts is then never deleted: an earlier part may have removed every statement of the edge's record, and the final state, in the order the
+ *   parts apply, holds the relation. The edge's identifying statements (class, reifier) are stated by that relation, so their removal is a
+ *   no-op, and the edge converges without the rest of what was removed.
  * - **A record written twice, or under a spelling.** Statements are grouped by the record they belong to (its kind and id, from the address,
  *   a chrono's time nodes included), never by the text of the subject.
  * - **A statement taken for a field.** A removal of a server-owned or derived statement (a time node, the author, the stamp), of a field the record
@@ -129,6 +133,8 @@ class Run {
   private readonly out: SubjectChangesResult = { ops: [], reasons: [], notTaken: [], stale: [], noops: [], taken: 0 };
   private readonly forms = new Map<string, Form | null>();
   private edgeByRelation: Map<string, string> | null = null;
+  /** By {@link recordKey}: the stored edges whose relation statement the change set inserts, that is states again (it is in the target, whatever else is removed). */
+  private readonly reasserted = new Set<string>();
   /** The context the translator is handed: the stored records, and the triplets the whole change asserts and reifies (see {@link Run.translate}). */
   private readonly work: Map<string, StoredRecord>;
   private readonly workAsserted = new Set<string>();
@@ -304,7 +310,7 @@ class Run {
       const edge = this.edgeOfRelation(q);
       let owner: Owner;
       if (edge !== null) {
-        if (side === 'inserted') { this.noop(q); return; }
+        if (side === 'inserted') { this.reasserted.add(recordKey('edge', edge)); this.noop(q); return; }
         owner = { as: 'record', kind: 'edge', id: edge, key: recordKey('edge', edge) };
       } else owner = this.ownerOf(q.subject);
       if (owner.as === 'refuse') { refuseLater(owner.code, q); return; }
@@ -368,11 +374,20 @@ class Run {
     const rec = this.ctx.stored.get(g.key)!;
     const doc = rec.doc as Record<string, unknown>;
     const own = form.own.value;
-    const removedSigs = new Set(g.removed.map(quadSig));
+    // An edge whose relation the change set states is never deleted (the parts apply in order, and a relation stated after the removal of its
+    // record is in the target): the statements that identify it (its class, its reifier) are stated by that relation, so removing them changes
+    // nothing, and the edge converges without the rest of what was removed.
+    const restated = g.kind === 'edge' && this.reasserted.has(g.key) ? new Set(form.identity.map(quadSig)) : new Set<string>();
+    const removedAll = g.removed.filter(r => !restated.has(quadSig(r)));
+    // The whole record was emptied (every identifying statement removed) and its relation is stated again: the server's own statements of the
+    // record (created, modified, author) went with it in the Update's intent, and a record that stays keeps them, so their removal is a no-op.
+    const emptied = restated.size > 0 && [...restated].every(s => g.removed.some(r => quadSig(r) === s));
+    g.removed.filter(r => restated.has(quadSig(r))).forEach(r => this.noop(r));
+    const removedSigs = new Set(removedAll.map(quadSig));
     const insertedSigs = new Set(g.inserted.map(quadSig));
     // A statement both removed and inserted changes nothing.
     const removedHeld: Quad[] = [];
-    for (const r of g.removed) {
+    for (const r of removedAll) {
       const s = quadSig(r);
       if (!form.sigs.has(s)) {
         const named = form.skipped.size > 0 ? this.namedBy(r, g, form) : null;
@@ -400,7 +415,8 @@ class Run {
     const tags: Quad[] = [];
     const data: Quad[] = [];
     for (const r of removedHeld) {
-      if (g.kind === 'edge' && !ofOwn(r) && relation(r)) statements.push(r);
+      if (emptied && ofOwn(r) && ['server-owned', 'derived'].includes(predicateRole(r.predicate.value, g.kind))) this.noop(r);
+      else if (g.kind === 'edge' && !ofOwn(r) && relation(r)) statements.push(r);
       else if (!ofOwn(r)) serverOwned.push(r);
       else if (r.predicate.value === RDF_TYPE) (settles(r) ? typeRemoved : serverOwned).push(r);
       else if (STATEMENT_PREDICATES.has(r.predicate.value)) statements.push(r);
