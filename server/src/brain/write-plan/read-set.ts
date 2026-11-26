@@ -126,6 +126,8 @@ export class ReadSet {
   private readonly loadedSubjects = new Set<string>();
   /** Per functional subject: the identities (`tripletKey`) of the held edges this batch deletes (`noteDeleted`). */
   private readonly deletedEdges = new Map<string, Set<string>>();
+  /** The held edges this batch deletes, by identity (`tripletKey`), as they were stored: `deletedTriplet`. Emptied when the identity is written again. */
+  private readonly deletedDocs = new Map<string, EdgeDoc>();
   private readonly nameTypeCounts = new Map<string, number>();
   /** Ids this batch minted — records that cannot appear in any stored edge or link. */
   private readonly mintedIds = new Set<string>();
@@ -354,6 +356,15 @@ export class ReadSet {
     return this.triplets.get(k)!;
   }
 
+  /**
+   * The stored edge of this identity that this batch DELETES (`noteDeleted`), or `null`: what a later plan of the same triplet converges onto.
+   * An edge's identity is its triplet and end kinds, so an edge deleted and planned again in one batch is one record, written once (the group
+   * drops the delete). `triplet` still answers `null` for it: nothing else about the deleted edge is held.
+   */
+  deletedTriplet(t: Triplet): EdgeDoc | null {
+    return this.deletedDocs.get(tripletKey(t)) ?? null;
+  }
+
   /** Forget what is held for these records and triplets, so the next `load` reads them as they now stand. */
   forget(records: Partial<Record<ReadKind, readonly string[]>>, triplets: readonly Triplet[] = []): void {
     for (const [kind, ids] of Object.entries(records) as Array<[ReadKind, readonly string[]]>) {
@@ -408,6 +419,7 @@ export class ReadSet {
     if (kind === 'edge') {
       const e = doc as unknown as EdgeDoc;
       this.triplets.set(tripletKey(e), null);
+      this.deletedDocs.set(tripletKey(e), e);
       this.subjectEdges.add(e);
       const key = functionalSubjectKey(e.from, e.label);
       let deleted = this.deletedEdges.get(key);
@@ -441,6 +453,7 @@ export class ReadSet {
       const e = doc as unknown as EdgeDoc;
       // Written again after a delete of the same identity: it is at its subject once more.
       this.deletedEdges.get(functionalSubjectKey(e.from, e.label))?.delete(tripletKey(e));
+      this.deletedDocs.delete(tripletKey(e));
       this.triplets.set(tripletKey(e), e);
       // A subject this batch minted was never read (it has no stored edges), so its count starts here; one that was
       // read counts what this batch plans from then on. A subject nobody asked about is held too, and read by nobody.

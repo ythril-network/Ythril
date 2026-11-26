@@ -20,7 +20,7 @@ import { register } from './registry.js';
 /** Write groups that landed nothing, by reason (`GROUP_ABORT_REASONS`). */
 export const writeGroupAbortsTotal = new Counter({
   name: 'ythril_write_group_aborts_total',
-  help: 'Write groups that landed nothing, by reason (stale, duplicate_key, version_ceiling, retries, too_large, space_not_writable, failed)',
+  help: 'Write groups that landed nothing, by reason (stale, duplicate_key, version_ceiling, referenced, retries, too_large, space_not_writable, failed)',
   labelNames: ['reason'] as const,
   registers: [register],
 });

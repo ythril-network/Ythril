@@ -97,6 +97,13 @@ export function foldRemovals(
   }
   const stored = existing as Record<string, unknown>;
   const fields: readonly string[] = DELETABLE_FIELDS[kind];
+  // A path under a field the kind does not list would be accepted and take nothing (`reflectDeleteFields` reflects the listed fields only): refused by name.
+  for (const path of paths) {
+    const top = path.split('.')[0] ?? path;
+    if (!fields.includes(top)) {
+      throw new RequestRefusal(`\`deleteFields\` names '${top}', which a write cannot remove from a ${kind} (it can remove: ${fields.join(', ')})`);
+    }
+  }
   if (paths.length === 0 && removal.replaceTags === undefined) {
     const left: Record<string, unknown> = {};
     for (const f of fields) {

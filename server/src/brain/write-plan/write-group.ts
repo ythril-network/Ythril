@@ -10,7 +10,9 @@
  *
  * ## How
  *
- * Before a session opens: every plan is for this space and names a distinct (kind, id); the group is inside its ceilings
+ * Before a session opens: every plan is for this space and names a distinct (kind, id) (a delete of an edge the group also converges is dropped:
+ * one record, written once; any other record planned twice is refused `409 write_group_record_planned_twice`); the link rows the group removes
+ * are counted (one count per delete kind, and the stored rows the converges drop), and the group is inside its ceilings
  * (`GROUP_MAX_RECORDS`, `GROUP_MAX_OPERATIONS`, `GROUP_MAX_BYTES`, refused `413 write_group_too_large` naming the one it passed); and the
  * write gate admits every family the group writes (`admitSpaceWriteUnit`, left in a `finally`). Then one `inHeldTransaction`, the position
  * floor held throughout, runs the callback:
@@ -62,13 +64,12 @@ import type { BrainCollection } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { COMMIT_ORDER, PLAN_KINDS, type PlanKind, type WritePlan } from './types.js';
 import {
-  writeStage, reconcileLinkRows, landedEdgeOf, storedVersions, runAfterCommit, type LinkReconcile, type FailedEffect, type LandedLinkRow,
+  writeStage, reconcileLinkRows, countDroppedLinkRows, LinkRemovalsOverCount, landedEdgeOf, storedVersions, runAfterCommit,
+  type LinkReconcile, type FailedEffect, type LandedLinkRow,
 } from './commit.js';
-import { linkRowsStartingFrom } from '../link-adjacency.js';
+import { linkRowsStartingFrom, countLinkRowsStartingFrom } from '../link-adjacency.js';
 import { nextUnheldPosition } from '../../util/position-clock.js';
 import { recordPositions } from '../../sync/record-position-stream.js';
-import { MAX_LINKS_PER_KIND } from '../../util/request-bounds.js';
-import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { WebhookActor } from '../../webhooks/webhook-actor.js';
 import { RecordVersionAtCeiling } from '../write-precondition.js';
 import { tombstoneDoc, removeWithTombstones } from '../tombstones.js';
@@ -92,13 +93,14 @@ export type GroupAbortReason = typeof GROUP_ABORT_REASONS[number];
 for (const reason of GROUP_ABORT_REASONS) writeGroupAbortsTotal.inc({ reason }, 0);
 
 /** The group's reasons a group aborts inside its transaction, each a refusal of the whole group. */
-type InSessionReason = 'stale' | 'duplicate_key' | 'version_ceiling' | 'referenced' | 'retries';
+type InSessionReason = 'stale' | 'duplicate_key' | 'version_ceiling' | 'referenced' | 'retries' | 'too_large';
 
 /**
  * The group landed nothing: inside its transaction a record moved since it was planned (`stale`), an insert met an id already stored
  * (`duplicate_key`), a record's version is at the ceiling (`version_ceiling`), a record it deletes is still named by another (`referenced`:
  * the delete guard's refusal, its blockers in `blockers`, owner D-91 — no implicit cascade), or the transaction met a transient failure on
  * every run it may take (`retries`). `recordId`/`recordKind` name the record when one is known; `attempts` is how many times the transaction ran.
+ * `too_large`: the session read more link rows to remove than the ceilings counted before it opened (rows arrived since).
  */
 export class GroupAborted extends Error {
   /** `referenced`: what still names the record (the guard's `blocking` rows), so the caller can delete them in the same request. */
@@ -123,12 +125,27 @@ export class GroupAborted extends Error {
       case 'referenced': return `nothing was written: ${record} is still referenced by ${(block?.blocking ?? []).map(b => `${b.type} ${b._id}${b.end ? ` (at its ${b.end === 'both' ? 'both ends' : `${b.end} end`})` : ''}`).join(', ') || 'another record'}`
         + ' — delete or relink those in the same request';
       case 'retries': return `nothing was written: the write met another write on every one of its ${GROUP_MAX_TRIES} tries — retry the whole request`;
+      case 'too_large': return 'nothing was written: more link rows were found to remove than were counted when the write was checked against its limits (another write added some meanwhile) — retry the whole request';
     }
   }
 }
 
 /** Which ceiling a group passed. */
 export type GroupCeiling = 'records' | 'operations' | 'bytes';
+
+/**
+ * A record planned twice in one group, refused before a session opened: `409 write_group_record_planned_twice`, naming the record. A group writes
+ * each record once; a planner that hands it two plans of one id has built a request the store cannot honour whole. (A delete and a converge of
+ * the same EDGE are one record written once and are no refusal: the delete is dropped, see `droppedDeletes`.)
+ */
+export class WriteGroupRecordPlannedTwice extends Error {
+  readonly status = 409;
+  readonly code = 'write_group_record_planned_twice';
+  constructor(readonly recordKind: PlanKind, readonly recordId: string) {
+    super(`the write plans the ${recordKind} '${recordId}' twice; one write changes a record once — nothing was written`);
+    this.name = 'WriteGroupRecordPlannedTwice';
+  }
+}
 
 /** A group over one of its ceilings, refused before a session opened: `413 write_group_too_large`, naming the ceiling, its limit and the size. */
 export class WriteGroupTooLarge extends Error {
@@ -180,28 +197,30 @@ const WRITES_PER_REMOVAL = 2;
 const WIDEST_STAMP = { seq: Number.MAX_SAFE_INTEGER, pos: Number.MAX_SAFE_INTEGER, posAtSeq: Number.MAX_SAFE_INTEGER } as const;
 /** A fork's id as counted (its own is read inside the transaction): the length of a minted id. */
 const FORK_ID_SHAPE = '00000000-0000-4000-8000-000000000000';
+/** A link row's id as counted: the length of a derived one (a uuid v5, as every link id is). */
+const LINK_ID_SHAPE = linkIdFor(FORK_ID_SHAPE, 'fact', FORK_ID_SHAPE, 'entity');
 
 /** The size of what a group writes, as its ceilings count it. */
 export interface GroupSize { readonly records: number; readonly operations: number; readonly bytes: number }
 
 /**
  * What `plans` would write: records, writes (records plus the link rows they name), and bytes — the document each insert writes, the `$set`
- * and `$unset` each converge writes, and each named link row as stored. A link row the group removes is not counted here: which ones go is
- * read inside the transaction; a removal writes a tombstone no larger than the row it buries, and the 32 MiB ceiling sits far below what the
- * store refused (probe E5: 100 MB).
+ * and `$unset` each converge writes, and each named link row as stored. The link rows a group REMOVES are counted too, as `opts.linkRemovals`
+ * (contract-760: a removal is two writes and a tombstone, whichever record it hangs off): one 13-fact delete holds up to 52 000 of them.
  *
  * A delete (`Q-963`) is two writes, its removal and its tombstone, and the tombstone's bytes; so is each unresolved version it settles
- * (`opts.forks`, read before the session: `commitWriteGroup` counts them), each removed behind a tombstone of its own. The link rows a
- * deleted fact or chrono entry starts are removed with tombstones too and are read inside the transaction, like a converge's removed links.
+ * (`opts.forks`) and each link row a removal takes (`opts.linkRemovals`: the rows the deleted facts and chrono entries START and the stored rows
+ * the converges drop). Both are read before the session (`commitWriteGroup` counts them), each removed behind a tombstone of its own.
  */
-export function writeGroupSize(plans: readonly WritePlan[], opts: { forks?: number } = {}): GroupSize {
+export function writeGroupSize(plans: readonly WritePlan[], opts: { forks?: number; linkRemovals?: number } = {}): GroupSize {
   let operations = 0;
   let bytes = 0;
-  const removal = (id: string, type: PlanKind) => {
+  const removal = (id: string, type: PlanKind | 'link') => {
     operations += WRITES_PER_REMOVAL;
     bytes += operationBytes(tombstoneDoc(plans[0]?.spaceId ?? '', WIDEST_STAMP, { _id: id, type, originalSeq: WIDEST_STAMP.seq }));
   };
   for (let f = 0; f < (opts.forks ?? 0); f++) removal(FORK_ID_SHAPE, 'fact');
+  for (let l = 0; l < (opts.linkRemovals ?? 0); l++) removal(LINK_ID_SHAPE, 'link');
   for (const p of plans) {
     if (p.op === 'delete') { removal(p.id, p.kind); continue; }
     operations += 1;
@@ -240,11 +259,22 @@ const DELETE_ORDER: readonly PlanKind[] = [...COMMIT_ORDER].reverse();
  * the records, so a peer applies a row's removal before its subject's, and the delete guard that follows does not see them name an entity
  * the group also deletes. Rows pointing AT a deleted record are the guard's to refuse, never removed here.
  */
-async function removeLinksFromDeleted(spaceId: string, kind: PlanKind, ids: readonly string[], session: ClientSession): Promise<void> {
+async function removeLinksFromDeleted(
+  spaceId: string, kind: PlanKind, ids: readonly string[], counted: number, session: ClientSession, attempt: number,
+): Promise<void> {
   if (ids.length === 0 || (kind !== 'fact' && kind !== 'chrono')) return;
-  // Bounded by its owners: each holds at most MAX_LINKS_PER_KIND rows per class, the bound every link writer refuses past.
-  const rows = await linkRowsStartingFrom(spaceId, ids, kind, ids.length * MAX_LINKS_PER_KIND * REF_KINDS.length, session);
-  await removeWithTombstones(spaceId, 'links', rows.map(r => ({ _id: r._id, type: 'link' as const, originalSeq: r.seq })), { session, filter: { spaceId } });
+  // Bounded by what the ceilings counted before the session opened: one row more is read and refused, never removed.
+  const rows = await linkRowsStartingFrom(spaceId, ids, kind, counted + 1, session);
+  if (rows.length > counted) throw new GroupAborted('too_large', attempt, kind, ids[0]);
+  try {
+    await removeWithTombstones(spaceId, 'links', rows.map(r => ({ _id: r._id, type: 'link' as const, originalSeq: r.seq })), { session, filter: { spaceId } });
+  } catch (err) {
+    // A link row at the version ceiling cannot be removed (its tombstone would be refused by every peer): the record it hangs off is the one named.
+    if (err instanceof RecordVersionAtCeiling) {
+      throw new GroupAborted('version_ceiling', attempt, kind, rows.find(r => r._id === err.id)?.from ?? ids[0], { cause: err });
+    }
+    throw err;
+  }
 }
 
 /**
@@ -253,22 +283,23 @@ async function removeLinksFromDeleted(spaceId: string, kind: PlanKind, ids: read
  * tombstone at the version ceiling aborts it `version_ceiling`.
  */
 async function writeDeletes(
-  spaceId: string, plans: readonly WritePlan[], session: ClientSession, attempt: number,
+  spaceId: string, plans: readonly WritePlan[], session: ClientSession, attempt: number, linkRows: ReadonlyMap<PlanKind, number>,
 ): Promise<RunValue['removed']> {
   const removed: Array<{ kind: PlanKind; ids: string[]; forks: string[] }> = [];
   const ofKind = (kind: PlanKind) => plans.filter(p => p.op === 'delete' && p.kind === kind);
-  for (const kind of DELETE_ORDER) await removeLinksFromDeleted(spaceId, kind, ofKind(kind).map(p => p.id), session);
+  for (const kind of DELETE_ORDER) await removeLinksFromDeleted(spaceId, kind, ofKind(kind).map(p => p.id), linkRows.get(kind) ?? 0, session, attempt);
   for (const kind of DELETE_ORDER) {
     const deletes = ofKind(kind);
     if (deletes.length === 0) continue;
+    // Read before the removal: once it ran, a record it removed is as absent from the transaction as one that was never there, and only the
+    // versions read BEFORE tell the record that was missing or moved from the ones the same removal took.
+    const before = await storedVersions(spaceId, kind, deletes.map(p => p.id), session);
     try {
       const { forks } = await removeInSession(spaceId, kind, deletes.map(p => ({ _id: p.id, seq: p.expectSeq ?? null })), session);
       removed.push({ kind, ids: deletes.map(p => p.id), forks });
     } catch (err) {
       if (err instanceof StaleRemoval) {
-        // The transaction is open (a short count is no error): the record still stored at another version is the one that moved.
-        const stored = await storedVersions(spaceId, kind, deletes.map(p => p.id), session);
-        const moved = deletes.find(p => stored.has(p.id) && (stored.get(p.id) ?? null) !== (p.expectSeq ?? null)) ?? deletes.find(p => !stored.has(p.id));
+        const moved = deletes.find(p => !before.has(p.id) || (before.get(p.id) ?? null) !== (p.expectSeq ?? null));
         throw new GroupAborted('stale', attempt, kind, moved?.id, { cause: err });
       }
       if (err instanceof RecordVersionAtCeiling) throw new GroupAborted('version_ceiling', attempt, kind, err.id, { cause: err });
@@ -300,10 +331,16 @@ async function guardDeletes(spaceId: string, removed: RunValue['removed'], sessi
  * failure of the store as it came (nothing landed: a failure before the commit aborts the transaction).
  */
 export async function commitWriteGroup(
-  spaceId: string, plans: readonly WritePlan[], opts: { actor?: WebhookActor } = {},
+  spaceId: string, given: readonly WritePlan[], opts: { actor?: WebhookActor } = {},
 ): Promise<GroupCommitted> {
+  // The plans the group writes, and where each stands among the ones given: a delete of an edge the group also converges is dropped (it is one
+  // record, written once), every other record planned twice is refused. Everything below runs on `plans`; the result is given back per `given`.
+  const dropped = droppedDeletes(given);
+  const keep = given.map((_, i) => i).filter(i => !dropped.has(i));
+  const plans = keep.map(i => given[i]!);
   assertOneGroup(spaceId, plans);
-  const size = writeGroupSize(plans, { forks: await forksOfDeletes(spaceId, plans) });
+  const linkRows = await linkRowsToRemove(spaceId, plans);
+  const size = writeGroupSize(plans, { forks: await forksOfDeletes(spaceId, plans), linkRemovals: linkRows.started + linkRows.dropped });
   const over = size.records > GROUP_MAX_RECORDS ? new WriteGroupTooLarge('records', GROUP_MAX_RECORDS, size.records)
     : size.operations > GROUP_MAX_OPERATIONS ? new WriteGroupTooLarge('operations', GROUP_MAX_OPERATIONS, size.operations)
       : size.bytes > GROUP_MAX_BYTES ? new WriteGroupTooLarge('bytes', GROUP_MAX_BYTES, size.bytes) : null;
@@ -311,7 +348,7 @@ export async function commitWriteGroup(
     writeGroupAbortsTotal.inc({ reason: 'too_large' });
     throw over;
   }
-  if (plans.length === 0) return { seqs: [], linksAdded: [], attempts: 0, takenBack: { edges: [], links: [] }, failedEffects: [] };
+  if (plans.length === 0) return { seqs: given.map(() => 0), linksAdded: given.map(() => 0), attempts: 0, takenBack: { edges: [], links: [] }, failedEffects: [] };
 
   const families = familiesOf(plans);
   let leave: () => void;
@@ -327,7 +364,7 @@ export async function commitWriteGroup(
   try {
     value = await inHeldTransaction(spaceId, 'write.group', (session) => {
       attempts += 1;
-      return runGroup(spaceId, plans, session, attempts);
+      return runGroup(spaceId, plans, session, attempts, linkRows);
     }, {
       landed: async (run) => {
         readBack = true;
@@ -376,10 +413,16 @@ export async function commitWriteGroup(
     const plan = value.linkOwner.get(linkId);
     if (plan === undefined) continue;
     linksAdded[plan] = Math.max(0, linksAdded[plan]! - 1);
-    links.push({ plan, entityId });
+    links.push({ plan: keep[plan]!, entityId });
   }
+  // Per plan GIVEN: a delete dropped for a converge of the same edge wrote nothing of its own.
+  const perGiven = (values: readonly number[]) => {
+    const out = given.map(() => 0);
+    keep.forEach((at, k) => { out[at] = values[k]!; });
+    return out;
+  };
   return {
-    seqs: value.seqs, linksAdded, attempts,
+    seqs: perGiven(value.seqs), linksAdded: perGiven(linksAdded), attempts,
     takenBack: { edges: [...report.edgesTakenBack].map(([id, end]) => ({ id, end })), links },
     failedEffects,
   };
@@ -399,7 +442,9 @@ async function forksOfDeletes(spaceId: string, plans: readonly WritePlan[]): Pro
 }
 
 /** One run of the transaction's callback — see the module docblock. Everything it decides is in its value; it keeps nothing outside. */
-async function runGroup(spaceId: string, plans: readonly WritePlan[], session: ClientSession, attempt: number): Promise<RunValue> {
+async function runGroup(
+  spaceId: string, plans: readonly WritePlan[], session: ClientSession, attempt: number, linkRows: LinkRowsToRemove,
+): Promise<RunValue> {
   if (attempt > GROUP_MAX_TRIES) throw new GroupAborted('retries', attempt - 1);
   const seqs = new Array<number>(plans.length).fill(0);
   let marker: RunValue['marker'];
@@ -407,7 +452,7 @@ async function runGroup(spaceId: string, plans: readonly WritePlan[], session: C
   const deletes = plans.some(p => p.op === 'delete');
   const began = deletes ? await nextUnheldPosition(recordPositions, spaceId) : undefined;
   // Deletes before inserts (design-r2 R6): an edge swapped at a functional subject leaves the unique guard before its successor takes it.
-  const removed = deletes ? await writeDeletes(spaceId, plans, session, attempt) : [];
+  const removed = deletes ? await writeDeletes(spaceId, plans, session, attempt, linkRows.startedBy) : [];
   for (const kind of COMMIT_ORDER) {
     const at = plans.flatMap((p, i) => (p.kind === kind && p.op !== 'delete' ? [i] : []));
     if (at.length === 0) continue;
@@ -418,7 +463,9 @@ async function runGroup(spaceId: string, plans: readonly WritePlan[], session: C
     } catch (err) {
       // A duplicate key is a record created since the plan read it; it carries no transient label (probe E1), and a read inside a transaction
       // the server already aborted would fail: the group aborts on the error alone. Everything else goes as it came, its labels kept.
-      if (!carriesErrorLabel(err, 'TransientTransactionError') && isDuplicateKey(err)) throw new GroupAborted('duplicate_key', attempt, kind, undefined, { cause: err });
+      if (!carriesErrorLabel(err, 'TransientTransactionError') && isDuplicateKey(err)) {
+        throw new GroupAborted('duplicate_key', attempt, kind, duplicateOf(err, ofKind), { cause: err });
+      }
       throw err;
     }
     const refused = stage.rows.find(r => 'refused' in r);
@@ -426,9 +473,11 @@ async function runGroup(spaceId: string, plans: readonly WritePlan[], session: C
     const inserts = ofKind.filter(p => p.op === 'insert').length;
     const converges = ofKind.length - inserts;
     if (stage.matched < converges) {
-      throw new GroupAborted('stale', attempt, kind, await staleConverge(spaceId, kind, ofKind, stage, session));
+      throw new GroupAborted('stale', attempt, kind, await movedRecord(spaceId, kind, 'converge', ofKind, stage, session));
     }
-    if (stage.inserted < inserts) throw new GroupAborted('stale', attempt, kind);
+    if (stage.inserted < inserts) {
+      throw new GroupAborted('stale', attempt, kind, await movedRecord(spaceId, kind, 'insert', ofKind, stage, session));
+    }
     stage.sent.forEach((k, s) => {
       seqs[at[k]!] = stage.stamps[s]!.version;
       if (!marker && ofKind[k]!.op === 'insert') marker = { kind, id: ofKind[k]!.id, seq: stage.stamps[s]!.version };
@@ -440,8 +489,14 @@ async function runGroup(spaceId: string, plans: readonly WritePlan[], session: C
   const owedLinks: LandedLinkRow[] = [];
   const linkOwner = new Map<string, number>();
   if (withLinks.length > 0) {
-    const records: LinkReconcile[] = withLinks.map(i => ({ from: plans[i]!.id, minted: plans[i]!.minted, ...plans[i]!.links! }));
-    const counts = await reconcileLinkRows(spaceId, records, { session, owed: owedLinks });
+    const records = linkRecordsOf(plans);
+    let counts: Awaited<ReturnType<typeof reconcileLinkRows>>;
+    try {
+      counts = await reconcileLinkRows(spaceId, records, { session, owed: owedLinks, removalCeiling: linkRows.dropped });
+    } catch (err) {
+      if (err instanceof LinkRemovalsOverCount) throw new GroupAborted('too_large', attempt, undefined, undefined, { cause: err });
+      throw err;
+    }
     withLinks.forEach((i, k) => { linksAdded[i] = counts[k]!.added; });
     for (const row of owedLinks) {
       const owner = withLinks.find(i => {
@@ -457,25 +512,87 @@ async function runGroup(spaceId: string, plans: readonly WritePlan[], session: C
   return { seqs, linksAdded, owedLinks, linkOwner, removed, ...(marker ? { marker } : {}), ...(began !== undefined ? { began } : {}) };
 }
 
-/** The converge of a short stage whose record moved: read in the session (the transaction is still open: a short count is no error). */
-async function staleConverge(
-  spaceId: string, kind: PlanKind, ofKind: readonly WritePlan[], stage: Awaited<ReturnType<typeof writeStage>>, session: ClientSession,
+/**
+ * The plan of `op` in a short stage whose record did not take the version the stage gave it: read in the session (the transaction is still
+ * open: a short count is no error). A converge that matched nothing moved or went; an insert that was not made is not stored at its version.
+ */
+async function movedRecord(
+  spaceId: string, kind: PlanKind, op: 'converge' | 'insert', ofKind: readonly WritePlan[], stage: Awaited<ReturnType<typeof writeStage>>,
+  session: ClientSession,
 ): Promise<string | undefined> {
-  const converges = stage.sent.filter(k => ofKind[k]!.op === 'converge');
-  const stored = await storedVersions(spaceId, kind, converges.map(k => ofKind[k]!.id), session);
-  const moved = converges.find(k => stored.get(ofKind[k]!.id) !== stage.stamps[stage.sent.indexOf(k)]!.version);
+  const planned = stage.sent.filter(k => ofKind[k]!.op === op);
+  const stored = await storedVersions(spaceId, kind, planned.map(k => ofKind[k]!.id), session);
+  const moved = planned.find(k => stored.get(ofKind[k]!.id) !== stage.stamps[stage.sent.indexOf(k)]!.version);
   return moved === undefined ? undefined : ofKind[moved]!.id;
 }
 
-/** Every plan is for `spaceId`, and no (kind, id) is planned twice: a group writes each record once. A planner's defect, thrown as one. */
+/**
+ * The record a duplicate key stopped: the document the failed insert carried (the bulk error holds it, `writeErrors[i].err.op`) is one of this
+ * stage's, so its id names the plan. Unnamed only when the driver's error carries no document.
+ */
+function duplicateOf(err: unknown, ofKind: readonly WritePlan[]): string | undefined {
+  const writeErrors = (err as { writeErrors?: unknown } | null)?.writeErrors;
+  const list = Array.isArray(writeErrors) ? writeErrors : writeErrors ? Object.values(writeErrors as object) : [];
+  for (const w of list as Array<{ err?: { op?: { _id?: unknown } }; getOperation?: () => { _id?: unknown } | undefined }>) {
+    const id = w.err?.op?._id ?? w.getOperation?.()?._id;
+    if (typeof id === 'string' && ofKind.some(p => p.id === id)) return id;
+  }
+  return undefined;
+}
+
+/** Every plan is for `spaceId`, and no (kind, id) is planned twice: a group writes each record once. A wrong space is a planner's defect, thrown as one. */
 function assertOneGroup(spaceId: string, plans: readonly WritePlan[]): void {
   const seen = new Set<string>();
   for (const p of plans) {
     if (p.spaceId !== spaceId) throw new Error(`commitWriteGroup: a plan decided for space '${p.spaceId}' was handed to a group for '${spaceId}'`);
     const key = `${p.kind}\u0000${p.id}`;
-    if (seen.has(key)) throw new Error(`commitWriteGroup: the ${p.kind} '${p.id}' is planned twice in one group`);
+    if (seen.has(key)) throw new WriteGroupRecordPlannedTwice(p.kind, p.id);
     seen.add(key);
   }
+}
+
+/**
+ * The indexes of the delete plans the group does not write: a delete of an EDGE the group also converges. An edge's identity is its triplet and
+ * end kinds, so a batch that deletes one and plans the same triplet again (`planEdge` plans that converge, from the read set's deleted edge)
+ * writes ONE record, converged in place, and the delete would remove what the converge writes. Only an edge: the other kinds' identities are
+ * not their content, and two plans of one such record stay a refusal (`assertOneGroup`).
+ */
+function droppedDeletes(plans: readonly WritePlan[]): Set<number> {
+  const converged = new Set(plans.filter(p => p.kind === 'edge' && p.op === 'converge').map(p => p.id));
+  return new Set(plans.flatMap((p, i) => (p.kind === 'edge' && p.op === 'delete' && converged.has(p.id) ? [i] : [])));
+}
+
+/** The link rows the group's plans remove, counted before the session opens: those a deleted fact or chrono entry starts, and those a converge drops. */
+interface LinkRowsToRemove {
+  /** Per deleted kind (fact, chrono): the rows its deleted records start. */
+  readonly startedBy: ReadonlyMap<PlanKind, number>;
+  readonly started: number;
+  /** The stored rows the converges drop, over all of them. */
+  readonly dropped: number;
+}
+
+/** The link-reconcile input of the plans that name link classes, in plan order: what `runGroup` reconciles and what the count reads. */
+function linkRecordsOf(plans: readonly WritePlan[]): LinkReconcile[] {
+  return plans.filter(p => p.links).map(p => ({ from: p.id, minted: p.minted, ...p.links! }));
+}
+
+/**
+ * Count, before a session opens, the link rows the group removes (contract-760: a removal is two writes and a tombstone, of whatever it hangs
+ * off): one count per delete kind of the rows its records start, and the stored rows the converges drop. Inside the session the same rows are read
+ * again and a row more than counted aborts the group `too_large`.
+ */
+async function linkRowsToRemove(spaceId: string, plans: readonly WritePlan[]): Promise<LinkRowsToRemove> {
+  const startedBy = new Map<PlanKind, number>();
+  let started = 0;
+  for (const kind of COMMIT_ORDER) {
+    if (kind !== 'fact' && kind !== 'chrono') continue;
+    const ids = plans.filter(p => p.op === 'delete' && p.kind === kind).map(p => p.id);
+    const n = await countLinkRowsStartingFrom(spaceId, ids, kind);
+    if (n > 0) startedBy.set(kind, n);
+    started += n;
+  }
+  const dropped = await countDroppedLinkRows(spaceId, linkRecordsOf(plans));
+  return { startedBy, started, dropped };
 }
 
 /** The families the group writes: each plan's collection, and the link rows (with their tombstones) when a plan names links. */

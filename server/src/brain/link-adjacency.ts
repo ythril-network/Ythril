@@ -346,11 +346,21 @@ export async function linksPointingAt(
  */
 export async function linkRowsStartingFrom(
   spaceId: string, ids: readonly string[], fromKind: RefKind, limit: number, session?: ClientSession,
-): Promise<Array<Pick<LinkDoc, '_id' | 'seq'>>> {
+): Promise<Array<Pick<LinkDoc, '_id' | 'seq' | 'from'>>> {
   if (ids.length === 0) return [];
   return await col<LinkDoc>(spaceCollection(spaceId, 'links'))
-    .find(asFilter<LinkDoc>({ spaceId, from: { $in: [...ids] }, fromKind }), { projection: { _id: 1, seq: 1 }, ...(session ? { session } : {}) })
-    .limit(limit).toArray() as Array<Pick<LinkDoc, '_id' | 'seq'>>;
+    .find(asFilter<LinkDoc>({ spaceId, from: { $in: [...ids] }, fromKind }), { projection: { _id: 1, seq: 1, from: 1 }, ...(session ? { session } : {}) })
+    .limit(limit).toArray() as Array<Pick<LinkDoc, '_id' | 'seq' | 'from'>>;
+}
+
+/**
+ * How many link rows records of `fromKind` among `ids` START — what {@link linkRowsStartingFrom} would return, counted without reading them (an
+ * index count over the same filter). Asked before a write group's session opens, so its ceilings count the rows a delete will remove.
+ */
+export async function countLinkRowsStartingFrom(spaceId: string, ids: readonly string[], fromKind: RefKind): Promise<number> {
+  if (ids.length === 0) return 0;
+  return await col<LinkDoc>(spaceCollection(spaceId, 'links'))
+    .countDocuments(asFilter<LinkDoc>({ spaceId, from: { $in: [...ids] }, fromKind }));
 }
 
 /** Every link row STARTING from any of `ids` — the mirror, on the `{from, fromKind, …}` index. */
