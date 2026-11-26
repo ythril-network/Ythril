@@ -404,7 +404,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
   const verdicts = new Map<string, Promise<'index' | 'records'>>();
   const paths = new Map<string, 'index' | 'records'>();
   /** The build each member read from its index was pinned at (R5): checked again by `indexesSwapped`. */
-  const pinned = new Map<string, string | null>();
+  const pinned = new Map<string, string>();
   const toRecords = new Set(opts.recordsFor ?? []);
   const pathOf = (member: RdfMember): Promise<'index' | 'records'> => {
     let p = verdicts.get(member.space);

@@ -25,8 +25,9 @@
  * - **A positioned write in a transaction that holds no floor** (`withLandingStamp` handed a session outside `inHeldTransaction`): its stamp
  *   settles before the commit, so the follower runs while the record is not visible and passes its position. It is journaled too.
  *
- * A write that changes no field a statement reads (`RDF_READ_FIELDS` of its kind) needs no row, nor does any write to a space with RDF off
- * (it has no index). Writes carrying a numeric `pos` are the follower's.
+ * A write that changes no field a statement reads (`RDF_READ_FIELDS` of its kind) needs no row. A write that would need one in a space with RDF
+ * off writes none (nothing follows the index of the time before) and marks that index stale instead (G3), as a drop or rename does. Writes
+ * carrying a numeric `pos` are the follower's.
  */
 import { randomUUID } from 'node:crypto';
 import { col, asFilter, asUpdate } from '../../db/mongo.js';
@@ -209,12 +210,15 @@ export function recordWriteJournal(wake: (spaceId: string) => void): RecordWrite
     wants: (name) => recordCollectionOf(name) !== null,
     before(name, method, args) {
       const target = recordCollectionOf(name);
-      if (target === null || !rdfOn(target.spaceId)) return null;
+      if (target === null) return null;
+      // G3: a space with RDF off keeps the index of the time before, which nothing follows. Every write that would be journaled (and every
+      // drop or rename) marks that index stale instead, so RDF on again never reads statements an unpositioned write has outdated.
       if (method === 'drop' || method === 'rename') return forgetting(target.spaceId, method === 'rename' ? args[0] : undefined);
       const session = sessionOf(args);
       const inTransaction = session?.inTransaction() === true;
       const needs = needOf(target.kind, method, args, !inTransaction || insideFloorOf(recordPositions, target.spaceId));
       if (needs.every(n => n === null)) return null;
+      if (!rdfOn(target.spaceId)) return staleWhileOff(target.spaceId);
       const keys = needs.some(n => n === 'every')
         ? [EVERY_RECORD]
         : [...new Set(needs.flatMap(n => (n === null || n === 'every' ? [] : n.ids.map(id => recordKeyOf(target.kind, String(id))))))];
@@ -243,6 +247,12 @@ async function writeRows(spaceId: string, keys: readonly string[], session: Sess
     await journalOf(spaceId).insertMany(chunk, { ordered: false, ...(session ? { session: session as never } : {}) });
   }
   return { spaceId, rows: inTransaction ? [] : rows.map(r => r._id) };
+}
+
+/** A write the journal would have named, made while RDF is off: the index it leaves behind (if any) is marked stale. Answers no ticket. */
+async function staleWhileOff(spaceId: string): Promise<null> {
+  await markTripleIndexStale(spaceId);
+  return null;
 }
 
 /** A record collection about to be dropped or renamed: its space's index, and a rename target's, need a rebuild. Answers no ticket. */

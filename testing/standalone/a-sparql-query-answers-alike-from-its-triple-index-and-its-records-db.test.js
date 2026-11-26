@@ -294,7 +294,8 @@ describe('a SPARQL query answers alike from its triple index and its records', {
     await owed.detectReupgrade();
     assert.equal((await d.col('ythril_counters').findOne({ _id: A })).positionsOwed, 'repair', 'the detector found the space');
     readAll(await alike('a delete a 5.6 build made', ['BSBM Q1', 'every statement', 'fixed 9 aggregate']), A, 'records', 'a delete a 5.6 build made');
-    assert.equal((await answer('SELECT ?s WHERE { ?s ?p ?o } LIMIT 100000', [A], false)).texts.some(t => t.includes('product29')), false, 'the records no longer state product29');
+    // Its edges still name it (they are records of their own); its own label is gone.
+    assert.deepEqual((await answer(`SELECT ?n WHERE { ${e(A, 'product29')} <${RDFS}label> ?n }`, [A], false)).texts, [], 'the records no longer state the label of product29');
     assert.equal((await (await rebuildModule()).rebuildTripleIndex(A)).outcome, 'built');
     await followUntilReady(d, A);
     readAll(await alike('after the rebuild', ['BSBM Q1', 'every statement', 'fixed 9 aggregate']), A, 'index', 'after the rebuild');

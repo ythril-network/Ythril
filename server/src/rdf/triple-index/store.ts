@@ -183,14 +183,7 @@ export async function setBuiltStatus(spaceId: string, buildId: string, status: T
 /** The write journal (`journal.ts`): the apply clears the rows it was handed, in its own transaction. */
 const journalCollection = (spaceId: string) => col<{ _id: string }>(spaceCollection(spaceId, 'rdfDirty'));
 
-/**
- * Mark `spaceId`'s index `stale` (a rebuild, slice S4, makes it ready again), when it has a state row: for a change no record row can name
- * (a journal row `*`, a record collection dropped or renamed, a writer around the db door). Never creates a state row: a space whose index
- * has none is not ready already, and a row written under a name a rename is about to move into would stop the rename.
- */
-export async function markTripleIndexStale(spaceId: string): Promise<void> {
-  await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state' }), asUpdate<TripleIndexState>({ $set: { status: 'stale' } }));
-}
+export { markTripleIndexStale } from './stale-mark.js';
 
 /** The `_id` of a record's row: its kind and id. */
 export const recordKeyOf = (kind: RdfRecordKind, id: string): string => `${kind}:${id}`;

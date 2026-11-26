@@ -56,6 +56,7 @@ import { carryScanCursors } from '../brain/scan-cursor.js';
 import { writtenHereFilter, isWrittenHere } from './written-here.js';
 import { withLandingStamp, arrivalRow } from './record-position-stream.js';
 import { carryMarksToPositions } from './receive-marks.js';
+import { markTripleIndexStale } from '../rdf/triple-index/stale-mark.js';
 import { syncedBy56 } from './member-status.js';
 import {
   COUNTERS, forgetPositionsReady, holdPositionsUntilDetected, positionsHeldUntilDetected, positionsOwed, releasePositionsHold, type PositionsOwed,
@@ -362,6 +363,16 @@ async function whatFiveSixLeft(): Promise<void> {
 }
 
 /**
+ * A space that owes a repair was written by a 5.6 build, which changes records without a position and without a journal row, so its triple
+ * index (`rdf/triple-index`) may state what the records no longer hold, and nothing in it says so (review finding G2): it is marked stale, and
+ * the upkeep rebuilds it. Every space that owes a repair, not only those this pass marked: the mark is idempotent, and a repair a restart cut
+ * short has still left the index unproven.
+ */
+async function staleIndexesOfRepairedSpaces(): Promise<void> {
+  for (const { spaceId, kind } of await owingSpaces()) if (kind === 'repair') await markTripleIndexStale(spaceId);
+}
+
+/**
  * The re-upgrade detector's one pass: what the first carry or a later boot has to mark (above), then the hold on every space is released and the gauge is set.
  * Run once per boot in phase 1, before the scheduler starts, and retried by the job while it is held. Throws when the store does not answer, which leaves the hold
  * armed: no transfer runs on a position a 5.6 build left stale.
@@ -369,6 +380,7 @@ async function whatFiveSixLeft(): Promise<void> {
 export async function detectReupgrade(): Promise<void> {
   if (getConfig().positionsSince === undefined) await firstCarry();
   await whatFiveSixLeft();
+  await staleIndexesOfRepairedSpaces();
   releasePositionsHold();
   await refreshBuildingGauge();
 }
