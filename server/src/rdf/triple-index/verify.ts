@@ -15,16 +15,19 @@
  * - `verify`: the drift verify found a record whose statements differ from its record row;
  * - `unused-terms`: the verify's passes over the dictionary found more than {@link UNUSED_TERMS_SHARE} of its terms used by no statement
  *   (the dictionary never frees an id; a rebuild starts a fresh one).
- * A reason starts a rebuild (`rebuild.ts` `requestTripleIndexRebuild`); the reason is logged.
+ * A reason starts a rebuild (`rebuild.ts` `launchTripleIndexRebuild`), at most one per tick and none while one runs in this process
+ * ({@link upkeepTripleIndexes}, finding F5); the reason is logged.
  *
  * ## The drift verify
  *
  * At most every {@link VERIFY_EVERY_MS} per space, and only while the index is ready, of the form now and caught up (no record above
  * `appliedPos`, no journal row): the next {@link VERIFY_SAMPLE_RECORDS} records (a cursor in `rdf_state` `{_id:'verify'}` rolls through
  * the record collections) are recomputed with the record form and compared with their record rows, and the next
- * {@link VERIFY_SAMPLE_TERMS} dictionary terms are looked up in `rdf_quads`. A record written meanwhile (its `pos` above `appliedPos`) is
- * not compared; a mismatch counts only when the barrier still holds after the sample, so a write landing during the verify is not drift.
- * Each mismatch is logged with the records it names.
+ * {@link VERIFY_SAMPLE_TERMS} dictionary terms are looked up in `rdf_quads`. The other way too (finding F9): the next
+ * {@link VERIFY_SAMPLE_RECORDS} record rows (a second cursor, `rowAfter`) are checked against the stored records, and a row whose record is
+ * gone is named. A record written meanwhile (its `pos` above `appliedPos`) is not compared; a mismatch counts only when the barrier still
+ * holds after the sample, so a write landing during the verify is not drift, and none counts when the index state (status, build, form) is
+ * not the one the verify started from at its end (another instance's swap, review point U4). Each mismatch is logged with the records it names.
  */
 import { Binary, type Document } from 'mongodb';
 import { col, asFilter, asUpdate } from '../../db/mongo.js';
@@ -37,13 +40,14 @@ import { eachSpace } from '../../util/housekeeping-walk.js';
 import { declareStep } from '../../util/housekeeping-signals.js';
 import { intervalJob } from '../../util/interval-job.js';
 import { configuredSpaces } from '../../spaces/space-lookup.js';
-import { RDF_KIND_COLLECTIONS } from '../rdf-members.js';
+import { RDF_KIND_COLLECTIONS, rdfKindCollection } from '../rdf-members.js';
+import type { RdfRecordKind } from '../record-triples.js';
 import { storedKeyOf, type TermRow } from './terms.js';
 import { formKeyOf, liveCollections, packStatement, readTripleIndexState, recordKeyOf, STATEMENT_BYTES } from './store.js';
 import { hasOutstandingJournalRows, journalAsksForRebuild } from './journal.js';
 import { formMetaOf, projectionOf, statementsOf } from './follow.js';
 import { filterOf, lagOf } from './read.js';
-import { requestTripleIndexRebuild, type RebuildResult } from './rebuild.js';
+import { anyRebuildRunsHere, launchTripleIndexRebuild, requestTripleIndexRebuild, type RebuildResult } from './rebuild.js';
 
 /** The records one verify run recomputes, at most. */
 export const VERIFY_SAMPLE_RECORDS = 200;
@@ -65,8 +69,11 @@ const KEYS_NAMED = 5;
 /** Why an index is rebuilt. */
 export type RebuildReason = 'missing' | 'stale' | 'journal' | 'form' | 'verify' | 'unused-terms';
 
-/** Where the verify stands: the record cursor (a kind's place in `RDF_KIND_COLLECTIONS` and the last `_id`) and the dictionary pass. */
-interface VerifyRow { _id: 'verify'; kind: number; after?: string; termAfter: number; termsSeen: number; termsUnused: number }
+/**
+ * Where the verify stands: the record cursor (a kind's place in `RDF_KIND_COLLECTIONS` and the last `_id`), the cursor over the record rows
+ * (`rowAfter`: the last row key) and the dictionary pass. A swap deletes the row (`store.ts` `writeBuiltState`): the cursors belong to the index.
+ */
+interface VerifyRow { _id: 'verify'; kind: number; after?: string; rowAfter?: string; termAfter: number; termsSeen: number; termsUnused: number }
 
 const verifyCollection = (spaceId: string) => col<VerifyRow>(spaceCollection(spaceId, 'rdfState'));
 
@@ -112,11 +119,18 @@ export async function verifyTripleIndex(spaceId: string): Promise<VerifyResult> 
     }
     if (page.end || page.last === undefined) { cursor.kind = (cursor.kind + 1) % RDF_KIND_COLLECTIONS.length; cursor.after = undefined; } else cursor.after = page.last;
   }
-  let mismatched = await mismatchesOf(spaceId, expected);
+  // Both directions (finding F9): each sampled record against its row above, and each sampled row against its record here.
+  const rows = await sampleRecordRows(spaceId, row?.rowAfter);
+  let mismatched = [...await mismatchesOf(spaceId, expected), ...await rowsWithoutRecords(spaceId, rows.keys)];
   const terms = await sampleTerms(spaceId, row);
-  const fields = { kind: cursor.kind, termAfter: terms.termAfter, termsSeen: terms.seen, termsUnused: terms.unused, ...(cursor.after !== undefined ? { after: cursor.after } : {}) };
+  // The index is the one the verify started from (review point U4): another instance's swap renames a build onto the collections this
+  // sample read, and what it read of them then is no drift. Nothing is recorded: the next verify reads the new index from its start.
+  if (!(await sameIndex(spaceId, state))) return none;
+  const fields = { kind: cursor.kind, termAfter: terms.termAfter, termsSeen: terms.seen, termsUnused: terms.unused, ...(cursor.after !== undefined ? { after: cursor.after } : {}),
+    ...(rows.next !== undefined ? { rowAfter: rows.next } : {}) };
+  const unset = { ...(cursor.after === undefined ? { after: '' } : {}), ...(rows.next === undefined ? { rowAfter: '' } : {}) };
   await verifyCollection(spaceId).updateOne(asFilter<VerifyRow>({ _id: 'verify' }),
-    asUpdate<VerifyRow>({ $set: fields, ...(cursor.after === undefined ? { $unset: { after: '' } } : {}) }), { upsert: true });
+    asUpdate<VerifyRow>({ $set: fields, ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}) }), { upsert: true });
   // A write that landed while the sample was read is the follower's, not drift.
   if (mismatched.length > 0 && !(await caughtUp(spaceId, state.appliedPos))) mismatched = [];
   if (mismatched.length > 0) {
@@ -125,6 +139,37 @@ export async function verifyTripleIndex(spaceId: string): Promise<VerifyResult> 
   }
   const reason = mismatched.length > 0 ? 'verify' : terms.overShare ? 'unused-terms' : null;
   return { checked: [...expected.keys()], mismatched, reason };
+}
+
+/** Whether `spaceId`'s index is still the state `was` (ready, the same build and form): no swap and no stale mark came between. */
+async function sameIndex(spaceId: string, was: { buildId?: string; formKey: string }): Promise<boolean> {
+  const now = await readTripleIndexState(spaceId);
+  return now !== null && now.status === 'ready' && now.buildId === was.buildId && now.formKey === was.formKey;
+}
+
+/** The next record rows of the index by key after `after` (at most {@link VERIFY_SAMPLE_RECORDS}), and where the next sample starts (`undefined`: from the first). */
+async function sampleRecordRows(spaceId: string, after: string | undefined): Promise<{ keys: string[]; next: string | undefined }> {
+  const page = await idKeysetPage<{ _id: string }>({ collection: liveCollections(spaceId).records, filter: {}, projection: { _id: 1 }, size: VERIFY_SAMPLE_RECORDS }, after);
+  return { keys: page.rows.map(r => r._id), next: page.end || page.last === undefined ? undefined : page.last };
+}
+
+/** The keys of `keys` (record rows) whose record is not stored: a row of a record that is gone, or one that names no record kind. */
+async function rowsWithoutRecords(spaceId: string, keys: readonly string[]): Promise<string[]> {
+  const byKind = new Map<RdfRecordKind, string[]>();
+  const unnamed: string[] = [];
+  for (const key of keys) {
+    const cut = key.indexOf(':');
+    const kind = RDF_KIND_COLLECTIONS.find(c => c.kind === key.slice(0, cut))?.kind;
+    if (cut < 1 || kind === undefined) { unnamed.push(key); continue; }
+    const ids = byKind.get(kind);
+    if (ids) ids.push(key.slice(cut + 1)); else byKind.set(kind, [key.slice(cut + 1)]);
+  }
+  const strays = [...unnamed];
+  for (const [kind, ids] of byKind) {
+    const stored = await readStoredById<{ _id: string }>(spaceCollection(spaceId, rdfKindCollection(kind)), ids, { _id: 1 });
+    for (const id of ids) if (!stored.has(id)) strays.push(`${kind}:${id}`);
+  }
+  return strays;
 }
 
 /** The keys of `expected` (record key: its statements, each the JSON of three term keys) whose record row states something else. */
@@ -193,29 +238,46 @@ export interface UpkeepResult { rebuilt: RebuildReason | null; reason: RebuildRe
 
 /** The upkeep of `spaceId`'s index: rebuild it when it needs one; `verify` runs the drift verify when nothing else asks for a rebuild. */
 export async function upkeepTripleIndex(spaceId: string, opts: { verify: boolean }): Promise<UpkeepResult> {
-  let reason: RebuildReason | null = await tripleIndexRebuildReason(spaceId);
-  if (reason === null && opts.verify) reason = (await verifyTripleIndex(spaceId)).reason;
+  const reason = await upkeepReasonOf(spaceId, opts.verify);
   if (reason === null) return { rebuilt: null, reason: null };
   log.info(`Triple index of space '${peerText(spaceId)}': rebuilt (${reason})`);
   const r = await requestTripleIndexRebuild(spaceId);
   return { rebuilt: r.outcome === 'built' ? reason : null, reason, outcome: r.outcome };
 }
 
+/** The reason `spaceId`'s index needs a rebuild now: its state's, else the drift verify's when `verify` asks for it. */
+async function upkeepReasonOf(spaceId: string, verify: boolean): Promise<RebuildReason | null> {
+  const reason: RebuildReason | null = await tripleIndexRebuildReason(spaceId);
+  return reason === null && verify ? (await verifyTripleIndex(spaceId)).reason : reason;
+}
+
 const STEP = declareStep('Triple index upkeep');
 /** When each space was verified last in this process. */
 const verifiedAt = new Map<string, number>();
 
-/** One tick: every configured space's upkeep, its verify when one is due. */
-async function upkeepAll(): Promise<void> {
+/**
+ * One tick: every configured space's upkeep, its verify when one is due. It starts at most one rebuild, and none while one runs in this
+ * process (finding F5): on an upgrade every RDF space is `missing`, and a tick that rebuilt them all, each awaited, ran for as long as all of
+ * them together and left the verify of every other space waiting. The rebuild is started and not awaited; the walk goes on, and a space that
+ * needs one meanwhile waits for a later tick. Nor does a tick verify a space it cannot rebuild: a verify that found drift would have
+ * moved its cursor past it.
+ */
+export async function upkeepTripleIndexes(): Promise<void> {
+  let started = false;
   await eachSpace(STEP, configuredSpaces(), async (s) => {
+    if (started || anyRebuildRunsHere()) return;
     const now = Date.now();
     const due = now - (verifiedAt.get(s.id) ?? 0) >= VERIFY_EVERY_MS;
+    const reason = await upkeepReasonOf(s.id, due);
     if (due) verifiedAt.set(s.id, now);
-    await upkeepTripleIndex(s.id, { verify: due });
+    if (reason === null) return;
+    started = true;
+    log.info(`Triple index of space '${peerText(s.id)}': rebuilding (${reason})`);
+    await launchTripleIndexRebuild(s.id, 'the upkeep');
   });
 }
 
-const upkeepJob = intervalJob('Triple index upkeep', UPKEEP_INTERVAL_MS, () => upkeepAll());
+const upkeepJob = intervalJob('Triple index upkeep', UPKEEP_INTERVAL_MS, () => upkeepTripleIndexes());
 
 /** Start the upkeep job (`bootstrap.ts`). */
 export function startTripleIndexUpkeep(): void {

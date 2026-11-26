@@ -39,10 +39,10 @@ async function main() {
 
   if (cmd === 'oxigraph-up') {
     needSize();
-    const s = await oxigraphUp(work, size);
+    const s = await oxigraphUp(work, size, prefix);
     console.log(`oxigraph ${size}: loaded in ${s.loadMs} ms, serving ${s.url}`);
   } else if (cmd === 'oxigraph-down') {
-    oxigraphDown(size);
+    oxigraphDown(size, prefix);
     console.log('oxigraph removed');
   } else if (cmd === 'ythril-up') {
     const s = await ythrilUp(work, {
