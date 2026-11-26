@@ -146,9 +146,19 @@ An Update that deletes every statement of a record deletes the record, behind it
 `using-graph-uri` naming a graph other than the space's own, are `400 sparql_graph_management_refused`. `SERVICE` is
 `400 sparql_federation_refused`. A query sent here is `400 sparql_not_an_update`.
 
+**A removal of what the record does not hold** is a no-op, as SPARQL says: a template `DELETE { ?s :p "x" } WHERE { ... }` states a removal for
+every match, held or not, and the ones no record holds change nothing. It is not a no-op when the record changed since the Update read it
+(its version differs from the one read) or when the record was read and is gone: that is a lost race ([Isolation](#isolation)).
+Removing an edge's asserted triple (`<from> <label> <to>`) is refused (`edge-ends-change`): an edge is deleted by deleting its record
+(`DELETE WHERE { <edge address> ?p ?o }`).
+
 **The answer** (`200`): `inserted`, `converged` and `deleted`, each counted by kind (`entity`, `fact`, `chrono`, `edge`); `recordsChanged`;
-`attempts`; `ids`, the ids of the records it inserted, by kind; `statements`, the statements it removed and inserted. MCP gives the same object
-in `structuredContent` and in the second text block.
+`attempts`; `ids`, the ids of the records it inserted, by kind; `statements`, the statements of the Update by what became of them: `taken`
+(part of a write; `removed` and `inserted` count only these), `noops` (a removal no record holds, an insert a record already holds) and
+`notTaken` (left out: the space's mode recorded and dropped them, or the server owns them). `reasons` names each recorded statement by its
+subject and predicate and its value by kind and length, with the rule (`code`, `message`, `kept`, `count`, `statements`); `notTaken`
+(the list) names each group of statements left out on purpose the same way. An Update whose every statement was dropped changes no record,
+and says so here. MCP gives the same object in `structuredContent` and in the second text block.
 
 ### Whole or nothing, and its exceptions
 
@@ -174,10 +184,13 @@ Look the new record up (by its label, say) before you send an `INSERT DATA` of a
 
 The writes are atomic: one transaction, all or none. The reads are not a snapshot. The evaluation reads each record with its version; a
 record it meets at two versions, or a record the Update changes that another write changed before the commit, is a lost race, and the
-**whole Update runs again**, evaluation included, at most 3 times within `sparql.timeoutMs`. A run starts only while the time left covers the
-last run, and never while the server shuts down (`503 shutting_down`). After the last run the answer is `409 sparql_update_conflict`,
-naming the record that kept changing (`record`: `{ kind, id }`). A record the `WHERE` read and the Update does not change is not checked at the
-commit: two Updates that each read what the other writes can both land.
+**whole Update runs again**, evaluation included, at most 3 times. The evaluation of every run is cut at `sparql.timeoutMs` counted from the
+start of the first run (`503 sparql_timeout`); the planning and the commit are not cut by it, so an Update that is run again can take longer
+than `sparql.timeoutMs` in all. A run starts only while the time left of that budget covers the last run (evaluation, planning and commit), and
+never while the server shuts down (`503 shutting_down`). After the last run the answer is `409 sparql_update_conflict`, naming the record
+that kept changing (`record`: `{ kind, id }`) and what the last run lost to (`lostAt`: `evaluation`, `plan`, `stale` or `duplicate_key`).
+A record the `WHERE` only read, and the Update does not change, is not checked at the commit (not even to see that it still exists): two
+Updates that each read what the other writes can both land, and an Update can land on a read that was true a moment before.
 
 ### Deletes
 

@@ -117,7 +117,7 @@ export const sparql_queryTool: ToolHandler = {
     + 'never cut short: use LIMIT and OFFSET in the query to page. An answer that holds more than `sparql.maxResultBytes` bytes of values, a query that reads more than '
     + '`sparql.maxRecordsRead` records and one that runs past `sparql.timeoutMs` are refused too. The size ceilings (`maxChars`, `maxBytes`, `maxTokens`) admit whole rows only; the rows they cut '
     + 'are kept for a day as a spill, read with `read_spill` (the answer\'s `remainder`).\n\n'
-    + 'NOT HERE: SERVICE (federation), SPARQL Update and LOAD are refused; FROM and `default-graph-uri` naming a graph outside your members '
+    + 'NOT HERE: SERVICE (federation) and LOAD are refused, and an Update is refused here (`sparql_update_not_here`): changing records is a write tool of its own, named in the SPARQL API guide; FROM and `default-graph-uri` naming a graph outside your members '
     + 'answer empty. Cost: one query runs at a time per token (503 `sparql_busy` otherwise). Needs `knowledge: read`. '
     + `Refusals carry a code: ${SPARQL_ENDPOINT_CODES.join(', ')}.`,
   mutating: false,

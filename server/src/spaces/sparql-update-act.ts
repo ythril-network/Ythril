@@ -20,9 +20,15 @@
  *   write_group_outcome_unknown` (read back before retrying: a statement about a stored record converges and a DELETE run again finds
  *   nothing, but a new subject is minted a new id each time it is sent).
  * - **A change concluded from an older record.** A record the evaluation read at one version and the planner or the transaction finds at
- *   another is a lost race: the WHOLE Update runs again, evaluation included, at most {@link UPDATE_MAX_ATTEMPTS} times inside one deadline
- *   (`sparql.timeoutMs` from the first attempt). An attempt starts only while the time left covers the last attempt's evaluation and hold,
- *   and never once the server is shutting down. After the last, `409 sparql_update_conflict` names the record that kept moving.
+ *   another, or read, named by the Update and gone, is a lost race: the WHOLE Update runs again, evaluation included, at most
+ *   {@link UPDATE_MAX_ATTEMPTS} times. The evaluation of every run is cut at `sparql.timeoutMs` from the first attempt's start; the planning
+ *   and the commit are not. An attempt starts only while the time left of that budget covers the last attempt (evaluation, plan and hold),
+ *   and never once the server is shutting down. After the last, `409 sparql_update_conflict` names the record that kept moving and what the
+ *   LAST attempt lost to (`lostAt`): one cause of one attempt, never a mix. A removal the stored record does not hold is no lost race but a
+ *   no-op (the record's version is what decides, `rdf/sparql-update-plan.ts`).
+ * - **An answer that counts what was not done.** `statements` says what became of each statement (taken, no-op, not taken); `reasons` and
+ *   `notTaken` name a statement a warn-mode space dropped, by subject and predicate, its value by kind and length.
+ * - **An ending nobody counted.** An Update that throws is counted `failed`, and its audit row is handed over (`recordAudit`) before the rethrow.
  * - **An unbounded write.** More records changed than `sparql.maxRecordsChanged` is `413 sparql_too_many_changes`, naming the cap, before
  *   the group; the group's own ceilings stand behind it (`413 write_group_too_large`).
  * - **A caller holding the store.** One Update per caller at a time, in its own slot family (`sparql_update`), held from evaluation
@@ -45,13 +51,12 @@ import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { commitWriteGroup, GroupAborted, WriteGroupOutcomeUnknown, WriteGroupTooLarge, type GroupCommitted } from '../brain/write-plan/write-group.js';
 import type { WritePlan } from '../brain/write-plan/types.js';
 import { rdfSpaceState, type FingerprintOf, type RdfCaller } from '../rdf/rdf-space-state.js';
-import { evaluateSparqlUpdate } from '../rdf/sparql-update-eval.js';
-import { checkSparqlUpdateAlgebra, SPARQL_QUERY_MAX_BYTES, type SparqlUpdateDataset } from '../rdf/sparql-engine.js';
-import { graphIri } from '../rdf/term-iri.js';
+import { evaluateSparqlUpdate, type SparqlUpdateChanges } from '../rdf/sparql-update-eval.js';
+import { SPARQL_QUERY_MAX_BYTES, type SparqlUpdateDataset } from '../rdf/sparql-engine.js';
 import { busyRefusal, sparqlRefusalOf, SPARQL_BAD_REQUEST, SPARQL_QUERY_TOO_LARGE, SPARQL_TOO_LARGE, SPARQL_UNAVAILABLE } from '../rdf/sparql-refusal.js';
 import { SPARQL_TOO_MANY_CHANGES } from '../rdf/change-set-store.js';
-import { planChangeSet, statedRemovals, type PlanRefusal } from '../rdf/sparql-update-plan.js';
-import type { ReasonEntry } from '../rdf/quads-to-ops.js';
+import { planChangeSet, type PlanRefusal, type PlannedChangeSet, type PlannedStatements } from '../rdf/sparql-update-plan.js';
+import type { NotTakenEntry, ReasonEntry } from '../rdf/quads-to-ops.js';
 import type { Quad, Term } from '../rdf/literals.js';
 import { sparqlUpdateTotal } from '../metrics/sparql-update-metrics.js';
 
@@ -78,6 +83,8 @@ export const SPARQL_UPDATE_CASCADE_INCOMPLETE = 'sparql_update_cascade_incomplet
 export const SPARQL_UPDATE_RATE_LIMITED = 'sparql_update_rate_limited';
 export const SPARQL_UPDATE_SHUTTING_DOWN = 'shutting_down';
 export const ENDPOINT_REMOVED = 'endpoint_removed';
+/** The outcome of an Update that threw: counted and audited under this name, not an answer's code. */
+const UPDATE_FAILED = 'failed';
 export const RECORD_VERSION_AT_CEILING = 'record_version_at_ceiling';
 export const WRITE_GROUP_OUTCOME_UNKNOWN = 'write_group_outcome_unknown';
 export const WRITE_GROUP_TOO_LARGE = 'write_group_too_large';
@@ -117,6 +124,11 @@ export interface SparqlUpdateInput {
   actor?: WebhookActor;
   fingerprintOf?: FingerprintOf;
   signal?: AbortSignal;
+  /**
+   * Handed the audit row's fields of an Update that THREW, just before the act rethrows (outcome `failed`): an answer carries its audit, a
+   * throw carries none, and a door that never saw one wrote a row of no counts.
+   */
+  recordAudit?: (audit: SparqlUpdateAudit) => void;
 }
 
 /** The audit row's fields: counts and the outcome, never the text. */
@@ -124,19 +136,30 @@ export interface SparqlUpdateAudit {
   form: 'update'; length: number; inserted: number; converged: number; deleted: number; recordsChanged: number; attempts: number; outcome: string;
 }
 
-/** What landed, per kind; the inserted records' ids; the attempts it took. */
+/**
+ * What landed, per kind; the inserted records' ids; the attempts it took; what became of the statements (`statements`: taken, no-ops, not taken),
+ * the reasons the space's mode recorded and the statements left out on purpose, each named without a value.
+ */
 export interface SparqlUpdateLanded {
   inserted: Counts; converged: Counts; deleted: Counts; recordsChanged: number; attempts: number;
   ids: Record<KnowledgeType, string[]>;
-  statements: { removed: number; inserted: number };
+  statements: PlannedStatements;
+  reasons: Array<Record<string, unknown>>;
+  notTaken: Array<Record<string, unknown>>;
 }
 
 export type SparqlUpdateAnswer =
   | { ok: true; status: typeof LANDED_STATUS; body: SparqlUpdateLanded; audit: SparqlUpdateAudit }
   | { ok: false; status: number; code: string; error: string; body: Record<string, unknown>; retryAfterSeconds?: number; audit: SparqlUpdateAudit };
 
-/** Test seam: a hook run before each attempt's commit (a test makes a record move there to lose the race). */
-export interface SparqlUpdateKnobs { beforeCommit?: () => Promise<void> }
+/**
+ * Test seams: a hook run before each attempt's commit (a test makes a record move there to lose the race), and one run after each attempt's
+ * evaluation, before it is judged (a test changes what the evaluation read, or the store under it).
+ */
+export interface SparqlUpdateKnobs {
+  beforeCommit?: () => Promise<void>;
+  afterEvaluation?: (attempt: number, changes: SparqlUpdateChanges) => Promise<void> | void;
+}
 let knobs: SparqlUpdateKnobs = {};
 export function setSparqlUpdateKnobsForTest(k: SparqlUpdateKnobs | null): void { knobs = k ?? {}; }
 
@@ -158,16 +181,48 @@ const statementWords = (q: Quad): { subject: string; predicate: string; object: 
 /** The statements a reason names, at most this many each; the rest counted. */
 const NAMED_MAX = 20;
 function reasonsBody(reasons: readonly ReasonEntry[]): Array<Record<string, unknown>> {
-  return reasons.map(r => ({ code: r.code, message: r.message, statements: r.quads.slice(0, NAMED_MAX).map(statementWords), count: r.quads.length }));
+  return reasons.map(r => ({ code: r.code, message: r.message, ...(r.outcome === 'recorded' ? { kept: r.kept } : {}), statements:r.quads.slice(0, NAMED_MAX).map(statementWords), count: r.quads.length }));
+}
+/** The statements left out on purpose, grouped by why, each group named as a reason is. */
+function notTakenBody(entries: readonly NotTakenEntry[]): Array<Record<string, unknown>> {
+  const groups = new Map<string, NotTakenEntry[]>();
+  for (const e of entries) (groups.get(e.why) ?? groups.set(e.why, []).get(e.why)!).push(e);
+  return [...groups].map(([why, list]) => ({ code: why, message: list[0]!.message, statements: list.slice(0, NAMED_MAX).map(e => statementWords(e.quad)), count: list.length }));
+}
+/** A value a violation row carries, as a refusal names it: by its kind and length, never the value (a literal as {@link termWords} names one). */
+function valueWords(v: unknown): string {
+  if (typeof v === 'string') return `a literal of ${v.length} characters`;
+  if (Array.isArray(v)) return `a list of ${v.length}`;
+  if (v === null || v === undefined) return 'no value';
+  return typeof v === 'object' ? 'an object' : `a ${typeof v}`;
+}
+/** A schema refusal's body (`SchemaViolationError.toStructured`) with the value of every row named by its kind and length. */
+function violationBody(violation: Record<string, unknown>): Record<string, unknown> {
+  const rows = (list: unknown): unknown => (Array.isArray(list)
+    ? list.map(r => (r !== null && typeof r === 'object' && Object.hasOwn(r, 'value') ? { ...(r as Record<string, unknown>), value: valueWords((r as Record<string, unknown>)['value']) } : r))
+    : list);
+  return { ...violation, introduced: rows(violation['introduced']), preExisting: rows(violation['preExisting']), violations: rows(violation['violations']) };
 }
 function refusalsBody(refusals: readonly PlanRefusal[]): Array<Record<string, unknown>> {
-  return refusals.map(r => ({ kind: r.kind, id: r.id, subject: r.subject, error: r.reason, ...(r.code ? { code: r.code } : {}), ...(r.violation ? { violation: r.violation } : {}) }));
+  return refusals.map(r => ({ kind: r.kind, id: r.id, subject: r.subject, error: r.reason, ...(r.code ? { code: r.code } : {}), ...(r.violation ? { violation: violationBody(r.violation) } : {}) }));
+}
+/** The 422's sentence and body for a planned change set that was refused: the first few refusals named, all of them in the body. */
+function refusedAnswer(planned: Extract<PlannedChangeSet, { kind: 'refused' }>): { error: string; body: Record<string, unknown> } {
+  const named = [...planned.reasons.map(r => `${r.code} (${r.quads.slice(0, 1).map(q => `${termWords(q.subject)} ${q.predicate.value}`).join('')})`),
+    ...planned.refusals.map(r => `${r.kind} '${r.id}' (${r.subject}): ${r.reason}`)];
+  return {
+    error: `Nothing was written: ${named.slice(0, NAMED_IN_SENTENCE).join('; ')}${named.length > NAMED_IN_SENTENCE ? `; and ${named.length - NAMED_IN_SENTENCE} more` : ''}`,
+    body: { reasons: reasonsBody(planned.reasons), refusals: refusalsBody(planned.refusals) },
+  };
 }
 
 // ── The act ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-function landedOf(plans: readonly WritePlan[], attempts: number, statements: SparqlUpdateLanded['statements']): SparqlUpdateLanded {
-  const out: SparqlUpdateLanded = { inserted: zero(), converged: zero(), deleted: zero(), recordsChanged: plans.length, attempts, ids: perKind((): string[] => []), statements };
+function landedOf(plans: readonly WritePlan[], attempts: number, planned: Extract<PlannedChangeSet, { kind: 'planned' }>): SparqlUpdateLanded {
+  const out: SparqlUpdateLanded = {
+    inserted: zero(), converged: zero(), deleted: zero(), recordsChanged: plans.length, attempts, ids: perKind((): string[] => []),
+    statements: planned.statements, reasons: reasonsBody(planned.reasons), notTaken: notTakenBody(planned.notTaken),
+  };
   for (const p of plans) {
     const kind = p.kind as KnowledgeType;
     if (p.op === 'delete') out.deleted[kind]++;
@@ -196,6 +251,49 @@ function announce(spaceId: string, landed: SparqlUpdateLanded, actor: WebhookAct
   } as Parameters<typeof emitWebhookEvent>[0]);
 }
 
+/** How an attempt was lost, and the record it was lost to: `evaluation` (a record read at two versions), `plan` (read again at another), or the group's abort reason. */
+interface Lost { by: string; record: { kind: string; id: string } | null }
+
+/** An answer the commit's failure maps to: a refusal, or a lost race (`lost`) that runs the Update again. `null`: no failure of the group's own. */
+type GroupFailure = { lost: Lost } | { status: number; code: string; error: string; body: Record<string, unknown>; retryAfterSeconds?: number };
+
+function groupFailure(err: unknown): GroupFailure | null {
+  if (err instanceof GroupAborted) {
+    const record = err.recordKind && err.recordId ? { kind: err.recordKind, id: err.recordId } : null;
+    if (err.reason === 'stale' || err.reason === 'duplicate_key') return { lost: { by: err.reason, record } };
+    if (err.reason === 'referenced') return { status: CONFLICT_STATUS, code: SPARQL_UPDATE_REFERENCED, error: err.message, body: { backlinks: err.blockers ?? [] } };
+    if (err.reason === 'version_ceiling') return { status: CONFLICT_STATUS, code: RECORD_VERSION_AT_CEILING, error: err.message, body: {} };
+    return { status: CONFLICT_STATUS, code: SPARQL_UPDATE_CONFLICT, error: err.message, body: record ? { record } : {} };
+  }
+  if (err instanceof WriteGroupTooLarge) return { status: SPARQL_TOO_LARGE, code: WRITE_GROUP_TOO_LARGE, error: err.message, body: { ceiling: err.ceiling, limit: err.limit, size: err.size } };
+  if (err instanceof WriteGroupOutcomeUnknown) {
+    return {
+      status: SPARQL_UNAVAILABLE, code: WRITE_GROUP_OUTCOME_UNKNOWN, retryAfterSeconds: RETRY_SOON_SECONDS, body: {},
+      error: 'The Update\'s commit failed and could not be read back: it may have landed, or not. Read the records back before you send it again; '
+        + 'sent again, a statement about a stored record converges and a DELETE finds nothing to remove, but a new subject is inserted again under a new id',
+    };
+  }
+  return null;
+}
+
+/** The answer of an Update that landed and not all that follows it did (rows taken back, an effect that failed), with what landed; `null` when all did. */
+function landedButNotWhole(committed: GroupCommitted, landed: SparqlUpdateLanded): { status: number; code: string; error: string; body: Record<string, unknown> } | null {
+  if (committed.takenBack.edges.length + committed.takenBack.links.length > 0) {
+    return {
+      status: CONFLICT_STATUS, code: ENDPOINT_REMOVED, body: { ...landed, takenBack: committed.takenBack },
+      error: 'The Update landed, and then rows it wrote were taken back because an entity they name was removed meanwhile: read the graph again',
+    };
+  }
+  if (committed.failedEffects.length > 0) {
+    return {
+      status: CASCADE_INCOMPLETE_STATUS, code: SPARQL_UPDATE_CASCADE_INCOMPLETE,
+      error: `The Update landed, and an effect owed after it did not complete (${committed.failedEffects.map(f => f.effect).join(', ')}): the records are stored, what follows from them is not all done`,
+      body: { ...landed, failedEffects: committed.failedEffects.map(f => ({ effect: f.effect, count: f.count })) },
+    };
+  }
+  return null;
+}
+
 /** Run the Update `input.update` on `input.spaceId` for its caller: see the module docblock. */
 export async function sparqlUpdateAct(input: SparqlUpdateInput): Promise<SparqlUpdateAnswer> {
   const text = input.update;
@@ -218,10 +316,8 @@ export async function sparqlUpdateAct(input: SparqlUpdateInput): Promise<SparqlU
     const { timeoutMs, maxRecordsChanged, maxRecordsRead } = sparqlLimits(getConfig());
     const deadline = Date.now() + timeoutMs;
     let lastAttemptMs = 0;
-    let stale: { kind: string; id: string } | null = null;
-    let staleStatement: ReturnType<typeof statementWords> | null = null;
-    /** How the last attempt was lost: `evaluation` (a record read at two versions), `plan` (read again at another), or the group's abort reason. */
-    let abortedBy = 'evaluation';
+    /** How the last attempt was lost, and the record it lost to: one cause of one attempt, replaced whole by the next (never a mix). */
+    let lost: Lost | null = null;
     let deletesPaid = false;
     while (attempts < UPDATE_MAX_ATTEMPTS) {
       if (isShuttingDown()) return refuse(SPARQL_UNAVAILABLE, SPARQL_UPDATE_SHUTTING_DOWN, 'The server is shutting down: nothing of the Update was written, send it again', {}, RETRY_SOON_SECONDS);
@@ -243,25 +339,15 @@ export async function sparqlUpdateAct(input: SparqlUpdateInput): Promise<SparqlU
         return refuse(r.status, r.code, r.error, { ...(r.line !== undefined ? { line: r.line } : {}), ...(r.column !== undefined ? { column: r.column } : {}) });
       }
       const changes = evaluated.changes;
-      if (changes.lostRace) { stale = { kind: changes.lostRace.kind, id: changes.lostRace.id }; lastAttemptMs = Date.now() - began; continue; }
+      await knobs.afterEvaluation?.(attempts, changes);
+      if (changes.lostRace) { lost = { by: 'evaluation', record: { kind: changes.lostRace.kind, id: changes.lostRace.id } }; lastAttemptMs = Date.now() - began; continue; }
       if (!state.ok) throw new Error('The space an Update changes is not one its caller reads as RDF');
-      const checked = await checkSparqlUpdateAlgebra(text, graphIri(state.meta), using ?? undefined);
-      if ('refusal' in checked) return refuse(checked.refusal.status, checked.refusal.code, checked.refusal.error);
       const mode = state.meta.validationMode ?? 'warn';
-      const planned = await planChangeSet(input.spaceId, state.meta, mode, changes, statedRemovals(checked.algebra));
-      if (planned.kind === 'stale') {
-        stale = planned.record;
-        staleStatement = planned.statement ? statementWords(planned.statement) : null;
-        abortedBy = 'plan';
-        lastAttemptMs = Date.now() - began;
-        continue;
-      }
+      const planned = await planChangeSet(input.spaceId, state.meta, mode, changes);
+      if (planned.kind === 'stale') { lost = { by: 'plan', record: planned.record }; lastAttemptMs = Date.now() - began; continue; }
       if (planned.kind === 'refused') {
-        const named = [...planned.reasons.map(r => `${r.code} (${r.quads.slice(0, 1).map(q => `${termWords(q.subject)} ${q.predicate.value}`).join('')})`),
-          ...planned.refusals.map(r => `${r.kind} '${r.id}' (${r.subject}): ${r.reason}`)];
-        return refuse(REFUSED_STATUS, SPARQL_UPDATE_REFUSED,
-          `Nothing was written: ${named.slice(0, NAMED_IN_SENTENCE).join('; ')}${named.length > NAMED_IN_SENTENCE ? `; and ${named.length - NAMED_IN_SENTENCE} more` : ''}`,
-          { reasons: reasonsBody(planned.reasons), refusals: refusalsBody(planned.refusals) });
+        const refused = refusedAnswer(planned);
+        return refuse(REFUSED_STATUS, SPARQL_UPDATE_REFUSED, refused.error, refused.body);
       }
       const plans = planned.plans;
       if (plans.length > maxRecordsChanged) {
@@ -280,45 +366,28 @@ export async function sparqlUpdateAct(input: SparqlUpdateInput): Promise<SparqlU
       try {
         committed = await commitWriteGroup(input.spaceId, plans, { ...(input.actor ? { actor: input.actor } : {}) });
       } catch (err) {
-        if (err instanceof GroupAborted) {
-          if (err.reason === 'stale' || err.reason === 'duplicate_key') {
-            stale = err.recordKind && err.recordId ? { kind: err.recordKind, id: err.recordId } : stale;
-            abortedBy = err.reason;
-            lastAttemptMs = Date.now() - began;
-            continue;
-          }
-          if (err.reason === 'referenced') return refuse(CONFLICT_STATUS, SPARQL_UPDATE_REFERENCED, err.message, { backlinks: err.blockers ?? [] });
-          if (err.reason === 'version_ceiling') return refuse(CONFLICT_STATUS, RECORD_VERSION_AT_CEILING, err.message);
-          return refuse(CONFLICT_STATUS, SPARQL_UPDATE_CONFLICT, err.message, err.recordKind && err.recordId ? { record: { kind: err.recordKind, id: err.recordId } } : {});
-        }
-        if (err instanceof WriteGroupTooLarge) return refuse(SPARQL_TOO_LARGE, WRITE_GROUP_TOO_LARGE, err.message, { ceiling: err.ceiling, limit: err.limit, size: err.size });
-        if (err instanceof WriteGroupOutcomeUnknown) {
-          return refuse(SPARQL_UNAVAILABLE, WRITE_GROUP_OUTCOME_UNKNOWN, 'The Update\'s commit failed and could not be read back: it may have landed, or not. Read the records back before you send it again; '
-            + 'sent again, a statement about a stored record converges and a DELETE finds nothing to remove, but a new subject is inserted again under a new id', {}, RETRY_SOON_SECONDS);
-        }
-        throw err;
+        const failure = groupFailure(err);
+        if (failure === null) throw err;
+        if ('lost' in failure) { lost = failure.lost; lastAttemptMs = Date.now() - began; continue; }
+        return refuse(failure.status, failure.code, failure.error, failure.body, failure.retryAfterSeconds);
       }
-      const landed = landedOf(plans, attempts, { removed: changes.removed.length, inserted: changes.inserted.length });
+      const landed = landedOf(plans, attempts, planned);
       announce(input.spaceId, landed, input.actor);
       const audit = auditOf(length, 'landed', attempts, landed);
-      const takenBack = committed.takenBack.edges.length + committed.takenBack.links.length;
-      if (takenBack > 0) {
-        const a = refuse(CONFLICT_STATUS, ENDPOINT_REMOVED, 'The Update landed, and then rows it wrote were taken back because an entity they name was removed meanwhile: read the graph again',
-          { ...landed, takenBack: committed.takenBack });
-        return { ...a, audit: { ...audit, outcome: ENDPOINT_REMOVED } };
-      }
-      if (committed.failedEffects.length > 0) {
-        const a = refuse(CASCADE_INCOMPLETE_STATUS, SPARQL_UPDATE_CASCADE_INCOMPLETE,
-          `The Update landed, and an effect owed after it did not complete (${committed.failedEffects.map(f => f.effect).join(', ')}): the records are stored, what follows from them is not all done`,
-          { ...landed, failedEffects: committed.failedEffects.map(f => ({ effect: f.effect, count: f.count })) });
-        return { ...a, audit: { ...audit, outcome: SPARQL_UPDATE_CASCADE_INCOMPLETE } };
-      }
+      const after = landedButNotWhole(committed, landed);
+      if (after !== null) return { ...refuse(after.status, after.code, after.error, after.body), audit: { ...audit, outcome: after.code } };
       sparqlUpdateTotal.inc({ outcome: 'landed' });
       return { ok: true, status: LANDED_STATUS, body: landed, audit };
     }
+    const record = lost?.record ?? null;
     return refuse(CONFLICT_STATUS, SPARQL_UPDATE_CONFLICT,
-      `Nothing was written: ${stale ? `the ${stale.kind} '${stale.id}'` : 'a record the Update reads'} was changed by another write on each of the Update's ${attempts} runs — send it again`,
-      { lostAt: abortedBy, ...(stale ? { record: stale } : {}), ...(staleStatement ? { statement: staleStatement } : {}) });
+      `Nothing was written: ${record ? `the ${record.kind} '${record.id}'` : 'a record the Update reads'} was changed by another write on each of the Update's ${attempts} runs — send it again`,
+      { lostAt: lost?.by ?? 'evaluation', ...(record ? { record } : {}) });
+  } catch (err) {
+    // An Update that threw is an ending too: counted, and its audit row handed over before the rethrow (the door's own error answer follows).
+    sparqlUpdateTotal.inc({ outcome: UPDATE_FAILED });
+    input.recordAudit?.(auditOf(length, UPDATE_FAILED, attempts));
+    throw err;
   } finally {
     slot.release();
   }
