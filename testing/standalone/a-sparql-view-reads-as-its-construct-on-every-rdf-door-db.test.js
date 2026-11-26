@@ -131,6 +131,23 @@ describe('a SPARQL view reads as its CONSTRUCT on every RDF door', { skip }, () 
     });
   });
 
+  it('a CONSTRUCT of exactly 50 000 statements is answered whole and one more is refused, on the export and the address', async () => {
+    // 260 entities make 67 600 solutions; the LIMIT cuts them to the number of statements the cap is held against.
+    const pairs = (limit) => `CONSTRUCT { ?a <urn:q762:pair> ?b } WHERE { ?a a <${ENTITY}> . ?b a <${ENTITY}> } LIMIT ${limit}`;
+    const exact = await view(both.key, 'q762-exact', [BIG], pairs(50_000));
+    const over = await view(both.key, 'q762-over', [BIG], pairs(50_001));
+    const exportOf = (id) => d.sparqlRest(both.key, 'GET', `/api/brain/spaces/${encodeURIComponent(id)}/export/rdf?format=nquads`);
+    const addressOf = (id) => d.sparqlRest(both.key, 'GET', `/ld/${id}/`, { headers: { Accept: 'application/n-quads' } });
+    for (const [door, read] of [['export', exportOf], ['address', addressOf]]) {
+      const fits = await read(exact);
+      assert.equal(fits.status, 200, `${door}, 50 000: ${fmt(fits)}`);
+      assert.equal(nquads(fits.text).length, 50_000, `${door}: the statements of the answer`);
+      const refused = await read(over);
+      assert.equal(refused.status, 413, `${door}, 50 001: ${fmt(refused)}`);
+      assert.equal(refused.body?.code, 'view_construct_too_large', `${door}, 50 001`);
+    }
+  });
+
   it('another token\'s SPARQL view and a plain view have no Linked Data address', async () => {
     const id = await view(both.key, 'q762-mine', [A], KEEP_ENTITIES);
     const theirs = await d.sparqlRest(other.key, 'GET', `/ld/${id}/`, { headers: { Accept: 'application/n-quads' } });

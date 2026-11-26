@@ -29,14 +29,19 @@ import { viewOf, viewsOf } from './_view-doors.mjs';
 const skip = await mongoSkipReason();
 const S = 'q762-save';
 const KEEP_ENTITIES = 'CONSTRUCT { ?s ?p ?o } WHERE { ?s a <https://w3id.org/ythril/ns#Entity> ; ?p ?o }';
+/** `KEEP_ENTITIES` and a comment, `bytes` UTF-8 bytes long in all. */
+function padded(bytes) {
+  const head = `${KEEP_ENTITIES}\n# `;
+  return `${head}${'x'.repeat(bytes - Buffer.byteLength(head, 'utf8'))}`;
+}
 const REFUSED = [
   ['a SELECT', 'SELECT ?s WHERE { ?s ?p ?o }', 'view_sparql_not_construct'],
   ['an ASK', 'ASK { ?s ?p ?o }', 'view_sparql_not_construct'],
   ['a DESCRIBE', 'DESCRIBE <urn:x:a>', 'view_sparql_not_construct'],
   ['an Update', 'INSERT DATA { <urn:x:a> <urn:x:b> <urn:x:c> }', 'view_sparql_not_construct'],
   ['a text no parser reads', 'CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p', 'view_sparql_invalid'],
-  // 16 KB and one byte more: a CONSTRUCT whose comment carries the rest.
-  ['a text over 16 KB', `${KEEP_ENTITIES}\n# ${'x'.repeat(16 * 1024)}`, 'view_sparql_too_large'],
+  // 16 384 bytes and one more: a CONSTRUCT whose comment carries the rest.
+  ['a text of 16 385 bytes', padded(16 * 1024 + 1), 'view_sparql_too_large'],
 ];
 
 let d, owner, receiver;
@@ -89,6 +94,20 @@ describe('a SPARQL view is saved only as a CONSTRUCT, on both doors', { skip }, 
     assert.equal(updated.isError, false, updated.text.slice(0, 300));
     assert.equal('sparql' in viewOf(updated), false, 'view_update with sparql: null makes it a plain view again');
     assert.equal('sparql' in viewOf(await d.rest(owner.key, 'GET', '/api/views/@q762-plain')), false, 'and it stays plain');
+  });
+
+  it('a CONSTRUCT of exactly 16 384 bytes is saved on create and update, on both doors', async () => {
+    const query = padded(16 * 1024);
+    assert.equal(Buffer.byteLength(query, 'utf8'), 16 * 1024);
+    const restCreate = await d.rest(owner.key, 'POST', '/api/views', { name: 'q762-exact-rest', members: [S], sparql: { query } });
+    assert.equal(restCreate.status, 201, fmt(restCreate));
+    const mcpCreate = await tool(owner.key, 'view_create', { name: 'q762-exact-mcp', members: [S], sparql: { query } });
+    assert.equal(mcpCreate.isError, false, mcpCreate.text.slice(0, 300));
+    const restPatch = await d.rest(owner.key, 'PATCH', '/api/views/@q762-exact-rest', { sparql: { query: `${query}\n#` } });
+    assert.equal(restPatch.status, 400, `REST update with two bytes more: ${fmt(restPatch)}`);
+    assert.equal(codeOf(restPatch), 'view_sparql_too_large');
+    const mcpPatch = await tool(owner.key, 'view_update', { view: '@q762-exact-mcp', sparql: { query } });
+    assert.equal(mcpPatch.isError, false, mcpPatch.text.slice(0, 300));
   });
 
   it('a SELECT, an ASK, a DESCRIBE, an Update, a broken text and one over 16 KB are refused alike on create and update, on both doors', async () => {

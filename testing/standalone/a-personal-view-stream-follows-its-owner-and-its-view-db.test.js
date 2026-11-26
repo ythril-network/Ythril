@@ -193,4 +193,19 @@ describe('the change stream on a personal view (Q-531)', { skip }, () => {
       assert.ok(!s.text.includes('vs-after-change'), 'the stream delivered a change of a member the view no longer has');
     } finally { s.close(); }
   });
+
+  // bundle-273, Q-762, review S5 K4: a SPARQL view is read by the RDF doors only, so a stream on a view that became one ends like any change of its kind.
+  it('turning the view into a SPARQL view ends its stream at the next change, its members unchanged', async () => {
+    const t = await reader();
+    await mustCreate(t.key, 'became', [QA, OPS]);
+    const s = await openStream(t.key, '%40became');
+    try {
+      const p = await d.rest(t.key, 'PATCH', '/api/views/%40became', { sparql: { query: 'CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }' } });
+      assert.equal(p.status, 200, `PATCH the view's sparql: ${fmt(p)}`);
+      change(QA, 'vs-after-construct');
+      await s.until(() => false, 3_000);
+      assert.ok(s.ended, 'a stream on a view that became a SPARQL view stayed open');
+      assert.ok(!s.text.includes('vs-after-construct'), 'the stream delivered a change of a view whose record doors now refuse it');
+    } finally { s.close(); }
+  });
 });
