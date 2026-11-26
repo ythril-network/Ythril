@@ -222,9 +222,10 @@ well: `sparql_malformed` (`line`, `column`), `sparql_query_too_large`, `sparql_u
 | 409 | `sparql_update_referenced` | It deletes an entity something still names (`backlinks`). |
 | 409 | `sparql_update_conflict` | Another write changed a record it reads on each of its 3 runs (`record`). Send it again. |
 | 409 | `record_version_at_ceiling` | A record it changes is at the highest version sync accepts. |
+| 409 | `write_group_record_planned_twice` | The writes plan one record twice (`record`): nothing was written. |
 | 409 | `endpoint_removed` | Landed, then rows were taken back (above). |
 | 413 | `sparql_too_many_changes` | More records than `sparql.maxRecordsChanged`, or a change set past its statement or byte cap. |
-| 413 | `write_group_too_large` | The writes pass a write group's ceiling. |
+| 413 | `write_group_too_large` | The writes pass a write group's ceiling, or a delete found more link rows to remove than were counted before it began (another write added some): nothing was written. |
 | 422 | `sparql_update_refused` | A statement or a record the write rules refuse (`reasons`, `refusals`). |
 | 429 | `sparql_update_rate_limited` | A sixth destructive call within a minute. |
 | 500 | `sparql_update_cascade_incomplete` | Landed, and an effect after it failed (above). |

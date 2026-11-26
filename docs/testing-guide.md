@@ -344,7 +344,7 @@ node scripts/test-times.mjs --help                # every flag and variable, pri
 | `YTHRIL_TEST_RUNS_URL` | The Ythril instance to record to, for `test-times.mjs` and for `trade.mjs --record` / `--history`, and to read from for `test-failure-rates.mjs`. `https`, or `http` to `127.0.0.1`, `localhost` or `[::1]`. |
 | `YTHRIL_TEST_RUNS_TOKEN` | A token that may write chrono entries in the space the scripts record to. Never printed, never stored, never in a payload, and never handed to the `gh` and `git` children of `trade.mjs`. |
 | `YTHRIL_TEST_RUNS_LOCK_WAIT_MS` | How long a recorder waits for the record lock (one per repository, in the git common dir), in milliseconds; a positive integer, default 120000. Both `test-times.mjs` and `trade.mjs --record` honour it. |
-| `GH_TOKEN` | A token that may read this repository's Actions runs and artifacts, for `--record-ci` and `--rewrite`. |
+| `GH_TOKEN` | A token that may read this repository's Actions runs and artifacts, for `--record-ci` and `--rewrite`, and for `trade.mjs --record`, which refuses at once without it. |
 | `GITHUB_API_URL` | The Actions API base. Defaults to the public GitHub API. |
 | `YTHRIL_TEST_RUNS_LISTING_WAIT_MS` | For `--record-ci <runId>`: how long, in milliseconds, the listing is read again for a run it does not hold yet before the pass fails. A positive integer; default `180000`. |
 | `YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS` | The pause between two of those reads, in milliseconds. A positive integer; default `20000`. |

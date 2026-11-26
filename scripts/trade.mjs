@@ -105,7 +105,7 @@ export const RECORD_LIMIT_CEILING = 5000;
 const BUDGET_MS = 10 * 60_000;
 const USAGE = [
   'usage: node scripts/trade.mjs [--limit N] [--line <ref>...]      print the report, or one line per bundle',
-  '       node scripts/trade.mjs [--limit N] --record <ref>...      record each bundle as a Trade entry (YTHRIL_TEST_RUNS_URL, YTHRIL_TEST_RUNS_TOKEN)',
+  '       node scripts/trade.mjs [--limit N] --record <ref>...      record each bundle as a Trade entry (YTHRIL_TEST_RUNS_URL, YTHRIL_TEST_RUNS_TOKEN, GH_TOKEN)',
   '       node scripts/trade.mjs --history                          the recorded trade over time',
   '       node scripts/trade.mjs --type-schema                      the schema_update arguments that declare the Trade type',
   '  (N a whole number from 1, default 500; a ref is full-run/<name>; the modes cannot be combined)',
@@ -607,6 +607,8 @@ async function main(argv, { now = Date.now } = {}) {
     if (refused) return refused;
     dest = recordDestination();
     if (dest.why) { console.error(`trade: ${dest.why}`); return 2; }
+    // The listing of runs is read with `gh`, which a run without a token fails in its own words ("Command failed: gh run list ..."), naming no cause.
+    if (!process.env.GH_TOKEN) { console.error('trade: --record needs GH_TOKEN (a token that can read this repository\'s Actions runs); it is not set, so nothing was read or written'); return 2; }
   }
   const deadline = now() + BUDGET_MS;
   try {
