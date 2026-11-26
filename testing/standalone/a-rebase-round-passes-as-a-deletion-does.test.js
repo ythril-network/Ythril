@@ -97,8 +97,10 @@ describe('pub/sub: the publisher clause covers a rebase', () => {
     assert.equal(adoptionRefusal(publishing, roundOf('space_rebase', { subjectInstanceId: PEER }), now), deletion,
       'the publisher adopted a subscriber\'s rebase round');
   });
-  it('a meta_change is counted as it always was: the clause is the delete family\'s alone', () => {
+  // Q-968: this case asserted the hole, a subscriber's meta_change passing on the publisher on the subscriber's own yes. Only the publisher's
+  // cast decides on pub/sub, and a publisher passes only a round it opened, of every kind.
+  it('a subscriber\'s meta_change never passes on the publisher either, as its rebase does not', () => {
     const votes = [cast(PEER)];
-    assert.equal(roundVerdict(publishing, roundOf('meta_change', { subjectInstanceId: PEER, votes })), 'passed');
+    assert.equal(roundVerdict(publishing, roundOf('meta_change', { subjectInstanceId: PEER, votes })), null);
   });
 });

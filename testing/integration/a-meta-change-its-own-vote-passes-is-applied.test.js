@@ -1,7 +1,8 @@
 /**
  * A meta change that the proposer's own vote already passes is applied at once, not left waiting (`Q-49`).
  *
- * On club and pub/sub one yes passes a round, and the proposer's yes is recorded when the round opens — but nothing
+ * On a club the proposer's yes passes a round, and on pub/sub the publisher's (Q-968: a subscriber's edit opens no round at all), and the
+ * proposer's yes is recorded when the round opens — but nothing
  * evaluated the round then, so the change sat `vote_pending` until somebody cast the same yes again by hand or the
  * deadline expired it. Found moving the `flows` space: a publisher's usage-notes edit answered 202 and changed
  * nothing until a second, identical vote was cast.

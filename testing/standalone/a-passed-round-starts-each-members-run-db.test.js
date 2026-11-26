@@ -16,7 +16,7 @@
  * - a round concluded a second time (a re-delivery, a second settle) starts no second run: one run per round per member.
  *
  * The round machinery is driven in-process: the round is the proposer's (another member), adopted here with the proposer's signed yes, and
- * concluded by the one conclusion function on a pub/sub network, where one yes passes it.
+ * concluded by the one conclusion function on a club, where the proposer's one yes passes it.
  *
  * Run: node --test testing/standalone/a-passed-round-starts-each-members-run-db.test.js
  * (requires a prior server build and the test MongoDB)
@@ -67,10 +67,11 @@ describe('a passed round starts each member\'s run', { skip }, () => {
     ({ spaceCollection } = await import('../../server/dist/db/space-collection.js'));
     signing.ensureInstanceKeypair();
     kp = signing.generateInstanceKeypair();
-    // Pub/sub, where the publisher's one yes passes a schema round; the proposer is a member this instance pushes to and never pulls from, so
-    // a run's first sync asks no peer (nothing here dials out).
+    // A club, where the proposer's one yes passes a schema round (on pub/sub only the publisher's would, Q-968, and a member pushed to is a
+    // subscriber); the proposer is a member this instance pushes to and never pulls from, so a run's first sync asks no peer (nothing here
+    // dials out).
     inst.loader.getConfig().networks.push({
-      id: NET, label: 'Net', type: 'pubsub', origin: 'joined', syncSchedule: '', spaces: [...SPACES], votingDeadlineHours: 24,
+      id: NET, label: 'Net', type: 'club', origin: 'joined', syncSchedule: '', spaces: [...SPACES], votingDeadlineHours: 24,
       createdAt: '2026-01-01T00:00:00.000Z', pendingRounds: [],
       members: [{ instanceId: PROPOSER, label: 'proposer', url: 'http://127.0.0.1:1', tokenHash: 'h', direction: 'push', signingPublicKey: kp.publicKeyPem }],
     });

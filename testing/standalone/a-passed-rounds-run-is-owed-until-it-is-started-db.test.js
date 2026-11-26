@@ -58,8 +58,9 @@ describe('a passed round\'s run is owed until it is started', { skip }, () => {
     ({ spaceCollection } = await import('../../server/dist/db/space-collection.js'));
     signing.ensureInstanceKeypair();
     kp = signing.generateInstanceKeypair();
+    // A club, where the proposer's one yes passes the round (on pub/sub only the publisher's would, Q-968, and a member pushed to is a subscriber).
     inst.loader.getConfig().networks.push({
-      id: NET, label: 'Net', type: 'pubsub', origin: 'joined', syncSchedule: '', spaces: [...SPACES], votingDeadlineHours: 24,
+      id: NET, label: 'Net', type: 'club', origin: 'joined', syncSchedule: '', spaces: [...SPACES], votingDeadlineHours: 24,
       createdAt: '2026-01-01T00:00:00.000Z', pendingRounds: [],
       members: [{ instanceId: PROPOSER, label: 'proposer', url: 'http://127.0.0.1:1', tokenHash: 'h', direction: 'push', signingPublicKey: kp.publicKeyPem }],
     });
