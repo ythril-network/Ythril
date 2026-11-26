@@ -891,7 +891,7 @@ other network still carries it. Emptying a space is different: a passed wipe vot
 every member.
 
 **Proposing counts as your yes.** When you delete, empty, add or change a networked space, your instance opens the
-vote and its yes is already in the tally. Where your yes alone carries the round (a club, a pub/sub network, or the only member of a closed network), it passes at once; otherwise the other members' votes decide it.
+vote and its yes is already in the tally. Where your yes alone carries the round (a club, a pub/sub network you publish on, or the only member of a closed network), it passes at once; otherwise the other members' votes decide it. On a pub/sub network you subscribe to, nothing is put to a vote by you: deleting or emptying a space is your own act, and a change to its schema lands in your own definitions only, under the publisher's layer, which outranks it. A network-wide schema change is the publisher's to make.
 
 **Signed votes:** a network can set `requireSignedVotes` so every vote cast must carry a valid Ed25519 signature from the voting member (verified against its pinned signing key). Enable it once all members have published a signing key; if a member rotates its signing key, the new key is accepted with a rotation proof that references the previous one.
 

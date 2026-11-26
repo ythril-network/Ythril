@@ -23,6 +23,7 @@ import { log, peerText, refusalOfParse } from '../util/log.js';
 import type { NetworkActResult } from './network-acts.js';
 import { roundSpaceLocalId } from '../sync/space-map.js';
 import { roundIsOpen, roundClosedRefusal, type RoundRefusal } from './round-state.js';
+import { publishesOn } from './network-role.js';
 import { outcomesFor, roundSummary } from './round-outcomes.js';
 import { settleRounds } from './round-conclusion.js';
 
@@ -32,6 +33,9 @@ export const VOTE_OUTCOMES_DEFAULT_LIMIT = 20;
 export const VOTE_OUTCOMES_MAX_LIMIT = 50;
 
 const notFound = { status: 404 as const, error: 'Network not found' };
+
+/** The status of a cast refused because of the round's own standing (a round a publisher did not open). */
+const CONFLICT = 409 as const;
 
 /** What a round that is not here reads as: concluded. The refusal for it is the 404 every closed round gets. */
 const NOT_HERE = { concluded: true } as const;
@@ -152,6 +156,17 @@ export function castVoteAct(id: string, roundId: string, input: unknown): Networ
   const found = roundToVoteOn(net, roundId, now);
   if ('refusal' in found) return found.refusal;
   const { round } = found;
+
+  // Q-968: on a pub/sub network this instance publishes on, the publisher's own cast alone decides a round, and it decides only a round it opened. A
+  // round a subscriber opened before the upgrade is still stored here (`adoptionRefusal` stops a new adoption, not a held one): a cast on it would pass
+  // it, every subscriber would apply what a subscriber chose, and this instance never would. Refused whole, nothing recorded; the round runs out.
+  if (publishesOn(net) && round.proposedHere !== true) {
+    return {
+      status: CONFLICT,
+      error: 'A pub/sub publisher decides only a round it opened, and a subscriber opened this one: it takes no cast here and ends at its deadline.',
+      code: 'round_not_opened_here',
+    };
+  }
 
   // A yes on a schema this member cannot read would be a vote for something it will not apply (`Q-216`, R6-6): a round whose changed
   // parts a member cannot parse is applied whole or not at all, and the member says no yes to it — and says why, on the round.

@@ -133,7 +133,7 @@ POST /api/networks
 }
 ```
 
-**Network types**: `closed` (unanimous vote), `democratic` (majority), `club` (proposer only), `braintree` (tree hierarchy), `pubsub` (auto-join publisher/subscriber, push-only).
+**Network types**: `closed` (unanimous vote), `democratic` (majority), `club` (proposer only), `braintree` (tree hierarchy), `pubsub` (auto-join publisher/subscriber, push-only; only the publisher's cast decides a round, and a subscriber's schema edit stays on the subscriber and opens no round). A club or pub/sub network admits and removes members directly and never opens a join or removal round (a pub/sub network adds spaces directly, so it opens no space-addition round either); one a peer serves is refused (`Q-968`).
 
 **`votingDeadlineHours`** (optional, 1–72, default 24): how long a vote round on this network stays open. A round is open until its deadline and never after it: it is not listed as open, a cast on it is refused naming the deadline, and the round is concluded as expired (kept, with how it ended, on [Vote Outcomes](#vote-outcomes)).
 
@@ -340,7 +340,7 @@ deadline instant itself it still is — and a round past it takes no cast, wheth
 | status | when | body |
 |---|---|---|
 | `404` | the round does not exist on this network, or has concluded | `{ "error": "Round not found or already concluded" }` |
-| `409` | the round is past its deadline | `{ "error": "Voting on this round closed at <ISO deadline>", "code": "round_expired", "deadline": "<ISO>" }` |
+| `409` | the round is past its deadline; or, on a pub/sub network this instance publishes on, a subscriber opened it (an older release's): the publisher decides only rounds it opened, so it takes no cast and ends at its deadline | `{ "error": "Voting on this round closed at <ISO deadline>", "code": "round_expired", "deadline": "<ISO>" }`, or `{ "error": "A pub/sub publisher decides only a round it opened, …", "code": "round_not_opened_here" }` |
 | `409` | a `yes` on a `meta_change` round whose schema this instance cannot read | `{ "error": "This instance cannot read the schema this round proposes, so it casts no yes on it: <what failed>" }` — a veto is always this instance's to cast. Nothing of the round is applied here (a round is applied whole or not at all), and `GET /api/spaces/:id/schema-layers` lists it under `refusedRounds` with the reason |
 
 A cast that is taken answers `200` `{ "concluded": false, "round": { … } }`; `concluded` is `true` when this cast ended the
