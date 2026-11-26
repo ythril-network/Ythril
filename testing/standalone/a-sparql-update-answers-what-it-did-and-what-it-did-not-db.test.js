@@ -31,6 +31,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { auditRowsOf } from './_audit-rows.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 import { openSparqlDoors, rdfMeta, baseOf } from './_sparql-doors.mjs';
 
 const skip = await mongoSkipReason();
@@ -250,7 +251,7 @@ describe('a SPARQL Update answers what it did and what it did not', { skip }, ()
       await seed();
       let runs = 0;
       await d.loader.mutateConfig(cfg => { cfg.sparql = { ...(cfg.sparql ?? {}), timeoutMs: 1000 }; });
-      act.setSparqlUpdateKnobsForTest({ beforeCommit: async () => { runs++; await new Promise(r => setTimeout(r, 700)); await entities().updateOne({ _id: 'e3' }, { $inc: { seq: 1 } }); } });
+      act.setSparqlUpdateKnobsForTest({ beforeCommit: async () => { runs++; await elapse(700, 'pacing: the attempt takes longer than the 1 s budget leaves for a second one'); await entities().updateOne({ _id: 'e3' }, { $inc: { seq: 1 } }); } });
       try {
         const a = await d.sparqlUpdate('rest', tokens.a.key, S, `INSERT DATA { <${at('entity', 'e3')}> <${p('nick')}> "slow" }`);
         assert.equal(a.status, 409, fmt(a));
