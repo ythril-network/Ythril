@@ -29,7 +29,8 @@
  *   ({@link QuadSource.failure}) or defect ({@link QuadSource.defect}, an error that is no refusal) is what the reader asks when the stream ends.
  * - **A refusal for a read the consumer ended.** A read still on its way when its stream is destroyed ends with the driver's own error;
  *   that is no failure of the store and never the query's (`failure()` stays empty, the query's other matches read on).
- * - **A false empty.** `countQuads` answers from estimates, and the engine skips a pattern it is told is empty: it answers 0 only when no
+ * - **A false empty.** `countQuads` answers from estimates (over an index, a count kept under the index's write counter while it has not
+ *   changed: `IndexRead.estimate`), and the engine skips a pattern it is told is empty: it answers 0 only when no
  *   find can answer the pattern at all, at least 1 otherwise, and a count it cannot make answers 1 and ends the
  *   query's reads with the refusal it recorded: it never answers 0 and never rejects (the engine's handler for a rejected count raises an
  *   unhandled rejection).
@@ -63,7 +64,7 @@ import {
   SPARQL_RETRY_AFTER_SECONDS, SPARQL_STORE_UNAVAILABLE, SPARQL_TOO_LARGE, SPARQL_TOO_MUCH_READ, SPARQL_UNAVAILABLE, SparqlRefusal, sparqlRefusalOf,
   timeoutRefusal, tooMuchReadRefusal,
 } from './sparql-refusal.js';
-import { IndexRead, indexVerdict, indexBuildOf } from './triple-index/read.js';
+import { IndexRead, indexVerdict, indexBuildOf, type IndexStamp } from './triple-index/read.js';
 import { rdfIndexReadsTotal } from '../metrics/rdf-index-metrics.js';
 import type { RdfCaller, FingerprintOf } from './rdf-space-state.js';
 
@@ -410,15 +411,15 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
   /** Where each member is read from, decided once per query (`triple-index/read.ts` gives the rule). */
   const verdicts = new Map<string, Promise<'index' | 'records'>>();
   const paths = new Map<string, 'index' | 'records'>();
-  /** The build each member read from its index was pinned at (R5): checked again by `indexesSwapped`. */
-  const pinned = new Map<string, string>();
+  /** The build and write counter each member read from its index was pinned at (R5): the build is checked again by `indexesSwapped`, the pair keys its planning counts. */
+  const pinned = new Map<string, IndexStamp>();
   const toRecords = new Set(opts.recordsFor ?? []);
   const pathOf = (member: RdfMember): Promise<'index' | 'records'> => {
     let p = verdicts.get(member.space);
     if (p === undefined) {
       const verdict = mayReadIndex && !toRecords.has(member.space)
         ? timePhase('verdict', () => indexVerdict(member.space, member.meta, opts.deadline)).then((v) => {
-          if (v.read === 'index') pinned.set(member.space, v.buildId);
+          if (v.read === 'index') pinned.set(member.space, { buildId: v.buildId, writes: v.writes });
           return v.read;
         })
         : Promise.resolve('records' as const);
@@ -585,7 +586,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
           // A bound subject or object names few statements: the engine is told 1, with no store call.
           if (isBound(s) || isBound(o)) continue;
           findMs();
-          if (await pathOf(member) === 'index') { sum += await indexRead.estimate(member.space, member.files, triple(pattern)); continue; }
+          if (await pathOf(member) === 'index') { sum += await indexRead.estimate(member.space, member.files, triple(pattern), pinned.get(member.space)!); continue; }
           for (const find of finds) sum += await estimate(member, find);
         }
         if (!any) return 0;
@@ -610,7 +611,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     indexRowsRead: () => indexRead.rowsRead(),
     async indexesSwapped() {
       const swapped: string[] = [];
-      for (const [space, buildId] of pinned) if (await indexBuildOf(space) !== buildId) swapped.push(space);
+      for (const [space, { buildId }] of pinned) if (await indexBuildOf(space) !== buildId) swapped.push(space);
       return swapped;
     },
   };

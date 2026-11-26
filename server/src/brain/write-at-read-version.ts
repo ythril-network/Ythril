@@ -9,8 +9,9 @@
  * corrected it afterwards: a peer holding the arrival never took this copy as newer. So the write is filtered by the version the stamp read
  * (`writeFilterFor`, `brain/write-precondition.ts`), and this module is what happens on a miss:
  *
- *  - **without `If-Match`**: re-read, re-stamp and write again, at most {@link MAX_ATTEMPTS} times; the last miss is the route's existing
- *    refusal (`null`). Each retry is counted `ythril_brain_write_seq_total{outcome="collision"}`;
+ *  - **without `If-Match`**: re-read, re-stamp and write again, at most {@link MAX_ATTEMPTS} times; the last miss on a record that is
+ *    still there throws `RecordWriteRaceLost` (`409 write_race_lost` on every door, bundle-378 Q-976 S2), never `null`, which every
+ *    caller reads as "not found". Each retry is counted `ythril_brain_write_seq_total{outcome="collision"}`;
  *  - **with `If-Match`**: a miss is that refusal at once, as it has always been — the caller asked for exactly one version;
  *  - **a record that is not there** is not retried: re-reading it finds nothing, and the answer is the route's 404.
  *
@@ -28,6 +29,7 @@ import type { BrainCollection } from '../config/types.js';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { refuseForkEdit } from './forks.js';
+import { RecordWriteRaceLost } from '../util/errors.js';
 
 /** How many times an edit without `If-Match` tries before it answers the precondition refusal. */
 export const MAX_ATTEMPTS = 3;
@@ -57,7 +59,9 @@ export async function writeAtReadVersion<T>(
     const at = stamp!;
     const done = await withLandingStamp(spaceId, [localRow(at.version)], ([patch]) => write({ ...at, patch: patch! }), holder);
     if (done !== null) return done;
-    if (ifMatchSeq !== undefined || !at.exists || attempt >= MAX_ATTEMPTS) return null;
+    if (ifMatchSeq !== undefined || !at.exists) return null;
+    // The last miss is counted here, as the caller's own count of a missed write did when it was handed `null`: the throw skips that count.
+    if (attempt >= MAX_ATTEMPTS) { countBrainWriteSeq(part, 'collision'); throw new RecordWriteRaceLost(id, attempt); }
     countBrainWriteSeq(part, 'collision');
   }
 }

@@ -46,7 +46,8 @@ describe('the query is embedded once per RECALL, not once per space', () => {
   it('recallGlobal embeds it itself', () => {
     const g = fn('recallGlobal');
     assert.ok(g, 'recallGlobal is gone — re-point this test');
-    assert.match(g, /await embed\(query, 'query'\)/,
+    // Through the query vector cache since bundle-378 (`embedQuery`, Q-976 S2): still one call per recall, and none for a repeated text.
+    assert.match(g, /await timePhase\('embed', \(\) => embedQuery\(query\)\)/,
       'the fan-out must embed once up front; without it each space embeds the identical text again');
   });
 
@@ -62,20 +63,20 @@ describe('the query is embedded once per RECALL, not once per space', () => {
   });
 
   it('recall uses the handed-down vector when it has one', () => {
-    assert.match(src(), /const embResult = opts\?\.embedded \?\? await embed\(query, 'query'\)/,
+    assert.match(src(), /const embResult = opts\?\.embedded \?\? await timePhase\('embed', \(\) => embedQuery\(query\)\)/,
       'recall must prefer the precomputed vector; ignoring it would keep the N-wide fan-out');
   });
 
   it('recall still embeds for its own single-space callers', () => {
     // The fallback is load-bearing: recall is called directly from the per-space routes and from traverse.
     // Making `embedded` required would have pushed the embed call out to every one of them.
-    assert.match(src(), /opts\?\.embedded \?\? await embed/,
+    assert.match(src(), /opts\?\.embedded \?\? await timePhase\('embed', \(\) => embedQuery/,
       'a single-space caller passes no vector and must still get one');
   });
 
   it('there is exactly ONE embed call site for a query in this module', () => {
     // Two would be two places to keep in step, and the second is where a future fan-out re-appears.
-    const calls = [...src().matchAll(/await embed\(query, 'query'\)/g)].length;
+    const calls = [...src().matchAll(/embedQuery\(query\)|await embed\(query, 'query'\)/g)].length;
     assert.equal(calls, 2,
       `expected exactly two: the fallback in recall and the one in recallGlobal. Found ${calls} — a third is a `
       + 'new fan-out, and it will embed the same text again');
@@ -89,7 +90,7 @@ describe('the query is embedded once per RECALL, not once per space', () => {
     const i = s.indexOf('const searchSpaces = crossSpaceIds');
     assert.ok(i > 0, 'the findSimilar space loop moved — re-point this');
     const loop = s.slice(i, s.indexOf('allResults.push(...spaceResults)', i));
-    assert.ok(!/await embed\(/.test(loop),
+    assert.ok(!/await embed\(|embedQuery\(/.test(loop),
       'findSimilar must not embed inside its per-space loop — it has a vector already');
   });
 });

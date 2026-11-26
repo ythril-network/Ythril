@@ -17,6 +17,21 @@
  * {@link CATCH_UP_SHARE} of the time the query has left, and the barrier is asked again. Otherwise the member is read from its records and
  * a follower run is started that the query does not wait for.
  *
+ * ## One command for a ready member (bundle-378, Q-976 S2, contract row 2)
+ *
+ * The verdict reads the state row and the barrier in ONE command ({@link barrierRead}): an aggregate of the state row that looks up, in the
+ * same command, the highest `pos` of each record collection and of the tombstones (a descending read of the `(pos, _id)` index, one row
+ * each) and whether the journal holds a row. A member is ready when each highest `pos` is at or below `appliedPos` and the journal is
+ * empty; only a member that is not ready pays more (the exact lag count, for the catch-up decision).
+ *
+ * The state row alone cannot keep the barrier, so the second half of the read stays, inside the same command. Nothing in the state row
+ * moves when a record is written: the follower moves it after the write, and a write is acknowledged even when its follower did not run
+ * (another process holds the lease, the store failed under the follower) and before an unpositioned write's journal row is cleared. Only
+ * the records and the journal show such a write. The highest position answers exactly what the old count asked (a row above `appliedPos`
+ * exists if and only if the highest one is above it), so a write acknowledged before the query started is either applied (its position
+ * is at or below `appliedPos`) or seen (above it, or its journal row is there). The state row's write counter (`writes`, `store.ts`) is
+ * not part of the barrier: it says when the index changed, never when the records did; it keys the planner's counts ({@link IndexRead.estimate}).
+ *
  * ## What it prevents
  *
  * - **An answer the records would not give.** A statement is read only where the verdict holds; a term is turned back into the RDF/JS
@@ -45,8 +60,7 @@ import { toRdfJsTerm, type RdfJsTerm } from '../rdf-js-terms.js';
 import { RDF_KIND_COLLECTIONS } from '../rdf-members.js';
 import { isBound, type PatternSlot, type PatternTerm } from '../quad-candidates.js';
 import { IDS_PER_FIND, MAX_TERM_ID, idsOfStoredKeys, storedKeyOf, type TermRow } from './terms.js';
-import { formKeyOf, packStatement, readTripleIndexState } from './store.js';
-import { hasOutstandingJournalRows } from './journal.js';
+import { formKeyOf, packStatement, readTripleIndexState, type TripleIndexState } from './store.js';
 
 /** The most records a member may lag behind for a query to wait for its follower. */
 export const CATCH_UP_MAX_LAG = 2_000;
@@ -74,8 +88,11 @@ export const CACHE_TERMS_MAX = 200_000;
 const FILTER_TESTS_PER_CHECK = 10_000;
 const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
 
-/** Why a member is read from its records, or that it is read from its index. */
-export type IndexVerdict = { read: 'index'; buildId: string } | { read: 'records'; why: 'absent' | 'unbuilt' | 'stale' | 'other-form' | 'catching-up' | 'lagging' | 'journal' };
+/** Why a member is read from its records, or that it is read from its index (with the build and the write counter it was ready at). */
+export type IndexVerdict = { read: 'index'; buildId: string; writes: number } | { read: 'records'; why: 'absent' | 'unbuilt' | 'stale' | 'other-form' | 'catching-up' | 'lagging' | 'journal' };
+
+/** The build and the write counter a member was read at: what a kept planning count is keyed by ({@link IndexRead.estimate}). */
+export interface IndexStamp { buildId: string; writes: number }
 
 /**
  * The build `spaceId`'s index is now (`null`: none, or a state no rebuild wrote). A query pins it in its verdict and
@@ -119,20 +136,53 @@ export async function lagOf(spaceId: string, appliedPos: number, deadline: numbe
   return lag;
 }
 
+/** The record collections and the tombstones: what the follower reads by position, so what the barrier reads. */
+const POSITIONED_PARTS = [...RDF_KIND_COLLECTIONS.map(k => k.collection), 'tombstones' as const];
+
+/** What the verdict's one command reads: the state row, whether a positioned row stands above its `appliedPos`, whether the journal holds a row. */
+interface BarrierRead { state: TripleIndexState; above: boolean; journal: boolean }
+
+/**
+ * The state row of `spaceId`'s index and its barrier, in one command (the module docblock): `null` when there is no state row. Each part's
+ * highest `pos` is one row read down the `(pos, _id)` index; a highest `pos` that is not a number (no position stored is no row above it in
+ * the old count either, but a value of another type is not trusted) counts as above, so the doubt sends the member to its records.
+ */
+async function barrierRead(spaceId: string, deadline: number): Promise<BarrierRead | null> {
+  const highest = POSITIONED_PARTS.map((part, i) => ({
+    $lookup: { from: spaceCollection(spaceId, part), pipeline: [{ $sort: { pos: -1 } }, { $limit: 1 }, { $project: { _id: 0, pos: 1 } }], as: `top${i}` },
+  }));
+  const rows = await col<Document>(spaceCollection(spaceId, 'rdfState')).aggregate([
+    { $match: { _id: 'state' } },
+    ...highest,
+    { $lookup: { from: spaceCollection(spaceId, 'rdfDirty'), pipeline: [{ $limit: 1 }, { $project: { _id: 1 } }], as: 'journal' } },
+  ], { maxTimeMS: msLeft(deadline) }).toArray();
+  const row = rows[0];
+  if (row === undefined) return null;
+  const state = row as unknown as TripleIndexState;
+  const above = POSITIONED_PARTS.some((_part, i) => {
+    const top = (row[`top${i}`] as Array<{ pos?: unknown }> | undefined)?.[0];
+    if (top === undefined || top.pos === undefined || top.pos === null) return false;
+    return typeof top.pos !== 'number' || top.pos > state.appliedPos;
+  });
+  return { state, above, journal: (row['journal'] as unknown[] | undefined ?? []).length > 0 };
+}
+
 /** The verdict without catching up: index, or the reason not, with the lag when only the barrier failed. */
 async function verdictNow(spaceId: string, meta: SpaceMeta, deadline: number): Promise<{ verdict: IndexVerdict; lag: number }> {
-  const state = await readTripleIndexState(spaceId);
-  if (state === null) return { verdict: { read: 'records', why: 'absent' }, lag: Infinity };
+  const read = await barrierRead(spaceId, deadline);
+  if (read === null) return { verdict: { read: 'records', why: 'absent' }, lag: Infinity };
+  const { state } = read;
   // G1: the follower reads by position, so it never reads a record without a `pos`; only a rebuild reads every row. An index no rebuild wrote
   // is never served, whatever its status says, and the upkeep (`verify.ts`, reason `missing`) builds it.
   if (typeof state.buildId !== 'string') return { verdict: { read: 'records', why: 'unbuilt' }, lag: Infinity };
   if (state.status === 'stale') return { verdict: { read: 'records', why: 'stale' }, lag: Infinity };
   if (state.formKey !== formKeyOf(meta)) return { verdict: { read: 'records', why: 'other-form' }, lag: Infinity };
-  const lag = await lagOf(spaceId, state.appliedPos, deadline);
+  // Behind: the exact lag (bounded) decides whether the query waits for the follower. Read only for a member that is not ready.
+  const lag = read.above ? await lagOf(spaceId, state.appliedPos, deadline) : 0;
   if (lag > 0) return { verdict: { read: 'records', why: 'lagging' }, lag };
-  if (await hasOutstandingJournalRows(spaceId)) return { verdict: { read: 'records', why: 'journal' }, lag: 1 };
+  if (read.journal) return { verdict: { read: 'records', why: 'journal' }, lag: 1 };
   if (state.status !== 'ready') return { verdict: { read: 'records', why: 'catching-up' }, lag: 1 };
-  return { verdict: { read: 'index', buildId: state.buildId }, lag: 0 };
+  return { verdict: { read: 'index', buildId: state.buildId, writes: state.writes ?? 0 }, lag: 0 };
 }
 
 /**
@@ -445,8 +495,22 @@ export class IndexRead {
     return answers;
   }
 
-  /** An estimate of the statements of a pattern in `space`, for the engine's planner: a count bounded by the cap. */
-  async estimate(space: string, files: boolean, terms: readonly [PatternSlot, PatternSlot, PatternSlot]): Promise<number> {
+  /**
+   * An estimate of the statements of a pattern in `space`, for the engine's planner: a count bounded by the cap, kept in this process under
+   * the index's build and write counter (`at`, from the verdict) and reused while they are the same ({@link keptCount}). A count is a true
+   * count of the index at a counter at or after `at`; the quad source never answers the engine 0 for a pattern a find can answer.
+   */
+  async estimate(space: string, files: boolean, terms: readonly [PatternSlot, PatternSlot, PatternSlot], at: IndexStamp): Promise<number> {
+    const key = JSON.stringify([space, at.buildId, at.writes, files, terms.map(t => (!isBound(t) || (t.termType === 'Quad' && !isGround(t)) ? null : keysOfTerm(t)))]);
+    const kept = keptCount(key);
+    if (kept !== undefined) return kept;
+    const n = await this.countNow(space, files, terms);
+    keepCount(key, n);
+    return n;
+  }
+
+  /** The count of a pattern's statements in `space` now: a term lookup and one count of `rdf_quads`. */
+  private async countNow(space: string, files: boolean, terms: readonly [PatternSlot, PatternSlot, PatternSlot]): Promise<number> {
     const bound = terms.filter((t): t is PatternTerm => isBound(t) && isGround(t)).flatMap(keysOfTerm);
     const found = await this.lookUpKeys(space, bound);
     const slots = this.slotsOf(found, terms);
@@ -457,6 +521,28 @@ export class IndexRead {
     if (files && Object.keys(where).length === 0) return coll.estimatedDocumentCount({ maxTimeMS: msLeft(this.opts.deadline) });
     return coll.countDocuments(asFilter(files ? where : { $and: [where, { nK: { $gt: 0 } }] }), { limit: this.opts.cap, maxTimeMS: msLeft(this.opts.deadline) });
   }
+}
+
+/** The most planning counts this process keeps; past it the least recently used goes. */
+export const KEPT_COUNTS_MAX = 10_000;
+/**
+ * The planning counts of every query in this process, by space, build, write counter, files right and the pattern's bound keys (bundle-378,
+ * Q-976 S2, contract row 3). The write counter rises in every write that changes the index (`store.ts`), so a count is never reused for
+ * an index that changed after it; a rebuild has another build id. A space deleted and made again starts another build. What it prevents:
+ * a term lookup and a count of `rdf_quads` per free pattern per query, most of a small query's planning.
+ */
+const keptCounts = new Map<string, number>();
+function keptCount(key: string): number | undefined {
+  const n = keptCounts.get(key);
+  if (n === undefined) return undefined;
+  keptCounts.delete(key);
+  keptCounts.set(key, n);
+  return n;
+}
+function keepCount(key: string, n: number): void {
+  keptCounts.delete(key);
+  keptCounts.set(key, n);
+  while (keptCounts.size > KEPT_COUNTS_MAX) keptCounts.delete(keptCounts.keys().next().value as string);
 }
 
 /** Filters once each (two bindings of one join may ask the same lookup). */

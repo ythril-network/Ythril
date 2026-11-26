@@ -162,6 +162,8 @@ const EXEMPT = {
   ]),
   ...reasoned('the query barrier counts every edge row above the index\'s appliedPos, fork rows included: the follower applies those rows too (R7), so a fork row not yet applied is a lag like any other', [
     'rdf/triple-index/read.ts:lagOf',
+    // Bundle-378 (Q-976 S2): the verdict's one command reads the highest position of the edges, fork rows included, for the same reason.
+    'rdf/triple-index/read.ts:barrierRead',
   ]),
   // ── a rebuild and the drift verify state every row by the record form, as the follower does (bundle-273, Q-764 S4)
   ...reasoned('a triple index rebuild reads every edge row by `_id` and states each by the record form, as the follower does: a fork row gets no statements, so the rebuilt index states exactly what the follower would', [

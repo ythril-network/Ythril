@@ -1689,6 +1689,7 @@
   "networks.refusal.round_expired": "Voting on this round has closed. Your vote was not counted.",
   "networks.refusal.round_not_opened_here": "A subscriber opened this round, and a publisher decides only rounds it opened. It takes no vote here and ends at its deadline.",
   "networks.refusal.record_version_at_ceiling": "The version of record {{id}} is at the highest number sync accepts, so this instance can no longer change or delete it. The instance that wrote it still can.",
+  "networks.refusal.write_race_lost": "Record {{id}} was changed by other writes while this edit was saved, each time it tried; nothing was written. Save it again.",
   "networks.refusal.endpoint_removed": "The entity {{id}} at one end of this relationship was deleted or merged while it was being saved, so the relationship was taken back. Reload the graph and try again.",
   "networks.wizard.continue": "Continue",
   "networks.wizard.back": "Back",

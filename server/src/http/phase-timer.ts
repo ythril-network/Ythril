@@ -25,7 +25,10 @@
  * `scope` the resolution of the spaces a request reads (a view's members, the readable spaces of a list). `door` is `total` less `auth` and
  * `rate`: the route's own work, the phases below included. A door's own phases (SPARQL's `parse`, `members`, `verdict`, `plan`, `run`,
  * `render`, and `schema` when the RDF schema checks were computed rather than read from their cache) lie inside `door` and may overlap
- * (an index verdict runs while the engine plans).
+ * (an index verdict runs while the engine plans). Recall's (bundle-378, Q-976 S2): `embed` the query's vector (a kept one costs nothing),
+ * `search` the vector searches, `fresh` the scan of records the vector index has not taken yet, `hydrate` the reads that fill results in
+ * (inside `fresh`, and the file chunks' parents), `lexical` the text channel's fusion, `rerank` the cross-encoder; a recall over several
+ * spaces runs each space's phases at once, so a phase may count more than once (`n=`).
  *
  * ## Where MCP cannot carry it
  *
@@ -38,7 +41,8 @@ import { performance } from 'node:perf_hooks';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 /** Every phase a request may name, in the order a header lists them. */
-export const PHASES = Object.freeze(['total', 'auth', 'rate', 'scope', 'door', 'parse', 'members', 'schema', 'verdict', 'plan', 'run', 'render'] as const);
+export const PHASES = Object.freeze(['total', 'auth', 'rate', 'scope', 'door', 'parse', 'members', 'schema', 'verdict', 'plan', 'run', 'render',
+  'embed', 'search', 'fresh', 'lexical', 'rerank', 'hydrate'] as const);
 export type Phase = typeof PHASES[number];
 /** The phases a door records itself (`total` and `door` are derived). */
 export type RecordedPhase = Exclude<Phase, 'total' | 'door'>;

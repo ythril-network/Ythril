@@ -28,10 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A member below 6.6.0 keeps a schema vote's conversion steps, takes the schema and converts nothing | After it upgrades, run `POST /api/spaces/:id/schema-convert` on the types the change reached |
 | `PUT /api/spaces/:id/schema` and a library group apply refuse a write past 200 types of a kind (`400`); a single-type write over the rule limits is refused `400` | Keep a kind under 200 types and within the rule limits |
 | The audit row of a call a guard refused (a missing rung, a space the token does not reach, a second factor) names the token it refused; it was empty | None; read `tokenId` on `403` and `429` rows |
+| An edit (REST or MCP, without `If-Match`) of a record that other writes kept changing answers `409 write_race_lost` after its third try; it answered `404` | Retry the edit on `409 write_race_lost` |
 
 ### Added
 
-- **Operations:** every answer carries `Server-Timing` per phase; MCP tool results carry it in `_meta`.
+- **Operations:** every answer carries `Server-Timing` per phase; MCP tool results carry it in `_meta`. Recall names its own phases (`embed`, `search`, `fresh`, `hydrate`, `lexical`, `rerank`).
+- **Performance:** a recall repeating a query text reuses its embedding for ten minutes, while the embedding model is the same; a SPARQL query over a ready triple index pays one store read to decide where it reads, and repeats no planning count while the index is unchanged.
 - **Operations:** `ythril_write_group_aborts_total{reason}` counts SPARQL Update write groups that landed nothing; a delete still referenced is refused whole (`referenced`).
 - **Schema:** every schema violation row carries a stable `code` and its `params` beside its `reason` on every REST door and MCP tool, and the web app words it in your language; a bulk warning row gains `warning`. The integration guide lists the codes; an older unconverted item has none.
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.

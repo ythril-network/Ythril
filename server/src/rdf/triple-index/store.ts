@@ -16,7 +16,10 @@
  *   right reads `nK > 0` alone. A row whose two counts reach 0 is deleted in the same transaction.
  * - `<space>_rdf_records`: `{ _id: '<kind>:<id>', pos, q: Binary(the record's statement ids, sorted, 12 bytes each) }`. A record with no
  *   statements has no row.
- * - `<space>_rdf_state`: `{ _id: 'state', appliedPos, formKey, status }` and the follower's lease `{ _id: 'lease', owner, until }`.
+ * - `<space>_rdf_state`: `{ _id: 'state', appliedPos, formKey, status, buildId, writes }` and the follower's lease `{ _id: 'lease', owner, until }`.
+ *   `writes` counts the index's changes (bundle-378, Q-976 S2): raised by 1 in every apply transaction, every rebuild swap and status write,
+ *   and every stale mark, in the same write as the change it counts. While it reads the same, the index answers every count as it did
+ *   (`read.ts` keeps the planner's counts under it).
  * - `<space>_rdf_dirty`: the write journal (`journal.ts`); a batch deletes the rows it answers (`clearJournal`) in its transaction.
  *
  * A missing state row is an index that is not ready (a new space, a restore that dropped it, a delete and re-create).
@@ -104,8 +107,14 @@ export function formKeyOf(meta: SpaceMeta): string {
 /** How far the index is: being filled (`catching-up`), caught up (`ready`), or built for a form the space no longer has (`stale`). */
 export type TripleIndexStatus = 'catching-up' | 'ready' | 'stale';
 
-/** `buildId`: the rebuild the live collections came from (`rebuild.ts`); absent on an index the follower started and nobody built whole. */
-export interface TripleIndexState { _id: 'state'; appliedPos: number; formKey: string; status: TripleIndexStatus; buildId?: string }
+/**
+ * `buildId`: the rebuild the live collections came from (`rebuild.ts`); absent on an index the follower started and nobody built whole.
+ * `writes`: the count of the index's changes (the module docblock); absent on a row written before bundle-378, read as 0.
+ */
+export interface TripleIndexState { _id: 'state'; appliedPos: number; formKey: string; status: TripleIndexStatus; buildId?: string; writes?: number }
+
+/** The update part that raises the write counter: one spelling, beside every write of the state row that changes the index. */
+const RAISE_WRITES = Object.freeze({ $inc: Object.freeze({ writes: 1 }) });
 interface LeaseRow { _id: 'lease'; owner: string; until: number }
 /**
  * The rebuild's fence (design-r2 R5): the build that may write, until when. Every batch of a build writes this row in its transaction on the
@@ -171,8 +180,11 @@ export async function runningTripleIndexBuild(spaceId: string): Promise<{ buildI
  * `status`. Replaces whatever state the index had.
  */
 export async function writeBuiltState(spaceId: string, state: Omit<TripleIndexState, '_id'>, session: ClientSession): Promise<void> {
-  // The replacement carries no `_id`: an upsert takes it from the filter.
-  await stateCollection(spaceId).replaceOne(asFilter<TripleIndexState>({ _id: 'state' }), { ...state }, { upsert: true, session });
+  // The whole row is replaced, but the write counter carries on, raised by one: a swap is a change of the index, and a counter that went back
+  // could read as an earlier index again (`read.ts` keeps counts under it). A pipeline, so the old counter is read in the same write.
+  await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state' }), [
+    { $replaceWith: { $mergeObjects: [{ $literal: { ...state, _id: 'state' } }, { writes: { $add: [{ $ifNull: ['$writes', 0] }, 1] } }] } },
+  ] as never, { upsert: true, session }); // `as never`: the driver's update type takes no pipeline of `$replaceWith`.
   // The verify's cursors (`verify.ts`) count the old dictionary's ids and the old record rows: the new index starts them from the first
   // (finding F10). Here, so no swap can state a new index and keep the old cursors.
   await col<{ _id: string }>(spaceCollection(spaceId, 'rdfState')).deleteOne(asFilter<{ _id: string }>({ _id: 'verify' }), { session });
@@ -199,7 +211,7 @@ export async function dropOrphanBuildCollections(spaceId: string, keepBuildId: s
 
 /** Set the status of `buildId`'s index, in `session`, when the index is still that build's. */
 export async function setBuiltStatus(spaceId: string, buildId: string, status: TripleIndexStatus, session: ClientSession): Promise<void> {
-  await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state', buildId }), asUpdate<TripleIndexState>({ $set: { status } }), { session });
+  await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state', buildId }), asUpdate<TripleIndexState>({ $set: { status }, ...RAISE_WRITES }), { session });
 }
 /** The write journal (`journal.ts`): the apply clears the rows it was handed, in its own transaction. */
 const journalCollection = (spaceId: string) => col<{ _id: string }>(spaceCollection(spaceId, 'rdfDirty'));
@@ -294,12 +306,12 @@ async function applyInTransaction(spaceId: string, batch: TripleIndexBatch): Pro
     if (lease?.owner !== batch.owner) return 'lease-lost';
     // R3, one statement: a state built for another form is marked stale here, whatever it said, so no read stands between the check and the mark.
     const staled = await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state', formKey: { $ne: batch.formKey } }),
-      asUpdate<TripleIndexState>({ $set: { status: 'stale' } }), { session });
+      asUpdate<TripleIndexState>({ $set: { status: 'stale' }, ...RAISE_WRITES }), { session });
     if (staled.matchedCount === 1) return 'stale';
     // The state moves first, on the condition that it is this form's and not stale; the statements follow in the same transaction, so either
     // both land or neither does, and no read of the state stands before a write of it. `$max`: appliedPos never moves back.
     const moved = await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state', formKey: batch.formKey, status: { $ne: 'stale' } }),
-      asUpdate<TripleIndexState>({ $max: { appliedPos: batch.appliedPos }, ...(batch.status !== undefined ? { $set: { status: batch.status } } : {}) }), { session });
+      asUpdate<TripleIndexState>({ $max: { appliedPos: batch.appliedPos }, ...RAISE_WRITES, ...(batch.status !== undefined ? { $set: { status: batch.status } } : {}) }), { session });
     if (moved.matchedCount === 0) {
       return await stateCollection(spaceId).countDocuments(asFilter<TripleIndexState>({ _id: 'state' }), { session, limit: 1 }) === 0 ? 'not-started' : 'stale';
     }

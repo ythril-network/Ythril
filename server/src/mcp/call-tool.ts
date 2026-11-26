@@ -55,7 +55,7 @@ import { spaceActAnswer } from '../spaces/space-act-answer.js';
 import { NotFoundError, ToolRefusal, schemaReadUnavailableAnswer } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
 import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
-import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal, EndpointRemoved, LinkTargetRemoved } from '../util/errors.js';
+import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal, EndpointRemoved, LinkTargetRemoved, RecordWriteRaceLost } from '../util/errors.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
 import { mergeRefusal } from '../brain/merge.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
@@ -520,6 +520,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     // And a fork row named by an ordinary edit, or a re-key or merge past the fork cap (Q-624): the REST door's 409, `fork_row_read_only` or `fork_cap`.
     const stampRefusal = err instanceof RecordVersionAtCeiling || err instanceof PositionClockUnusable || err instanceof PositionsSeedUnavailable
       || err instanceof ForkRowReadOnly || err instanceof ForkCapRefusal || err instanceof EndpointRemoved || err instanceof LinkTargetRemoved
+      || err instanceof RecordWriteRaceLost
       ? writeRefusalAnswer(err, 'update') : null;
     if (stampRefusal) {
       return { result: { ...toolErrorResult(message), structuredContent: { ...stampRefusal.body } }, status: stampRefusal.status, callSpace };

@@ -135,6 +135,13 @@ const EXEMPT = [
     why: 'the triple index barrier: how many visible rows stand above `appliedPos` (R1, whatever the settled cap), a count bounded by the catch-up lag, not a page of positions a reader continues',
     holds: (e) => (/countDocuments\(/.test(bodyOf(rawByFile.get(e.file) ?? '', e.function)) ? null : 'the barrier no longer counts: a read of rows above appliedPos must go through readAfterPosition'),
   },
+  // Bundle-378 (Q-976 S2): the verdict's one command reads each positioned collection's highest `pos` (one row, descending) beside the
+  // state row, to ask whether any row stands above `appliedPos`: the same question as `lagOf`, answered without a count; no page.
+  {
+    file: 'server/src/rdf/triple-index/read.ts', fn: 'barrierRead', kind: 'ordering', by: 'slot',
+    why: 'the triple index barrier in the verdict\'s one command: the highest `pos` of each positioned collection, one row each, compared with `appliedPos`; not a page of positions a reader continues',
+    holds: (e) => (/\$limit: 1 \}/.test(bodyOf(rawByFile.get(e.file) ?? '', e.function)) ? null : 'the barrier read is no longer one row per collection: a read of rows above appliedPos must go through readAfterPosition'),
+  },
   // Bundle-273 (Q-764, design-r2 R1): the triple index's follower reads every visible row ABOVE `appliedPos` whatever the settled cap, which
   // `readAfterPosition` exists to impose, and merges seven collections by position. A tie at a full batch's last position is left whole to the
   // next batch (`withoutTrailingTie`, in `followOnce`), so no row of a tie is stepped past.
