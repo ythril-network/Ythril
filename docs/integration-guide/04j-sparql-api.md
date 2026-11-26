@@ -140,7 +140,7 @@ write door keeps (the schema, strict linkage, the functional rule, the delete gu
 space as you read it plus what the parts before it changed. A record is named by its address under the space's RDF base, as the export and
 the query write it. A new subject under an address of the space is inserted under an id the server makes; the address's own id is not used,
 and the answer's `ids` give the new ids. An edge's details are statements about its reifier (see [What a query sees](#what-a-query-sees)).
-An Update that deletes every statement of a record deletes the record, behind its tombstone.
+An Update that deletes every statement of a record deletes the record, behind its tombstone. The parts apply in order, so a statement a later part states after an earlier part removed it is in the final state: an edge whose record is emptied and whose relation (`<from> <label> <to>`) is stated again is kept, without the properties that were removed.
 
 **What it refuses.** Graph management (`CLEAR`, `DROP`, `CREATE`, `ADD`, `MOVE`, `COPY`) and `LOAD`, and any `GRAPH`, `USING`, `WITH` or
 `using-graph-uri` naming a graph other than the space's own, are `400 sparql_graph_management_refused`. `SERVICE` is
