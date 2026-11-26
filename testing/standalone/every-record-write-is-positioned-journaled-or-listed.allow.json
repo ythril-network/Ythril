@@ -1,0 +1,15 @@
+{
+  "entries": [
+    { "rule": "own-door", "file": "server/src/db/mongo.ts", "reason": "IS the door: getDb wraps the client's database in the observer, whose journal (setRecordWriteJournal, registered by rdf/triple-index/follow.ts) writes every unpositioned record write's row.", "reviewBy": "2027-05-26" },
+    { "rule": "own-door", "file": "server/src/db/conn-test.ts", "reason": "A connection test: it pings admin and writes no collection, so it changes no field a statement reads.", "reviewBy": "2027-05-26" },
+    { "rule": "own-door", "file": "server/src/db/dump.ts", "reason": "A backup: it reads every collection and writes none, so it changes no field a statement reads.", "reviewBy": "2027-05-26" },
+    { "rule": "own-door", "file": "server/src/db/restore.ts", "reason": "Changes every RDF field it restores, around the journal; it also drops every collection its dump does not hold, and the dump leaves the triple index out (TRIPLE_INDEX_PARTS), so after a restore a space has no index state and the follower builds it again from the records.", "reviewBy": "2027-05-26" },
+    { "rule": "own-door", "file": "server/src/db/migrate-act.ts", "reason": "A migrate's target database, not this process's: it lists collections and builds indexes there after restoreDatabase copied into it, and writes no record field; the boot on the new URI starts every index again (the copy holds none).", "reviewBy": "2027-05-26" },
+    { "rule": "own-door", "file": "server/src/ready.ts", "reason": "A readiness probe: an admin ping and a listing of search indexes, both reads; it changes no field a statement reads.", "reviewBy": "2027-05-26" },
+    { "rule": "own-door", "file": "server/src/api/about.ts", "reason": "serverInfo for the About page, a read of the admin database; it changes no field a statement reads.", "reviewBy": "2027-05-26" },
+    { "rule": "own-door", "file": "server/src/db/bounded-transaction.ts", "reason": "The seal of an ended transaction: an updateOne on transaction_seal (never a record collection) and killSessions on admin; it changes no field a statement reads.", "reviewBy": "2027-05-26" },
+    { "rule": "own-door", "file": "server/src/db/store-answers.ts", "reason": "A ping of the admin database that writes nothing, so it changes no field a statement reads.", "reviewBy": "2027-05-26" },
+    { "rule": "own-door", "file": "server/src/tools/positions-rollback.ts", "reason": "The rollback tool hands its own client to rollBackPositions (sync/positions-rollback.ts), which unsets local position fields only and marks every space's triple index stale, since the 5.6 build that runs next writes records with no journal.", "reviewBy": "2027-05-26" },
+    { "rule": "pos-from-a-field", "file": "server/src/sync/positions-owed.ts", "reason": "The carry gives a row with a version and no position the identity band (pos := seq). The row had no position, so no follower ever read it and its statements are not in a running index; the carry sets only pos and posAtSeq, which no statement reads, and a rebuild (slice S4) states the row.", "reviewBy": "2027-05-26" }
+  ]
+}
