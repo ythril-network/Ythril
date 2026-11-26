@@ -68,6 +68,7 @@ export function takeSpaceOutOfNetwork(
   const hadLayer = Boolean(net.schemaLayers?.[localId]);
   if (net.schemaLayers) delete net.schemaLayers[localId];
   if (net.schemaLayerUnread) delete net.schemaLayerUnread[localId];
+  if (net.schemaLayerSeeded) delete net.schemaLayerSeeded[localId];
   if (net.spaceOrigins) delete net.spaceOrigins[localId];
   forgetRdfBaseConflict(net, localId);
   forgetEveryMark(net, localId);

@@ -11,6 +11,8 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth } from '../../auth/middleware.js';
 import { getConfig } from '../../config/loader.js';
 import { replicatedMetaOf, servedMetaFor } from '../../sync/replicated-meta.js';
+import { isDirectionalNetwork } from '../../networks/network-spaces.js';
+import { createdHere, seededAs } from '../../networks/schema-standing.js';
 import { refusePeerReach, refuseSchemaRung } from './_shared.js';
 import { registerSchemaSnapshotRoute } from './schema-snapshot.js';
 import { inlineResolvableRefs } from '../../spaces/schema-validation.js';
@@ -29,9 +31,21 @@ syncMetaRouter.get('/meta', syncRateLimit, requireAuth, (req, res) => {
     const space = getConfig().spaces.find(s => s.id === spaceId);
     if (!space) { sendLostSpace(req, res, spaceId); return; }
     // Own definitions plus THIS network's layer only — never another network's, never the effective mix (F-39.2).
-    const layer = getConfig().networks.find(n => n.id === networkId)?.schemaLayers?.[spaceId];
+    const net = getConfig().networks.find(n => n.id === networkId);
+    const layer = net?.schemaLayers?.[spaceId];
     // Q-60: library references written inline where this instance can resolve them — a peer's library is its own.
-    res.json({ meta: inlineResolvableRefs(replicatedMetaOf(servedMetaFor(space, layer ? { networkId, meta: layer } : undefined))) });
+    const meta = inlineResolvableRefs(replicatedMetaOf(servedMetaFor(space, layer ? { networkId, meta: layer } : undefined)));
+    // Q-966: on a voted network, the network's own part, which is what a joiner or a healing member stores as the network's layer. The
+    // creator's own definitions are the network's, and so are a proposer's of a space it proposed; any other member holds the network's
+    // schema as its LAYER, and its own definitions are not the network's to hand on (what a joiner stored would depend on who invited it).
+    if (net && !isDirectionalNetwork(net) && net.spaces.includes(spaceId)) {
+      const seeded = seededAs(net, spaceId);
+      const ownIsNetworks = createdHere(net, space) || seeded === 'own';
+      const network = ownIsNetworks ? meta : inlineResolvableRefs(replicatedMetaOf(layer ?? {}));
+      res.json({ meta, network, networkSeeded: ownIsNetworks || seeded === 'layer' });
+      return;
+    }
+    res.json({ meta });
   } catch (err) {
     sendCaughtFailure(res, 'sync GET /meta', err);
   }

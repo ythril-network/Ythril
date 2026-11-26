@@ -14,6 +14,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { INSTANCES, post, patch, get, syncUntil, triggerSync, waitFor, delWithBody } from './helpers.js';
+import { elapse } from '../_shared/sleep.mjs';
 import { tokenOf, createClub, joinThrough, tearDown, layerOn, networkOn, metaOn } from './_q966-club.mjs';
 
 let club;
@@ -59,7 +60,7 @@ describe('a joined member that proposed a space', () => {
     // Give the cycle the trigger started the time to take a layer, were one to be taken.
     await waitFor(async () => (await metaOn('b', OWN)).validationMode === 'strict', 10_000, 500);
     await triggerSync(INSTANCES.b, tokenOf('b'), club.networkId).catch(() => {});
-    await waitFor(async () => layerOn('b', club.networkId, OWN) !== undefined, 8_000, 1_000).catch(() => {});
+    await elapse(6_000, 'absence window: the cycle just triggered would have taken the admitter\'s copy within seconds (it did, before the proposer was marked)');
     assert.equal(layerOn('b', club.networkId, OWN), undefined, `B kept its admitter's copy as a layer in front of its own definitions: ${JSON.stringify(layerOn('b', club.networkId, OWN))}`);
     assert.equal((await metaOn('b', OWN)).typeSchemas?.entity?.vessel?.propertySchemas?.draught?.type, 'number');
   });

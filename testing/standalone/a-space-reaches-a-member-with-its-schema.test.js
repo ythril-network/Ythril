@@ -34,7 +34,8 @@ describe('a library reference travels resolved', () => {
     assert.match(body(read('server/src/networks/round-local-state.ts'), 'export function roundForPeer'), /inlineResolvableRefs\(copy\.pendingMeta[,)]/);
   });
   it('an arriving layer leaves out only the types it cannot resolve, not the whole schema', () => {
-    const accept = body(read('server/src/sync/space-meta-pull.ts'), 'export function acceptNetworkLayer');
+    // acceptNetworkLayer answers takeNetworkLayer's `changed`; the one read-and-store of a layer is takeNetworkLayer.
+    const accept = body(read('server/src/sync/space-meta-pull.ts'), 'export function takeNetworkLayer');
     assert.match(accept, /withoutBrokenLibraryRefs\(/);
     assert.doesNotMatch(accept, /refused whole: it references/, 'the whole-schema refusal for a missing entry is back');
   });

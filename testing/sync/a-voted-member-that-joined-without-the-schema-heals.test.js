@@ -51,6 +51,7 @@ before(async () => {
   patchContainerNetwork('ythril-b', networkId, `
     if (n.schemaLayers) delete n.schemaLayers[${JSON.stringify(SPACE)}];
     if (n.schemaLayerUnread) delete n.schemaLayerUnread[${JSON.stringify(SPACE)}];
+    delete n.schemaLayerSeeded;
     const s = cfg.spaces.find(x => x.id === ${JSON.stringify(SPACE)});
     if (s) { delete s.meta; delete s.ownMeta; }
   `);

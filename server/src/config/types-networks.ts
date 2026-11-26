@@ -477,6 +477,14 @@ export interface NetworkConfig {
    */
   schemaLayerUnread?: Record<string, string[]>;
   /**
+   * Q-966: per LOCAL space id, that this member holds the network's WHOLE schema for the space and the heal has nothing to take (`networks/schema-standing.ts`).
+   * `'layer'`: the layer was taken whole, from the member that admitted this instance (the join, the heal, a passed `space_addition`, an accepted pending
+   * space). `'own'`: this instance proposed the space, so its own definitions ARE the network's and it holds no layer. A layer a passed round wrote onto
+   * nothing holds only that round's changed fields and is NOT marked, which is how the heal tells a partial layer from a whole one. Local state, never sent
+   * to a peer; it follows its space (a rename moves it, leaving the network removes it).
+   */
+  schemaLayerSeeded?: Record<string, 'layer' | 'own'>;
+  /**
    * Q-748: per LOCAL space id, a base this network's layer offers that no held `space_rebase` round explains. Local state, written by the
    * effective-meta recompute and cleared when a rebase lands or the layer agrees; the RDF doors answer 409 `rdf_base_conflict` while one
    * stands. Leaving the network removes it with the network.

@@ -204,7 +204,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database:** that holds too when the database ends a write or a single-document read inside a transaction and answers a moment before Ythril's own clock reads the deadline.
 - **Workstation:** `npm run local-connector:dev` builds the schema package it imports first and starts the local connector from a fresh clone, as the guide says.
 - **Testing:** the source-hygiene gates read the schema package's source with the server's, and the standalone runner refuses a schema build older than its source or missing.
-- **Sync:** a member that joins a club, closed or democratic network holds each joined space with the network's types and validation mode, as that network's layer; one that joined without them takes them on its next cycle.
+- **Sync:** a member that joins a club, closed or democratic network holds each joined space with the network's types and validation mode as that network's layer; one without them, or with only a passed vote's changed fields, takes them from its admitter on its next cycle.
 - **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`, and the sender offers it again an hour later.
 - **Sync:** a sync run queued behind a running one for a network that is deleted before it starts ends with one info line; it used to end as an unhandled rejection.
 
