@@ -153,11 +153,13 @@ export type SparqlUpdateAnswer =
   | { ok: false; status: number; code: string; error: string; body: Record<string, unknown>; retryAfterSeconds?: number; audit: SparqlUpdateAudit };
 
 /**
- * Test seams: a hook run before each attempt's commit (a test makes a record move there to lose the race), and one run after each attempt's
- * evaluation, before it is judged (a test changes what the evaluation read, or the store under it).
+ * Test seams: a hook run before each attempt's commit (a test makes a record move there to lose the race), one run after each attempt's
+ * evaluation, before it is judged (a test changes what the evaluation read, or the store under it), and one run on the plans of each attempt
+ * the planner answered, whose result is the plans the act goes on with (a test hands the group a list no Update's text plans).
  */
 export interface SparqlUpdateKnobs {
   beforeCommit?: () => Promise<void>;
+  afterPlan?: (plans: WritePlan[]) => WritePlan[] | Promise<WritePlan[]>;
   afterEvaluation?: (attempt: number, changes: SparqlUpdateChanges) => Promise<void> | void;
 }
 let knobs: SparqlUpdateKnobs = {};
@@ -349,7 +351,7 @@ export async function sparqlUpdateAct(input: SparqlUpdateInput): Promise<SparqlU
         const refused = refusedAnswer(planned);
         return refuse(REFUSED_STATUS, SPARQL_UPDATE_REFUSED, refused.error, refused.body);
       }
-      const plans = planned.plans;
+      const plans = knobs.afterPlan ? await knobs.afterPlan(planned.plans) : planned.plans;
       if (plans.length > maxRecordsChanged) {
         return refuse(SPARQL_TOO_LARGE, SPARQL_TOO_MANY_CHANGES, `The Update changes ${plans.length} records, more than ${maxRecordsChanged} (sparql.maxRecordsChanged): nothing was written — split it`,
           { cap: maxRecordsChanged, records: plans.length });

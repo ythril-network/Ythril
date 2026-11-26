@@ -302,6 +302,16 @@ describe('exit 2: a recording that did not happen is never exit 0', () => {
     });
   });
 
+  it('GH_TOKEN unset: refused at once, naming GH_TOKEN, before gh is asked anything (Q-761 wiring: the lead saw "Command failed: gh run list" and no cause)', async () => {
+    await withServer(async (server) => {
+      const r = await runTrade(['--record', REF_130], { server, env: { GH_TOKEN: undefined } });
+      assert.equal(r.code, 2, everything(r));
+      assert.match(r.stderr, /^trade: [^\n]*needs GH_TOKEN/m, everything(r));
+      assert.deepEqual(r.calls, [], 'gh or git was called before the refusal');
+      assert.deepEqual(server.calls, []);
+    });
+  });
+
   it('a write the instance refuses, and the token is not in what is printed', async () => {
     await withServer(async (server) => {
       server.respond = (call) => (call.tool === 'save_chrono' ? { status: 500, body: { ok: false, error: 'the store is down' } } : undefined);
