@@ -110,16 +110,20 @@ describe('a write group lands whole or not at all', { skip }, () => {
 
   it('the watcher catches a session-less write planted in a transaction (it is what the case above relies on)', async () => {
     const watch = watchSessionlessWrites(fx.mongo);
+    // Another writer's session: a session, but not the transaction's own. A write that carries it is outside the transaction.
+    const stranger = fx.mongo.getMongo().startSession();
     try {
       await settle(fx.held.inHeldTransaction(SPACE, 'test.plant', async (session) => {
         await fx.coll('facts').insertOne({ ...factDoc(factId(300), 'in the session'), seq: 1 }, { session });
         await fx.coll('facts').insertOne({ ...factDoc(factId(301), 'planted without it'), seq: 2 });
+        await fx.coll('facts').insertOne({ ...factDoc(factId(302), 'planted with another session'), seq: 3 }, { session: stranger });
         throw new Error('abort the planted transaction');
       }));
-    } finally { watch.restore(); }
-    assert.deepEqual(watch.sessionless(), [`insertOne on ${SPACE}_facts`], 'the watcher did not flag the planted session-less write');
+    } finally { watch.restore(); await stranger.endSession(); }
+    assert.deepEqual(watch.sessionless(), [`insertOne on ${SPACE}_facts`, `insertOne on ${SPACE}_facts`],
+      'the watcher did not flag both planted writes: the one with no session and the one with a session that is not the transaction\'s');
     assert.equal(await fx.coll('facts').countDocuments({ _id: factId(300) }), 0, 'the write in the session survived the abort');
-    assert.equal(await fx.coll('facts').countDocuments({ _id: factId(301) }), 1,
-      'premise: a session-less write inside a transaction survives its abort (probe E4) — if it no longer does, this rule needs rereading');
+    assert.equal(await fx.coll('facts').countDocuments({ _id: { $in: [factId(301), factId(302)] } }), 2,
+      'premise: a write outside the transaction survives its abort (probe E4), with no session or with another one — if it no longer does, this rule needs rereading');
   });
 });

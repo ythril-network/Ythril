@@ -147,6 +147,17 @@ const EXEMPT_ORPHAN_FILES = {};
 const RECORD_COLLECTIONS = new Set(BRAIN_COLLECTIONS.filter(c => c !== 'files'));
 
 const INDEX = moduleIndex(SERVER_CODE_ROOTS);
+
+/** The index as a walk sees it with `cut` unreachable: nothing resolves to it, so no call, member call or reference enters it. */
+function withoutNode(index, cut) {
+  const keep = (key) => (key === cut ? undefined : key);
+  return {
+    ...index,
+    resolve: (file, name) => keep(index.resolve(file, name)),
+    resolveMember: (file, obj, prop) => keep(index.resolveMember(file, obj, prop)),
+    sameFileMethods: (file, prop) => index.sameFileMethods(file, prop).filter(key => key !== cut),
+  };
+}
 // Lowered from 170 when the plan/commit split folded the create/converge writers' direct writes into one
 // commit (`Q-99` part 3): the sites went because the copies did, not because the scan broke.
 // The record floor is 40, from 50: the counter sites (five on 797dbb2e) stopped counting as records when the
@@ -213,20 +224,24 @@ describe('a create/converge write to a record collection lives in the commit', (
     // The exemption list says which functions MAY write; this says the create path does not reach them. It is
     // what keeps `reconcileLinks` (exempt for the update path) from being the create path's link writer too.
     // The sequence counter is excluded by what it is (`_record-writes.mjs`): allocating a seq is not a record write.
-    const { seen, parent } = walkFrom(INDEX, CREATE_CONVERGE_WRITERS);
+    const { seen } = walkFrom(INDEX, CREATE_CONVERGE_WRITERS);
     for (const root of CREATE_CONVERGE_WRITERS) assert.ok(seen.has(root), `${root} is gone — re-anchor the scope`);
     assert.ok(seen.has(AFTER_COMMIT), `${AFTER_COMMIT} is not reached from the create path — re-anchor the take-back exclusion`);
+    // A take-back removes, through the one remover, a row the commit LANDED against an entity removed meanwhile: a delete after the write,
+    // never a create or a converge (`runAfterCommit`, Q-760). What it reaches is excused, and ONLY what it alone reaches: the walk is made
+    // again from the same roots with that node cut out, and every site THAT walk reaches is a finding. The excuse never reads the first path
+    // a walk happened to find to a site, which may run through the node while another path to the same site does not.
+    const { seen: without, parent } = walkFrom(withoutNode(INDEX, AFTER_COMMIT), CREATE_CONVERGE_WRITERS);
+    assert.ok(!without.has(AFTER_COMMIT), `${AFTER_COMMIT} is still reached with it cut out: the second walk does not exclude it`);
     const reached = [];
-    for (const key of seen) {
+    for (const key of without) {
       for (const s of WRITERS.byKey.get(key) ?? []) {
         if (!writesRecord(s) || s.file === COMMIT) continue;
-        // A take-back removes, through the one remover, a row the commit LANDED against an entity removed meanwhile: a delete after the
-        // write, never a create or a converge (`runAfterCommit`, Q-760). Only a site reached solely through it is excused.
-        if (pathTo(parent, key).includes(AFTER_COMMIT)) continue;
         reached.push(`${s.key}:${s.line} ${s.op} (${s.collection ?? s.why}) via ${pathTo(parent, key).map(k => k.split(':')[1]).join(' > ')}`);
       }
     }
     assert.deepEqual([...new Set(reached)], [],
       'the create/converge path writes a record collection outside the commit');
-  });
+    const excused = [...seen].filter(key => !without.has(key) && (WRITERS.byKey.get(key) ?? []).some(s => writesRecord(s) && s.file !== COMMIT));
+    assert.ok(excused.length > 0, 'the take-back excuses no site: its exclusion is dead — delete it');  });
 });
