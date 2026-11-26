@@ -12,9 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A pub/sub subscriber's schema edit answers `200` and stays in its own definitions, not `202 vote_pending`; `targetNetwork` on it is refused `400` | Change the network's schema on the publisher, and upgrade the publisher: an older one still passes a subscriber's round |
 | An RDF import with `schema` set builds the space's schema from the file's classes and shapes and writes it only when the data passes; it needs `schema: write` | None; without `schema` an import is unchanged |
 | A space import (`POST /api/admin/spaces/:spaceId/import`) sent slower than 16 KiB/s over a minute, or silent for a minute, is refused `408`; the caller then waits a minute (`429`, `Retry-After`) | Send a backup over a link faster than 16 KiB/s, without pauses |
-| With `softDeleteFileMeta` off, a deleted, moved or re-keyed file leaves a feed marker (path, deletion time, position; nothing else) for `fileChangeFeedWindowDays` (default 30) | None; set the key to change the window, 0 to purge at the next sweep |
+| With `softDeleteFileMeta` off, a deleted, moved or re-keyed file leaves a feed marker (path, deletion time, position) for `fileChangeFeedWindowDays` (default 30) | None; set the key to change the window, 0 to purge at the next sweep |
 | A file deleted before this release has an old position: it is listed as deleted only to a feed read with no cursor | None |
-| A `config.json` that is there but empty, not JSON or unreadable stops the start, naming the file, instead of opening first-run setup | Repair or restore the file; delete it only to set the instance up anew |
+| An empty, non-JSON or unreadable `config.json` stops the start, naming the file, instead of opening first-run setup | Repair or restore the file; delete it only to set the instance up anew |
 | Irreversible: records of files whose bytes this instance lost are removed here only, with no tombstone, once their window has passed and every peer we pull from completed a sync | Put lost bytes back before upgrading to keep their records |
 | A joined club, closed or democratic member takes the network's schema per space at the join or its next cycle; under `validationMode: strict` it then refuses what that schema refuses | None |
 | `GET /api/sync/meta` now asks `schema: read` on the space (`knowledge: write` implies it); a peer token without it is answered `403 schema_rung` | Give peer tokens `schema: read` where a member reads the schema |
@@ -27,13 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | An importer below 6.6.0 skips the `schemaSnapshots` of a 6.6 export: the records land without their schema versions, which are then fetched from members or stay unheld | Import a 6.6 export into 6.6.0 or later to keep the versions |
 | A member below 6.6.0 keeps a schema vote's conversion steps, takes the schema and converts nothing | After it upgrades, run `POST /api/spaces/:id/schema-convert` on the types the change reached |
 | `PUT /api/spaces/:id/schema` and a library group apply refuse a write past 200 types of a kind (`400`); a single-type write over the rule limits is refused `400` | Keep a kind under 200 types and within the rule limits |
-| The audit row of a call a guard refused (a missing rung, a space the token does not reach, a second factor) names the token it refused; it was empty | None; read `tokenId` on `403` and `429` rows |
-| An edit (REST or MCP, without `If-Match`) of a record that other writes kept changing answers `409 write_race_lost` after its third try; it answered `404` | Retry the edit on `409 write_race_lost` |
+| The audit row of a call a guard refused names the token it refused; it was empty | None; read `tokenId` on `403` and `429` rows |
+| An edit other writes outran three times answers `409 write_race_lost`, not `404` | Retry it |
 
 ### Added
 
-- **Operations:** every answer carries `Server-Timing` per phase; MCP tool results carry it in `_meta`. Recall names its own phases (`embed`, `search`, `fresh`, `hydrate`, `lexical`, `rerank`).
-- **Performance:** a recall repeating a query text reuses its embedding for ten minutes, while the embedding model is the same; a SPARQL query over a ready triple index pays one store read to decide where it reads, and repeats no planning count while the index is unchanged.
+- **Operations:** every answer carries `Server-Timing` per phase; MCP tool results carry it in `_meta`.
 - **Operations:** `ythril_write_group_aborts_total{reason}` counts SPARQL Update write groups that landed nothing; a delete still referenced is refused whole (`referenced`).
 - **Schema:** every schema violation row carries a stable `code` and its `params` beside its `reason` on every REST door and MCP tool, and the web app words it in your language; a bulk warning row gains `warning`. The integration guide lists the codes; an older unconverted item has none.
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.
