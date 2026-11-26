@@ -75,6 +75,8 @@ const WRITERS = {
   'server/src/sync/positions-owed.ts:repairRows': { marker: 'none-by-design', why: 'sets position fields on rows held; from, label and the marker are untouched' },
   'server/src/sync/positions-rollback.ts:rollBackPositions': { marker: 'none-by-design', why: 'unsets the 6.0 local fields (never the write guard) on rows held' },
   'server/src/sync/delivered-by-backfill.ts:stampCollection': { marker: 'none-by-design', why: 'stamps who delivered a row; from, label and the marker are untouched' },
+  'server/src/rdf/triple-index/store.ts:applyRecordChanges': { marker: 'none-by-design', why: 'the triple index (Q-764) writes its own collections, named by the caller (the live ones, or a rebuild\'s own before its swap); never edges' },
+  'server/src/rdf/triple-index/terms.ts:termIds': { marker: 'none-by-design', why: 'the triple index dictionary (Q-764), in the collection the caller names; never edges' },
   'server/src/brain/candidate-prune.ts:pruneCandidateCollection': { marker: 'none-by-design', why: 'prunes candidate rows; the collection name is computed and is not edges' },
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': { marker: 'none-by-design', why: 'chrono entries; the collection name is computed' },
   'server/src/brain/retention-stamp-heal.ts:healStoredStamps': { marker: 'none-by-design', why: 'the sweep\'s heal sets or unsets a retention stamp on a row that exists; it writes neither from nor label, so the marker is neither stamped nor unset' },

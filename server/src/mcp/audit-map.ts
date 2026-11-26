@@ -72,7 +72,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   schema_update: 'space.update',
   save_space: 'space.create',
   space_reindex: 'space.reindex',
-  // The triple index's rebuild (Q-764): a mutation of its own; its status read is a read of the space, `space.list` as the other status reads.
+  // The triple index's rebuild (Q-764): an act of its own, never `space.reindex` (a re-embed), recorded by its REST route
+  // `POST /api/brain/spaces/:spaceId/rdf-index/rebuild` too; its status read is a read of the space, `space.list` as the other status reads.
   space_rdf_rebuild: 'space.rdf.rebuild',
   space_rdf_index: 'space.list',
   // Under the operation its REST twin already records, not a new one: a compliance reader asks who

@@ -54,6 +54,8 @@ const COMPUTED_BULK_WRITES = {
     + 'sent; the collection is a replicated family\'s, and embed jobs are local and never replicated',
   'server/src/brain/schema-convert-record.ts:stampQuietly': 'a schema conversion run\'s quiet stamps: the collection is a knowledge kind\'s (`COLLECTION_SUFFIX`), '
     + 'one $set of the schema stamp on rows held; queues no job',
+  'server/src/rdf/triple-index/store.ts:applyRecordChanges': 'the triple index (Q-764): statements and record rows into the collections the caller names '
+    + '(the live ones, or a rebuild\'s own before its swap), never the jobs collection; queues no job',
   'server/src/brain/write-plan/commit.ts:writeStage':'the write commit\'s record stage: the collection is a record kind\'s '
     + '(`PLAN_KINDS`), never the jobs collection — the commit queues its jobs through the runner, which the last case holds',
 };

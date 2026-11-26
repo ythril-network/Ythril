@@ -160,8 +160,9 @@ export async function swapTripleIndexBuild(build: TripleIndexBuild): Promise<voi
     });
     const live = liveCollections(spaceId);
     for (const part of ['terms', 'quads', 'records'] as const) {
-      await ensureCollection(build.target[part]);
-      await getDb().renameCollection(build.target[part], live[part], { dropTarget: true });
+      if (await collectionExists(build.target[part])) await getDb().renameCollection(build.target[part], live[part], { dropTarget: true });
+      // A space whose records state nothing wrote no row, so the build made no collection: its index is empty, the live one dropped.
+      else if (await collectionExists(live[part])) await getDb().dropCollection(live[part]);
     }
     for (const ix of TRIPLE_INDEX_INDEXES) await buildSpaceIndex(spaceId, ix);
     await inBoundedTransaction(async (session) => {
@@ -177,16 +178,21 @@ export async function swapTripleIndexBuild(build: TripleIndexBuild): Promise<voi
   }
 }
 
-/** Create `name` when no write has (a space whose records state nothing has no rows), so a rename finds it. */
-async function ensureCollection(name: string): Promise<void> {
-  const exists = (await getDb().listCollections({ name }, { nameOnly: true }).toArray()).length > 0;
-  if (!exists) await getDb().createCollection(name);
+/** Whether the collection `name` exists (a build's collection exists only once a write made it). */
+async function collectionExists(name: string): Promise<boolean> {
+  return (await getDb().listCollections({ name }, { nameOnly: true }).toArray()).length > 0;
 }
 
 /** Drop the collections of a build that ended without a swap (or after one: a renamed collection is gone already). */
 async function dropBuildCollections(build: TripleIndexBuild): Promise<void> {
   for (const name of Object.values(build.target)) {
-    await getDb().collection(name).drop().catch(() => false);
+    try {
+      if (await collectionExists(name)) await getDb().dropCollection(name);
+    } catch (err) {
+      // The build's own failure is what its caller reports, so this one never replaces it; a collection left behind is said once.
+      rebuildFailed(build.spaceId, () => log.warn(`Triple index of space '${peerText(build.spaceId)}': a collection of build ${peerText(build.buildId)} `
+        + `could not be dropped: ${peerText(String(err))}`));
+    }
   }
 }
 
@@ -198,7 +204,7 @@ export async function rebuildTripleIndex(spaceId: string, opts: { leaseMs?: numb
   try {
     const records = await fillTripleIndexBuild(build);
     await swapTripleIndexBuild(build);
-    log.info(`Triple index of space '${peerText(spaceId)}': rebuilt from ${records} record(s) (build ${build.buildId})`);
+    log.info(`Triple index of space '${peerText(spaceId)}': rebuilt from ${records} record(s) (build ${peerText(build.buildId)})`);
     return { outcome: 'built', buildId: build.buildId, records };
   } catch (err) {
     await releaseTripleIndexBuild(spaceId, build.buildId);
@@ -244,8 +250,14 @@ export async function tripleIndexStatusOf(spaceId: string): Promise<TripleIndexS
   return { spaceId, status: state?.status ?? 'absent', buildId: state?.buildId ?? null, appliedPos: state?.appliedPos ?? null, rebuilding: building };
 }
 
+/** The codes the admin door's start refuses with: the one list `space_rdf_rebuild`'s description names them from. */
+export const TRIPLE_INDEX_REBUILD_REFUSAL_CODES = ['rdf_off'] as const;
+/** The status a refused start answers: the space's state conflicts with a rebuild (it has no RDF form now). */
+const REBUILD_REFUSED_STATUS = 409 as const;
+
 /** What the admin door's start answers: started (or one runs already), or refused because the space has no RDF form now. */
-export type RebuildStart = { ok: true; status: 'started' | 'running'; spaceId: string } | { ok: false; status: 409; code: 'rdf_off'; error: string };
+export type RebuildStart = { ok: true; status: 'started' | 'running'; spaceId: string }
+  | { ok: false; status: typeof REBUILD_REFUSED_STATUS; code: typeof TRIPLE_INDEX_REBUILD_REFUSAL_CODES[number]; error: string };
 
 /**
  * Start a rebuild of `spaceId`'s index in the background (the admin door): answered at once, the rebuild runs outside the request that
@@ -253,7 +265,7 @@ export type RebuildStart = { ok: true; status: 'started' | 'running'; spaceId: s
  */
 export function startTripleIndexRebuild(spaceId: string): RebuildStart {
   if (formMetaOf(spaceId) === null) {
-    return { ok: false, status: 409, code: 'rdf_off', error: `Space '${peerText(spaceId)}' has RDF off or names that are not settled, so it has no triple index to rebuild` };
+    return { ok: false, status: REBUILD_REFUSED_STATUS, code: 'rdf_off', error: `Space '${peerText(spaceId)}' has RDF off or names that are not settled, so it has no triple index to rebuild` };
   }
   const already = rebuildRunsHere(spaceId);
   outsideRequest(() => {

@@ -199,8 +199,8 @@ type Slots = [number[] | null, number[] | null, number[] | null];
 const MIN_ID = 0;
 const bin = (s: number, p: number, o: number): Binary => new Binary(packStatement(s, p, o));
 
-/** The filter of one combination of ids (each `undefined` free), on the index that serves it. */
-function filterOf(s: number | undefined, p: number | undefined, o: number | undefined): Document {
+/** The filter of one combination of ids (each `undefined` free), on the index that serves it; the drift verify's term lookup too (`verify.ts`). */
+export function filterOf(s: number | undefined, p: number | undefined, o: number | undefined): Document {
   if (s !== undefined && p !== undefined && o !== undefined) return { _id: bin(s, p, o) };
   if (s !== undefined && p !== undefined) return { _id: { $gte: bin(s, p, MIN_ID), $lte: bin(s, p, MAX_TERM_ID) } };
   if (s !== undefined && o !== undefined) return { o, s };

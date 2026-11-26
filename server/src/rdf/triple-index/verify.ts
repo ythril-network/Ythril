@@ -30,6 +30,7 @@ import { Binary, type Document } from 'mongodb';
 import { col, asFilter, asUpdate } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { idKeysetPage } from '../../db/id-keyset-page.js';
+import { readStoredById } from '../../db/read-by-id.js';
 import { inChunks } from '../../util/chunks.js';
 import { log, peerText } from '../../util/log.js';
 import { eachSpace } from '../../util/housekeeping-walk.js';
@@ -37,11 +38,11 @@ import { declareStep } from '../../util/housekeeping-signals.js';
 import { intervalJob } from '../../util/interval-job.js';
 import { configuredSpaces } from '../../spaces/space-lookup.js';
 import { RDF_KIND_COLLECTIONS } from '../rdf-members.js';
-import { storedKeyOf, MAX_TERM_ID, type TermRow } from './terms.js';
+import { storedKeyOf, type TermRow } from './terms.js';
 import { formKeyOf, liveCollections, packStatement, readTripleIndexState, recordKeyOf, STATEMENT_BYTES } from './store.js';
 import { hasOutstandingJournalRows, journalAsksForRebuild } from './journal.js';
 import { formMetaOf, projectionOf, statementsOf } from './follow.js';
-import { lagOf } from './read.js';
+import { filterOf, lagOf } from './read.js';
 import { requestTripleIndexRebuild, type RebuildResult } from './rebuild.js';
 
 /** The records one verify run recomputes, at most. */
@@ -138,10 +139,8 @@ async function mismatchesOf(spaceId: string, expected: ReadonlyMap<string, strin
     for (const r of rows) ids.set(r.k, r._id);
   }
   const stored = new Map<string, string>();
-  for (const chunk of inChunks([...expected.keys()], IDS_PER_FIND)) {
-    const rows = await col<{ _id: string; q: Binary }>(live.records).find(asFilter<{ _id: string; q: Binary }>({ _id: { $in: chunk } }), { projection: { _id: 1, q: 1 } }).toArray();
-    for (const r of rows) stored.set(r._id, hexIds(Buffer.from(r.q.buffer)));
-  }
+  const rows = await readStoredById<{ _id: string; q: Binary }>(live.records, [...expected.keys()], { _id: 1, q: 1 });
+  for (const [id, r] of rows) stored.set(id, hexIds(Buffer.from(r.q.buffer)));
   const out: string[] = [];
   for (const [key, statements] of expected) {
     const packed: string[] = [];
@@ -173,8 +172,8 @@ async function sampleTerms(spaceId: string, row: VerifyRow | null): Promise<{ te
   const ids = terms.map(t => t._id);
   const used = new Set<number>();
   const quads = col<Document>(live.quads);
-  // One bounded, indexed look per place a term may stand (`{p,o,s}`, `{o,s,p}`, the `_id` prefix for the subject), stopping at the first hit.
-  const wheres = (id: number): Document[] => [{ p: id }, { o: id }, { _id: { $gte: bin(id, 0, 0), $lte: bin(id, MAX_TERM_ID, MAX_TERM_ID) } }];
+  // One bounded, indexed look per place a term may stand, as a query looks it up (`read.ts` `filterOf`), stopping at the first hit.
+  const wheres = (id: number): Document[] => [filterOf(undefined, id, undefined), filterOf(undefined, undefined, id), filterOf(id, undefined, undefined)];
   for (const id of ids) {
     for (const where of wheres(id)) {
       if (await quads.countDocuments(asFilter<Document>(where), { limit: 1 }) > 0) { used.add(id); break; }
@@ -188,8 +187,6 @@ async function sampleTerms(spaceId: string, row: VerifyRow | null): Promise<{ te
   }
   return { termAfter: ids[ids.length - 1]!, seen, unused, overShare: false };
 }
-
-const bin = (s: number, p: number, o: number): Binary => new Binary(packStatement(s, p, o));
 
 /** What one upkeep step did: the reason it rebuilt for (`null`: none), and the rebuild's outcome when it started one. */
 export interface UpkeepResult { rebuilt: RebuildReason | null; reason: RebuildReason | null; outcome?: RebuildResult['outcome'] }

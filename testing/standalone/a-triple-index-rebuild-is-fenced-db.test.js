@@ -21,7 +21,7 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { setTimeout as sleep } from 'node:timers/promises';
+import { elapse } from '../_shared/sleep.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openSparqlDoors, rdfMeta } from './_sparql-doors.mjs';
 import { landAll, followUntilReady, entityDoc } from './_triple-index-read.mjs';
@@ -73,7 +73,7 @@ describe('a triple index rebuild is fenced', { skip }, () => {
     const { beginTripleIndexBuild, fillTripleIndexBuild, swapTripleIndexBuild } = await rebuildModule();
     const first = await beginTripleIndexBuild(S, { leaseMs: 1 });
     assert.ok(first);
-    await sleep(30);
+    await elapse(30, 'ttl elapses: the first build\'s lease of 1 ms runs out');
     const second = await beginTripleIndexBuild(S);
     assert.ok(second, 'a build row whose lease ran out is taken by the next build');
     await assert.rejects(fillTripleIndexBuild(first), { name: 'RebuildFenced' });
@@ -90,7 +90,7 @@ describe('a triple index rebuild is fenced', { skip }, () => {
     const was = (await state()).buildId;
     const build = await beginTripleIndexBuild(S, { leaseMs: 1 });
     assert.ok(build);
-    await sleep(30);
+    await elapse(30, 'ttl elapses: the build\'s lease of 1 ms runs out');
     await assert.rejects(fillTripleIndexBuild(build), { name: 'RebuildFenced' });
     assert.equal((await state()).buildId, was, 'the index is still the one it was');
     assert.deepEqual(await buildCollections(d, S), [], 'the refused build left no collection');

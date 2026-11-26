@@ -163,6 +163,13 @@ const EXEMPT = {
   ...reasoned('the query barrier counts every edge row above the index\'s appliedPos, fork rows included: the follower applies those rows too (R7), so a fork row not yet applied is a lag like any other', [
     'rdf/triple-index/read.ts:lagOf',
   ]),
+  // ── a rebuild and the drift verify state every row by the record form, as the follower does (bundle-273, Q-764 S4)
+  ...reasoned('a triple index rebuild reads every edge row by `_id` and states each by the record form, as the follower does: a fork row gets no statements, so the rebuilt index states exactly what the follower would', [
+    'rdf/triple-index/rebuild.ts:fillTripleIndexBuild',
+  ]),
+  ...reasoned('the drift verify recomputes a rolling sample of edge rows with the record form and compares each with its record row: a fork row must be in the sample, since its expected statements (none) are compared too', [
+    'rdf/triple-index/verify.ts:verifyTripleIndex',
+  ]),
 };
 
 const INDEX = moduleIndex(SERVER_CODE_ROOTS);
