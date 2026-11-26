@@ -79,6 +79,11 @@ export interface ToolContext {
    */
   viewConstructs?: ReadonlyMap<string, string>;
   /**
+   * Ends when the caller goes away: the MCP connection that carried the call closed (`ToolCallRequest.signal`). Absent on a door with no
+   * connection to watch (the REST tool door). A tool whose run holds a slot for the caller passes it on, so the run stops for a caller who left.
+   */
+  signal?: AbortSignal;
+  /**
    * Who a rate limit counts against: the calling token's id, or the IP when there is none — the key `callTool` uses
    * for `heavy` tools, handed on so a shared module that holds its own rail (`beginIngest`) counts the same caller.
    */

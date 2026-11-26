@@ -47,7 +47,8 @@ export function viewStreamGuard(snapshot: ViewStreamSnapshot): { holds(): boolea
       if (!isSession && (!stored || !tokenIsLive(stored))) return false;
       const owner = viewOwnerOf(snapshot.token);
       const view = resolveOwnView(owner, snapshot.viewId, cfg);
-      if (!view) return false;
+      // A view that became a SPARQL view is read by the RDF doors alone: a record stream of it is one every other door now refuses (`view_is_construct`).
+      if (!view || view.sparql) return false;
       const rights = (stored?.rights ?? snapshot.token.rights) ?? undefined;
       const now = viewReadMembers({ rights, view, area: 'knowledge', needs: 'read', peerId: peerBoundTo(stored ?? snapshot.token), config: cfg }).sort();
       if (now.length !== opened.length || now.some((id, i) => id !== opened[i])) return false;

@@ -33,13 +33,14 @@ import { requireSpaceAuth } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { viewConstructOfRequest, viewReadOfRequest } from '../../spaces/read-scope.js';
 import {
-  rdfExportAct, rdfExportEndingWaitMs, rdfExportHeadAct, rdfExportIdleMs, rdfExportRate, type MembersLeftOut, type RdfExportPage, type RdfExportRefusal,
+  rdfExportAct, rdfExportEndingWaitMs, rdfExportHeadAct, rdfExportIdleMs, rdfExportRate, type RdfExportPage, type RdfExportRefusal,
   type RdfExportStream,
 } from '../../rdf/export-act.js';
 import { trailersFor } from '../../export/export-trailers.js';
 import { closeUnlessFinished, pacedWriter, type ReaderPace } from '../../export/export-reader-pace.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
-import { slotCallerKey } from '../../http/read-caller.js';
+import { abortWhenClientGoes, slotCallerKey } from '../../http/read-caller.js';
+import { setViewHeaders, VIEW_MEMBER_HEADERS } from '../../http/view-member-headers.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { log, peerText, NAME_QUOTED } from '../../util/log.js';
 import type { TokenRights } from '../../config/rights-shape.js';
@@ -49,20 +50,7 @@ import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
 export const rdfExportRouter = Router();
 
 /** The headers a browser may read of an export answer. */
-const EXPOSED = 'Link, Content-Disposition, Ythril-View-Members, Ythril-View-Members-Without-Rdf, Ythril-View-Members-In-Conflict, '
-  + 'Ythril-File-Triples, Ythril-Budget-Chars, Ythril-Budget-Bytes';
-
-/**
- * The view's members on the answer: those exported (`Ythril-View-Members`), and those the caller reads that were left out, RDF off or names
- * not settled (bundle-269 drive, finding 11: only MCP named them). Each a member the guard accepted for the caller, percent-encoded (a
- * header value is Latin-1).
- */
-function setViewHeaders(res: Response, viewMembers: readonly string[] | undefined, leftOut: MembersLeftOut): void {
-  const list = (ids: readonly string[]): string => ids.map(encodeURIComponent).join(', ');
-  if (viewMembers) res.setHeader('Ythril-View-Members', list(viewMembers));
-  if (leftOut.withoutRdf.length > 0) res.setHeader('Ythril-View-Members-Without-Rdf', list(leftOut.withoutRdf));
-  if (leftOut.inConflict.length > 0) res.setHeader('Ythril-View-Members-In-Conflict', list(leftOut.inConflict));
-}
+const EXPOSED = `Link, Content-Disposition, ${VIEW_MEMBER_HEADERS}, Ythril-File-Triples, Ythril-Budget-Chars, Ythril-Budget-Bytes`;
 
 const ROUTE = 'GET /api/brain/spaces/:spaceId/export/rdf';
 
@@ -82,7 +70,7 @@ rdfExportRouter.get('/spaces/:spaceId/export/rdf', globalRateLimit, requireSpace
       format: req.query['format'], edgeDetails: req.query['edgeDetails'], after: req.query['after'], limit: req.query['limit'],
       maxChars: req.query['maxChars'], maxBytes: req.query['maxBytes'], maxTokens: req.query['maxTokens'],
     },
-    caller: token, callerKey: slotCallerKey(req), transport: 'rest' as const, fingerprintOf: schemaFingerprintOf,
+    caller: token, callerKey: slotCallerKey(req), transport: 'rest' as const, fingerprintOf: schemaFingerprintOf, signal: abortWhenClientGoes(res),
   };
   if (req.method === 'HEAD') {
     answerHead(res, input);

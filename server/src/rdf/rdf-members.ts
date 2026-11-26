@@ -21,7 +21,7 @@ import { mayReadArea } from '../auth/reachable-spaces.js';
 import { LIVE_FILE_ROW, NOT_A_FEED_MARKER } from '../files/live-file-row.js';
 import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
 import { RDF_RECORD_KINDS, type RdfRecordKind } from './record-triples.js';
-import { rdfSpaceState, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
+import { rdfSpaceState, RDF_NOT_ENABLED, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
 import type { EXPORT_CONFLICT } from '../export/export-statuses.js';
 import type { BrainCollection } from '../config/types-knowledge.js';
 
@@ -67,6 +67,18 @@ export function rdfMembers(spaces: readonly string[], caller: RdfCaller | undefi
     leftOut.push({ space, code: state.code, status: state.status, error: state.error, ...(state.detail ? { detail: state.detail } : {}) });
   }
   return { members, leftOut };
+}
+
+/**
+ * The members a read left out, by why: RDF off (`withoutRdf`), or names not settled (`inConflict`). The one split every door announces them
+ * by (`Ythril-View-Members-Without-Rdf`, `Ythril-View-Members-In-Conflict`, `membersWithoutRdf`, `membersInConflict`), so no door says a left-out
+ * member under the other reason.
+ */
+export function splitLeftOut(leftOut: readonly RdfMemberLeftOut[]): { withoutRdf: string[]; inConflict: string[] } {
+  return {
+    withoutRdf: leftOut.filter(l => l.code === RDF_NOT_ENABLED).map(l => l.space),
+    inConflict: leftOut.filter(l => l.code !== RDF_NOT_ENABLED).map(l => l.space),
+  };
 }
 
 /** The collection each kind lives in: keyed by kind, so a kind the mapper adds is a compile error here until it names its collection. */

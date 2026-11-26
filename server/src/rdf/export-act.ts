@@ -32,7 +32,7 @@ import type { SpaceMeta } from '@ythril-network/schema';
 import { getConfig } from '../config/loader.js';
 import { idKeysetPage, type IdPage, type IdPageSpec } from '../db/id-keyset-page.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { RDF_KIND_COLLECTIONS, rdfMembers, rdfRowFilter } from './rdf-members.js';
+import { RDF_KIND_COLLECTIONS, rdfMembers, rdfRowFilter, splitLeftOut } from './rdf-members.js';
 import { budgetCeilingZ, defaultBudgetChars, queryInt, resolveBudget, budgetBoundBy, type ResolvedBudget } from '../brain/result-budget.js';
 import { storeFailureAnswer } from '../brain/store-failure.js';
 import { log, refusalOfParse, peerText, NAME_QUOTED } from '../util/log.js';
@@ -53,8 +53,9 @@ import {
 import { ythrilIri } from './ythril-vocabulary.js';
 import { MIN_TRANSFER_BYTES_PER_SECOND } from '../util/pace-window.js';
 import { SPARQL_GRAPH_FORMATS } from './sparql-answer.js';
-import { VIEW_CONSTRUCT_TOO_LARGE } from './view-construct.js';
-import { constructPage } from './export-construct.js';
+import { VIEW_CONSTRUCT_TOO_LARGE, VIEW_SPARQL_INVALID, VIEW_SPARQL_NOT_CONSTRUCT } from './view-construct.js';
+import { SPARQL_ANSWER_TOO_LARGE, SPARQL_TOO_MUCH_READ } from './sparql-refusal.js';
+import { constructPage, RDF_EXPORT_BUDGET_EXCEEDED } from './export-construct.js';
 
 /** The most records one page holds. */
 export const RDF_EXPORT_LIMIT_MAX = 10_000;
@@ -94,7 +95,8 @@ export const RDF_EXPORT_INCOMPLETE = 'rdf_export_incomplete';
 export const RDF_EXPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   RDF_BAD_FORMAT, 'rdf_format_not_acceptable', RDF_BAD_EDGE_DETAILS, RDF_BAD_AFTER, RDF_BAD_LIMIT, RDF_BAD_BUDGET,
   RDF_NOT_ENABLED, 'rdf_base_conflict', RDF_BASE_SHARED, RDF_BASE_NESTED, 'rdf_term_clash', RDF_UNWRITABLE, RDF_EXPORT_BUSY, RDF_EXPORT_INCOMPLETE,
-  VIEW_CONSTRUCT_TOO_LARGE,
+  // A SPARQL view's export (Q-762): the cap, a page past the budget, the read bounds the SPARQL endpoint answers alike, and a stored query no door runs.
+  VIEW_CONSTRUCT_TOO_LARGE, RDF_EXPORT_BUDGET_EXCEEDED, SPARQL_TOO_MUCH_READ, SPARQL_ANSWER_TOO_LARGE, VIEW_SPARQL_INVALID, VIEW_SPARQL_NOT_CONSTRUCT,
 ]);
 
 /** The edge forms, by their parameter value. */
@@ -170,6 +172,11 @@ export interface RdfExportInput {
    * CONSTRUCT's statements over `viewMembers` as the caller reads them, one graph in one document (`constructPage`).
    */
   viewConstruct?: string | undefined;
+  /**
+   * Ends when the caller goes away (the REST response closing before it was written, the MCP connection ending): a SPARQL view's CONSTRUCT
+   * and the reads under it stop at once, and the slot is free. A space's export reads page by page and stops at its door's own end.
+   */
+  signal?: AbortSignal | undefined;
   /** The caller's parameters as sent (a REST query's strings are read as their numbers). */
   params: Record<string, unknown>;
   /** The REST `Accept` header; MCP has none. */
@@ -272,7 +279,9 @@ export function rdfExportHeadAct(input: Omit<RdfExportInput, 'whole'>):
   if ('error' in prepared) return prepared;
   return {
     status: EXPORT_OK,
-    contentType: rdfContentType(prepared.format, rdfVersionOf(prepared.format, prepared.edgeDetails)),
+    // A SPARQL view's GET announces RDF 1.2 only when a statement holds a triple term (`renderGraph`): a HEAD, which runs nothing, states the
+    // version of a graph with none, not the one the `edgeDetails` parameter (which a CONSTRUCT's document ignores) would have chosen.
+    contentType: rdfContentType(prepared.format, prepared.construct ? undefined : rdfVersionOf(prepared.format, prepared.edgeDetails)),
     disposition: rdfContentDisposition(input.spaceId, prepared.format),
     ...(prepared.view ? { viewMembers: prepared.exported.map(e => e.space) } : {}),
     membersLeftOut: { withoutRdf: [...prepared.withoutRdf], inConflict: [...prepared.inConflict] },
@@ -332,8 +341,7 @@ function prepareExport(input: Omit<RdfExportInput, 'whole'>): PreparedExport | R
   const scope = rdfMembers(view ? [...input.viewMembers!] : [spaceId], caller, input.fingerprintOf);
   const exported = scope.members.map(({ space, meta, fingerprint }) => ({ space, meta, fingerprint }));
   const readsFiles = new Set(scope.members.filter(m => m.files).map(m => m.space));
-  const withoutRdf = scope.leftOut.filter(l => l.code === RDF_NOT_ENABLED).map(l => l.space);
-  const inConflict = scope.leftOut.filter(l => l.code !== RDF_NOT_ENABLED).map(l => l.space);
+  const { withoutRdf, inConflict } = splitLeftOut(scope.leftOut);
   const first = scope.leftOut[0];
   if (first && exported.length === 0) return { status: first.status, error: first.error, code: first.code, ...(first.detail ? { detail: first.detail } : {}) };
 
@@ -359,7 +367,7 @@ function prepareExport(input: Omit<RdfExportInput, 'whole'>): PreparedExport | R
   if (!resolved.ok) return { status: EXPORT_BAD_REQUEST, error: resolved.error, code: RDF_BAD_BUDGET };
   return {
     exported, withoutRdf, inConflict, format, edgeDetails, cursor, budget: resolved, limit: parsed.data.limit,
-    after: parsed.data.after, files: (m) => readsFiles.has(m), view,
+    after: parsed.data.after, files: (m) => readsFiles.has(m), view, construct,
   };
 }
 
@@ -416,6 +424,8 @@ interface PageInput {
   files: (space: string) => boolean;
   slot: ExportSlot;
   view: boolean;
+  /** The view is a SPARQL view: the document is its CONSTRUCT's graph, written by `renderGraph` (`constructPage`). */
+  construct: boolean;
 }
 
 /**

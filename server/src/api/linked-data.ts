@@ -55,7 +55,7 @@ import { readSchemaVersionAct } from '../spaces/schema-versions-acts.js';
 import { networkIdsSharedWithCaller } from '../networks/network-spaces.js';
 import { EXPORT_OK } from '../export/export-statuses.js';
 import { chooseRdfFormat, RDF_MEDIA_TYPES, RDF_FORMAT_NOT_ACCEPTABLE } from '../rdf/export-format.js';
-import { rdfMembers, type RdfMember } from '../rdf/rdf-members.js';
+import { rdfMembers, splitLeftOut, type RdfMember } from '../rdf/rdf-members.js';
 import { addressNames, recordOfAddress, shapeOfAddress } from '../rdf/term-reverse.js';
 import { exportReportIri, graphDescription } from '../rdf/export-act.js';
 import { rdfSchemaExportAct, type UsedType, type UsedProperties } from '../rdf/schema-export-act.js';
@@ -75,7 +75,8 @@ import { sparqlLimits } from '../config/sparql-limits.js';
 import { createQuadSource } from '../rdf/quad-source.js';
 import { readAcrossSwaps } from '../rdf/read-across-swaps.js';
 import { fromRdfJs } from '../rdf/rdf-js-terms.js';
-import { constructStatements, VIEW_CONSTRUCT_TOO_LARGE } from '../rdf/view-construct.js';
+import { constructStatements, VIEW_CONSTRUCT_TOO_LARGE, VIEW_SPARQL_INVALID, VIEW_SPARQL_NOT_CONSTRUCT } from '../rdf/view-construct.js';
+import { setViewHeaders, VIEW_MEMBER_HEADERS } from '../http/view-member-headers.js';
 
 /** An address no reader of this caller may read, of any kind: one code for all of them. */
 export const LD_NOT_FOUND = 'ld_not_found';
@@ -92,7 +93,7 @@ export const LD_TRUNCATED_HEADER = 'X-Ythril-Truncated';
 export const LD_CODES: readonly string[] = Object.freeze([
   LD_NOT_FOUND, RDF_FORMAT_NOT_ACCEPTABLE, RDF_NOT_ENABLED, RDF_BASE_CONFLICT, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_TERM_CLASH, RDF_UNWRITABLE,
   SPARQL_TOO_MANY_RESULTS, SPARQL_ANSWER_TOO_LARGE, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT, SPARQL_STORE_UNAVAILABLE, SPARQL_BUSY,
-  VIEW_CONSTRUCT_TOO_LARGE,
+  VIEW_CONSTRUCT_TOO_LARGE, VIEW_SPARQL_INVALID, VIEW_SPARQL_NOT_CONSTRUCT,
 ]);
 
 /** The record kinds `/ld/:spaceId/:kind/:id` answers; a file, an agent, a schema version and a term have routes of their own. */
@@ -324,18 +325,24 @@ function ownConstructView(req: Request): (ViewRecord & { sparql: { query: string
  */
 function constructViewFirst(req: Request, res: Response, next: NextFunction): void {
   const view = ownConstructView(req);
-  if (!view) { next(); return; }
+  // An address a space's base holds is that space's, as it was before a view had one: a base may be spelled `<public url>/ld/@<name>/`, and the
+  // view of that name must not take it from a space the caller reads.
+  if (!view || spaceOfAddress(getPublicBaseUrl() + pathOf(req)) !== null) { next(); return; }
   answered('GET /ld/:spaceId/', (rq, rs) => answerConstructView(rq, rs, view))(req, res);
 }
 
 async function answerConstructView(req: Request, res: Response, view: ViewRecord & { sparql: { query: string } }): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Access-Control-Expose-Headers', 'Retry-After');
+  res.setHeader('Access-Control-Expose-Headers', `Retry-After, ${VIEW_MEMBER_HEADERS}`);
   const choice = chooseRdfFormat({ accept: req.headers['accept'], members: 1, offered: SPARQL_GRAPH_FORMATS });
   if (!choice.ok) { sendProblem(res, { status: choice.status, title: 'Not acceptable', detail: choice.error, code: choice.code, extra: { formats: choice.formats } }); return; }
   const token = req.authToken as { rights?: TokenRights | null; peerInstanceId?: unknown } | undefined;
   const members = viewReadMembers({ rights: token?.rights ?? undefined, view, area: 'knowledge', needs: 'read', peerId: peerBoundTo(token ?? {}) });
   req.authorisedSpaces = members;
+  // The members the CONSTRUCT runs over, and those the caller reads that it leaves out (RDF off, names not settled): said as the export says them,
+  // never a member dropped without a word.
+  const scope = rdfMembers(members, callerOf(req), schemaFingerprintOf);
+  setViewHeaders(res, scope.members.map(m => m.space), splitLeftOut(scope.leftOut));
   const slot = takeSlot('sparql', slotCallerKey(req));
   if (!slot) {
     const busy = busyRefusal('sparql');

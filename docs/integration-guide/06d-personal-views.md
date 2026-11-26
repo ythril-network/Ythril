@@ -89,8 +89,12 @@ them now**: a member you cannot read contributes nothing, exactly as on a plain 
   members' ([SPARQL API](04j-sparql-api.md#a-sparql-view));
 - the view's Linked Data address, `/ld/@people/`: those statements, to you alone.
 
-The CONSTRUCT may make at most 50 000 statements: more is `413 view_construct_too_large` on each door, and nothing of it is
-answered. **Every other door refuses the view** with `409 view_is_construct`: `recall`, `filter`, `graph_traverse` and the
+The CONSTRUCT may make at most 50 000 statements, counted as the graph's own statements (one made twice is one): more is `413 view_construct_too_large` on each door, and nothing of it is
+answered. Any other bound is answered as the SPARQL endpoint answers it, with the same code on every door (a CONSTRUCT that reads more
+than `sparql.maxRecordsRead` records is `413 sparql_too_much_read` on the export, the endpoint and the address). A query in `config.json` that
+is empty, over 16 KB or not a CONSTRUCT is refused when the file loads, or answered `409 view_sparql_not_construct` where only a parse can tell.
+Tools that do not read the view (`recall`, `filter`, the other reads) are not offered it in `tools/list`; their `space` lists plain views only.
+A member whose RDF is off is left out and named, as the export names it: `Ythril-View-Members` and `Ythril-View-Members-Without-Rdf` on the address. **Every other door refuses the view** with `409 view_is_construct`: `recall`, `filter`, `graph_traverse` and the
 other reads, and every write, SPARQL Update included (a view of computed statements has nothing to write into). The
 query lives in `config.json` with the rest of the view: it is not synced and not in a database backup.
 
