@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo } from './_mongo-harness.mjs';
 import { ASYNC_MUTATORS } from './_document-mutators.mjs';
 
@@ -143,6 +144,9 @@ export function watchSessionlessWrites(mongo) {
   let open = 0;
   let writes = 0;
   const missing = [];
+  // The sessions whose transaction is open: a write belongs to the transaction only when it carries one of THESE. A session that is merely
+  // a session (started and never in a transaction, or another writer's) leaves the write outside the group's transaction.
+  const openSessions = new Set();
   const inside = new Set();
   const originals = Object.fromEntries(ASYNC_MUTATORS.map(m => [m, collProto[m]]));
   const sessionOriginals = { start: sessionProto.startTransaction, commit: sessionProto.commitTransaction, abort: sessionProto.abortTransaction };
@@ -151,14 +155,16 @@ export function watchSessionlessWrites(mongo) {
       if (open > 0 && this.collectionName !== 'ythril_counters') {
         writes++;
         inside.add(this.collectionName);
-        const carries = args.some(a => a && typeof a === 'object' && !Array.isArray(a) && a.session && typeof a.session.inTransaction === 'function');
+        const carries = args.some(a => a && typeof a === 'object' && !Array.isArray(a) && a.session && openSessions.has(a.session));
         if (!carries) missing.push(`${m} on ${this.collectionName}`);
       }
       return originals[m].apply(this, args);
     };
   }
-  sessionProto.startTransaction = function started(...args) { open++; return sessionOriginals.start.apply(this, args); };
-  const closing = (orig) => async function closed(...args) { try { return await orig.apply(this, args); } finally { open = Math.max(0, open - 1); } };
+  sessionProto.startTransaction = function started(...args) { open++; openSessions.add(this); return sessionOriginals.start.apply(this, args); };
+  const closing = (orig) => async function closed(...args) {
+    try { return await orig.apply(this, args); } finally { open = Math.max(0, open - 1); openSessions.delete(this); }
+  };
   sessionProto.commitTransaction = closing(sessionOriginals.commit);
   sessionProto.abortTransaction = closing(sessionOriginals.abort);
   return {
@@ -173,6 +179,25 @@ export function watchSessionlessWrites(mongo) {
       sessionProto.abortTransaction = sessionOriginals.abort;
     },
   };
+}
+
+/** The `ythril_write_group_aborts_total` series of `reason` as it stands: what a group's abort adds one to. */
+export async function abortsOf(reason) {
+  const { writeGroupAbortsTotal } = await import('../../server/dist/metrics/write-group-metrics.js');
+  const series = (await writeGroupAbortsTotal.get()).values.find(v => v.labels.reason === reason);
+  assert.ok(series, `ythril_write_group_aborts_total has no series for reason '${reason}'`);
+  return series.value;
+}
+
+/** Store `n` link rows STARTING from `from` (a record of `fromKind`) directly in the test store, each at its derived id; returns their ids. */
+export async function seedLinkRows(coll, from, n, { fromKind = 'fact', toKind = 'entity', seq = 5, first = 0 } = {}) {
+  const { linkIdFor } = await import('../../server/dist/brain/link-id.js');
+  const docs = Array.from({ length: n }, (_, i) => {
+    const to = entityId(first + i + 1);
+    return { _id: linkIdFor(from, fromKind, to, toKind), spaceId: SPACE, from, fromKind, to, toKind, author: AUTHOR, createdAt: NOW, updatedAt: NOW, seq };
+  });
+  for (let at = 0; at < docs.length; at += 10_000) await coll('links').insertMany(docs.slice(at, at + 10_000));
+  return docs.map(d => d._id);
 }
 
 /** Count the transactions started from now on (`startTransaction` on any session) until `restore()`. */
