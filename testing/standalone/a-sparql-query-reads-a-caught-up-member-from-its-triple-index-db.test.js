@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openSparqlDoors, rdfMeta, baseOf, rowTexts } from './_sparql-doors.mjs';
 import { landAll, followUntilReady, collectionsOf, readsOn, bendState, holdLease, restore, entityDoc } from './_triple-index-read.mjs';
+import { rebuildModule } from './_triple-index-rebuild.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'tixr-member';
@@ -60,6 +61,8 @@ describe('a SPARQL query reads a caught-up member from its triple index', { skip
     for (let i = 0; i < 150; i++) docs.push(['entities', entityDoc(S, `p${i}`, `Person ${String(i).padStart(3, '0')}`, 'person', { nick: `n${i}` })]);
     docs.push(['files', { _id: 'docs/a.txt', spaceId: S, path: 'docs/a.txt', sizeBytes: 12, sha256: 'ab'.repeat(32), createdAt: '2026-03-04T05:06:07.000Z', updatedAt: '2026-03-04T05:06:07.000Z', tags: ['f'], seq: 1 }]);
     await landAll(d, S, docs);
+    // An index no rebuild wrote is never read (review finding G1): the rebuild makes it.
+    assert.equal((await (await rebuildModule()).rebuildTripleIndex(S)).outcome, 'built');
     await followUntilReady(d, S);
     names = await collectionsOf(d, S);
   });

@@ -23,6 +23,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openSparqlDoors, rdfMeta, baseOf, rowTexts } from './_sparql-doors.mjs';
 import { landAll, followUntilReady, collectionsOf, findsOn, readsOn, entityDoc } from './_triple-index-read.mjs';
+import { rebuildModule } from './_triple-index-rebuild.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'tixj-join';
@@ -39,6 +40,8 @@ describe('a SPARQL join looks up a hundred bindings in one find', { skip }, () =
     for (let i = 0; i < 100; i++) docs.push(['entities', entityDoc(S, `probe${i}`, `Probe ${String(i).padStart(3, '0')}`, 'probe')]);
     for (let i = 0; i < 2_400; i++) docs.push(['entities', entityDoc(S, `fill${i}`, `Filler ${i}`, 'filler')]);
     await landAll(d, S, docs);
+    // An index no rebuild wrote is never read (review finding G1): the rebuild makes it.
+    assert.equal((await (await rebuildModule()).rebuildTripleIndex(S)).outcome, 'built');
     await followUntilReady(d, S);
     names = await collectionsOf(d, S);
   });

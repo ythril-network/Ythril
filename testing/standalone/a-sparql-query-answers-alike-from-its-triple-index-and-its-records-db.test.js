@@ -18,22 +18,38 @@
  * 1. a positioned write held open (its band not yet released);
  * 2. two overlapping writes to one record;
  * 3. a schema change, and its revert;
- * 4. a raw delete at the db door, as a 5.6 build makes it (no position, the journal's case);
+ * 4. a delete a 5.6 build makes, through the driver's own client (no position, no journal row, no tombstone), found by the re-upgrade
+ *    detector, which holds the member's index to its records until a rebuild;
  * 5. a lagging member (its index behind and its follower held by another process).
+ *
+ * ## An answer from the index is checked as one from the index (review finding G4)
+ *
+ * A comparison of two answers that both came from the records proves nothing, so every case that ends with the index ready asserts
+ * `readPaths` says `index` for the member after `followUntilReady` (or after the rebuild a stale index needs), and every case that holds
+ * the member to its records asserts `records`. The index is made by a rebuild first: an index no rebuild wrote is never read (G1).
+ *
+ * ## Duplicates (review point V6)
+ *
+ * The records path states a statement once per record, the index once per space. The data holds the cases that could differ: one author on
+ * every record (the agent's statements), edges that share an end, and a record whose tags repeat a word. A SELECT without DISTINCT over all
+ * of them compares with its multiplicity. Two edges of one label between one pair cannot be stored (`edge_identity` is unique on
+ * `from, to, label, fromKind, toKind`), so the records path's edge rule has no second edge to see.
  *
  * ## Seen red
  *
  * On bcb4d7d63 (no index read): the first comparison fails at the check that the default source read the member from its index
- * (`readPaths` is not a function).
+ * (`readPaths` is not a function). On d5192c4f6 (the corrected cases): the delete a 5.6 build makes is not seen (case 4 answers the record
+ * the index still states) and the index is read after no rebuild wrote it.
  *
  * Run: a Mongo the harness accepts, npm run build:server, then
  *      node --test testing/standalone/a-sparql-query-answers-alike-from-its-triple-index-and-its-records-db.test.js
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mongoSkipReason } from './_mongo-harness.mjs';
+import { mongoSkipReason, openFixtureMongo } from './_mongo-harness.mjs';
 import { openSparqlDoors, rdfMeta, baseOf } from './_sparql-doors.mjs';
 import { landAll, followUntilReady, bendState, holdLease, restore, entityDoc, edgeDoc } from './_triple-index-read.mjs';
+import { rebuildModule } from './_triple-index-rebuild.mjs';
 
 const skip = await mongoSkipReason();
 const A = 'tixe-a';
@@ -74,6 +90,8 @@ function dataset(s) {
   ent('engines', 'Engines Ltd', 'Org', { size: 12 });
   edge('k1', 'ada', 'charles', 'knows', { properties: { since: 'friend' }, weight: 0.9 });
   edge('w1', 'charles', 'engines', 'worksFor');
+  // V6: a record whose tags repeat a word states it once. (A second edge of one label between one pair cannot be stored: `edge_identity` is unique.)
+  ent('twice', 'Twice', 'Person', { age: 5 }, { tags: ['dup', 'dup', 'solo'] });
   docs.push(['facts', { _id: 'f1', spaceId: s, seq: 1, fact: 'Ledger entry', type: 'note', properties: { weight: 2 }, tags: [], createdAt: STAMP, updatedAt: STAMP, author: { instanceId: 'tix-author', instanceLabel: 'Tix' } }]);
   docs.push(['links', { _id: 'l1', spaceId: s, from: 'f1', fromKind: 'fact', to: 'ada', toKind: 'entity', seq: 1 }]);
   docs.push(['chrono', { _id: 'c1', spaceId: s, seq: 1, title: 'Launch', type: 'event', status: 'upcoming', startsAt: '2026-07-04T10:00:00Z', endsAt: '2026-07-04T11:00:00Z', tags: [], createdAt: STAMP, updatedAt: STAMP, author: { instanceId: 'tix-author', instanceLabel: 'Tix' } }]);
@@ -176,6 +194,13 @@ async function alike(why, names) {
   return paths;
 }
 
+/** Every read of `space` in `paths` took `path`, and there was one (an answer compared with itself proves nothing: review finding G4). */
+function readAll(paths, space, path, why) {
+  const mine = paths.filter(p => p.space === space);
+  assert.ok(mine.length > 0, `${why}: ${space} was read at all`);
+  assert.deepEqual(mine.filter(p => p.path !== path), [], `${why}: ${space} was read from its ${path}`);
+}
+
 describe('a SPARQL query answers alike from its triple index and its records', { skip }, () => {
   before(async () => {
     d = await openSparqlDoors({ suite: 'b273-tixe', spaces: [{ id: A, meta: rdfMeta(A, { typeSchemas: SCHEMA }) }, { id: B, meta: rdfMeta(B, { typeSchemas: SCHEMA }) }] });
@@ -184,6 +209,8 @@ describe('a SPARQL query answers alike from its triple index and its records', {
     quadSource = await import('../../server/dist/rdf/quad-source.js');
     await landAll(d, A, dataset(A));
     await landAll(d, B, dataset(B).filter(([c]) => c === 'entities'));
+    // An index no rebuild wrote is never read (review finding G1): the rebuild makes both, the follower keeps them caught up.
+    for (const space of [A, B]) assert.equal((await (await rebuildModule()).rebuildTripleIndex(space)).outcome, 'built');
     await followUntilReady(d, A);
     await followUntilReady(d, B);
   });
@@ -210,7 +237,8 @@ describe('a SPARQL query answers alike from its triple index and its records', {
     }, 'test.held');
     await landed;
     try { await alike('a write held open', ['fixed 1 type match', 'fixed 2 property filter', 'every statement']); } finally { release(); await held; }
-    await alike('after the held write', ['fixed 1 type match', 'fixed 2 property filter']);
+    await followUntilReady(d, A);
+    readAll(await alike('after the held write', ['fixed 1 type match', 'fixed 2 property filter']), A, 'index', 'after the held write');
   });
 
   it('two overlapping writes to one record answer alike', async () => {
@@ -233,22 +261,44 @@ describe('a SPARQL query answers alike from its triple index and its records', {
     }
     assert.ok(compared > 0, 'at least one pass compared while the records stood still');
     for (const w of await Promise.all(writes)) assert.ok(w.status === 200 || w.status === 409, w.text);
-    await alike('after the overlapping writes', ['fixed 8 OPTIONAL', 'fixed 2 property filter', 'every statement']);
+    await followUntilReady(d, A);
+    readAll(await alike('after the overlapping writes', ['fixed 8 OPTIONAL', 'fixed 2 property filter', 'every statement']), A, 'index', 'after the overlapping writes');
   });
 
   it('a schema change and its revert answer alike', async () => {
     const meta = (cfg) => cfg.spaces.find(s => s.id === A).meta;
     let before_;
     await d.loader.mutateConfig(cfg => { before_ = JSON.parse(JSON.stringify(meta(cfg))); meta(cfg).typeSchemas.entity.Person.propertySchemas.shoe = { type: 'number' }; });
-    try { await alike('a schema change', ['fixed 1 type match', 'fixed 8 OPTIONAL', 'every statement']); } finally {
+    try {
+      readAll(await alike('a schema change', ['fixed 1 type match', 'fixed 8 OPTIONAL', 'every statement']), A, 'records', 'a schema change');
+    } finally {
       await d.loader.mutateConfig(cfg => { cfg.spaces.find(s => s.id === A).meta = before_; });
     }
-    await alike('its revert', ['fixed 1 type match', 'fixed 8 OPTIONAL', 'every statement']);
+    // The follower met the other form and marked the index stale: a rebuild is what makes it ready again (design-r2 R3).
+    assert.equal((await d.col(`${A}_rdf_state`).findOne({ _id: 'state' })).status, 'stale', 'the index built for another form is stale');
+    assert.equal((await (await rebuildModule()).rebuildTripleIndex(A)).outcome, 'built');
+    await followUntilReady(d, A);
+    readAll(await alike('its revert', ['fixed 1 type match', 'fixed 8 OPTIONAL', 'every statement']), A, 'index', 'its revert');
   });
 
-  it('a raw delete at the db door, as a 5.6 build makes it, answers alike', async () => {
-    await d.col(d.spaceCollection(A, 'entities')).deleteOne({ _id: 'product29' });
-    await alike('a raw delete', ['BSBM Q1', 'every statement', 'fixed 9 aggregate']);
+  it('a delete a 5.6 build makes through its own client answers alike once the re-upgrade detector has run', async () => {
+    const owed = await import('../../server/dist/sync/positions-owed.js');
+    // The driver's own client is not the server's door: no journal row, no tombstone, no position (what a 5.6 build writes).
+    const raw = await openFixtureMongo('b273-tixe');
+    try {
+      await raw.col(d.spaceCollection(A, 'entities')).deleteOne({ _id: 'product29' });
+      // The counter moved under a 5.6 allocation (`seq` above `seqSeenBy6`), which the detector reads as a re-upgrade of the space.
+      await raw.col('ythril_counters').updateOne({ _id: A }, { $set: { seq: 987654, seqSeenBy6: 1, positionsReadyAt: '2026-10-01T00:00:00.000Z' }, $unset: { positionsOwed: '' } }, { upsert: true });
+    } finally { await raw.close(); }
+    await d.loader.mutateConfig((cfg) => { cfg.positionsSince ??= '2026-10-01T00:00:00.000Z'; });
+    await owed.detectReupgrade();
+    assert.equal((await d.col('ythril_counters').findOne({ _id: A })).positionsOwed, 'repair', 'the detector found the space');
+    readAll(await alike('a delete a 5.6 build made', ['BSBM Q1', 'every statement', 'fixed 9 aggregate']), A, 'records', 'a delete a 5.6 build made');
+    assert.equal((await answer('SELECT ?s WHERE { ?s ?p ?o } LIMIT 100000', [A], false)).texts.some(t => t.includes('product29')), false, 'the records no longer state product29');
+    assert.equal((await (await rebuildModule()).rebuildTripleIndex(A)).outcome, 'built');
+    await followUntilReady(d, A);
+    readAll(await alike('after the rebuild', ['BSBM Q1', 'every statement', 'fixed 9 aggregate']), A, 'index', 'after the rebuild');
+    await d.col('ythril_counters').updateOne({ _id: A }, { $set: { positionsReadyAt: '2026-10-01T00:00:00.000Z' }, $unset: { positionsOwed: '' }, $max: { seqSeenBy6: 987654 } });
   });
 
   it('a lagging member answers alike', async () => {
