@@ -401,6 +401,10 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'ingest_status', area: 'knowledge', needs: 'read' },
   { tool: 'space_stats', area: 'knowledge', needs: 'read' },
   { tool: 'space_reindex', area: 'knowledge', needs: 'admin' },
+  // The SPARQL triple index's rebuild rewrites what every query of the space reads (Q-764), so the rung of the other rebuilds; its status
+  // says only how a query is answered.
+  { tool: 'space_rdf_rebuild', area: 'knowledge', needs: 'admin' },
+  { tool: 'space_rdf_index', area: 'knowledge', needs: 'read' },
   // The BACKFILL, priced with its route rather than with the other `write` mutations: it rewrites what
   // recall can find, and the route has sat at `knowledge: admin` beside `rebuild-indexes` since 4.4.
   { tool: 'space_reembed', area: 'knowledge', needs: 'admin' },

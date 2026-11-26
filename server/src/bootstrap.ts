@@ -185,6 +185,9 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   // with no peers never syncs, and that is precisely the space whose whole tombstone collection is droppable.
   const { startTombstonePrune } = await import('./brain/tombstone-prune.js');
   startTombstonePrune();
+  // Rebuilds a SPARQL triple index that is missing, stale, of another form or drifted, and verifies a rolling sample of each (Q-764).
+  const { startTripleIndexUpkeep } = await import('./rdf/triple-index/verify.js');
+  startTripleIndexUpkeep();
   // Redacts the `changes` payload on brain record-edit audit entries past their shorter retention.
   // The entry itself keeps `audit.retentionDays` — only the user content inside it expires early.
   const { startAuditChangeRetention } = await import('./audit/change-retention.js');

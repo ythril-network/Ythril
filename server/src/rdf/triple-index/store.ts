@@ -46,10 +46,37 @@ import { termIds, MAX_TERM_ID } from './terms.js';
 export const TRIPLE_INDEX_PARTS: readonly SpacePart[] = Object.freeze(['rdfTerms', 'rdfQuads', 'rdfRecords', 'rdfState', 'rdfDirty'] satisfies SpacePart[]);
 const TRIPLE_INDEX_SUFFIXES: ReadonlySet<string> = new Set(TRIPLE_INDEX_PARTS.map(p => SPACE_COLLECTIONS[p]));
 
-/** Whether `name` is a collection of some space's triple index. */
+/** Whether `name` is a collection of some space's triple index: a live one, or one a rebuild writes before its swap. */
 export function isTripleIndexCollection(name: string): boolean {
   const parsed = parseSpaceCollection(name);
-  return parsed !== null && TRIPLE_INDEX_SUFFIXES.has(parsed.suffix);
+  if (parsed !== null) return TRIPLE_INDEX_SUFFIXES.has(parsed.suffix);
+  const cut = name.indexOf('_');
+  return cut > 0 && BUILD_COLLECTION.test(name.slice(cut + 1)) && spaceCollectionNameable(name.slice(0, cut));
+}
+
+/** A space id `spaceCollection` accepts (the one rule of what may name a collection). */
+function spaceCollectionNameable(spaceId: string): boolean {
+  try { spaceCollection(spaceId, 'rdfState'); return true; } catch { return false; }
+}
+
+/** The three collections one build of the index writes: the live ones, or a rebuild's own (named by its build id) before its swap. */
+export interface IndexCollections { terms: string; quads: string; records: string }
+
+/** The live collections of `spaceId`'s index: what the follower writes and a query reads. */
+export const liveCollections = (spaceId: string): IndexCollections => ({
+  terms: spaceCollection(spaceId, 'rdfTerms'), quads: spaceCollection(spaceId, 'rdfQuads'), records: spaceCollection(spaceId, 'rdfRecords'),
+});
+
+/** A build id: 16 hex characters, so the collections it names stay short and match {@link BUILD_COLLECTION}. */
+const BUILD_ID = /^[0-9a-f]{16}$/;
+/** The suffix of a rebuild's own collection: `rdf_b<build id>_<part>`. */
+const BUILD_COLLECTION = /^rdf_b[0-9a-f]{16}_(terms|quads|records)$/;
+
+/** The collections a rebuild of `spaceId` with `buildId` writes before its swap (design-r2 R5); a build id of another shape throws. */
+export function buildCollectionsOf(spaceId: string, buildId: string): IndexCollections {
+  if (!BUILD_ID.test(buildId)) throw new Error('a triple index build id is 16 hex characters');
+  const at = (part: string): string => `${spaceCollection(spaceId, 'rdfState').slice(0, -SPACE_COLLECTIONS.rdfState.length)}rdf_b${buildId}_${part}`;
+  return { terms: at('terms'), quads: at('quads'), records: at('records') };
 }
 
 /** The bytes of one statement id: three big-endian uint32 term ids. */
@@ -78,16 +105,81 @@ export function formKeyOf(meta: SpaceMeta): string {
 /** How far the index is: being filled (`catching-up`), caught up (`ready`), or built for a form the space no longer has (`stale`). */
 export type TripleIndexStatus = 'catching-up' | 'ready' | 'stale';
 
-export interface TripleIndexState { _id: 'state'; appliedPos: number; formKey: string; status: TripleIndexStatus }
+/** `buildId`: the rebuild the live collections came from (`rebuild.ts`); absent on an index the follower started and nobody built whole. */
+export interface TripleIndexState { _id: 'state'; appliedPos: number; formKey: string; status: TripleIndexStatus; buildId?: string }
 interface LeaseRow { _id: 'lease'; owner: string; until: number }
+/**
+ * The rebuild's fence (design-r2 R5): the build that may write, until when. Every batch of a build writes this row in its transaction on the
+ * condition that it is still its build's and not run out (`fenceTripleIndexBuild`), as `files/media/lease.ts` `writeUnderClaim` fences a
+ * job. The follower's journal batch writes it too (`journalClears`), so a clear and a build's start never pass each other unseen.
+ */
+interface BuildRow { _id: 'build'; buildId?: string; until?: number; startedAt?: number; fencedWrites?: number; journalClears?: number }
 interface QuadRow { _id: Binary; s: number; p: number; o: number; nK: number; nF: number }
 interface RecordRow { _id: string; pos: number; q: Binary }
 
 const stateCollection = (spaceId: string) => col<TripleIndexState>(spaceCollection(spaceId, 'rdfState'));
 /** The same collection, read for its lease row. */
 const leaseCollection = (spaceId: string) => col<LeaseRow>(spaceCollection(spaceId, 'rdfState'));
-const quadCollection = (spaceId: string) => col<QuadRow>(spaceCollection(spaceId, 'rdfQuads'));
-const recordCollection = (spaceId: string) => col<RecordRow>(spaceCollection(spaceId, 'rdfRecords'));
+/** The same collection, read for its build row. */
+const buildCollection = (spaceId: string) => col<BuildRow>(spaceCollection(spaceId, 'rdfState'));
+
+/** A build that lost its row (another build took it, or its lease ran out): nothing it writes may land. */
+export class RebuildFenced extends Error {
+  constructor(spaceId: string, buildId: string) {
+    super(`the triple index build ${buildId} of space '${spaceId}' no longer holds its build row: its lease ran out or another build took it`);
+    this.name = 'RebuildFenced';
+  }
+}
+
+/**
+ * Take the build row of `spaceId` for `buildId` for `ms`: false when another build holds one that has not run out. A row without a lease
+ * (written by the follower's journal batch) is free.
+ */
+export async function claimTripleIndexBuild(spaceId: string, buildId: string, ms: number): Promise<boolean> {
+  const now = Date.now();
+  const set = { buildId, until: now + ms, startedAt: now };
+  const r = await buildCollection(spaceId).updateOne(
+    asFilter<BuildRow>({ _id: 'build', $or: [{ until: { $lt: now } }, { until: { $exists: false } }] }), asUpdate<BuildRow>({ $set: set }));
+  if (r.matchedCount === 1) return true;
+  const inserted = await buildCollection(spaceId).updateOne(asFilter<BuildRow>({ _id: 'build' }), asUpdate<BuildRow>({ $setOnInsert: set }), { upsert: true });
+  return inserted.upsertedCount === 1;
+}
+
+/**
+ * The fence: in `session`, renew `buildId`'s lease on the build row for `ms`, on the condition that the row is still its build's and has not
+ * run out; throws {@link RebuildFenced} otherwise, so the transaction it sits in writes nothing.
+ */
+export async function fenceTripleIndexBuild(spaceId: string, buildId: string, ms: number, session?: ClientSession): Promise<void> {
+  const now = Date.now();
+  const held = await buildCollection(spaceId).updateOne(asFilter<BuildRow>({ _id: 'build', buildId, until: { $gt: now } }),
+    asUpdate<BuildRow>({ $set: { until: now + ms }, $inc: { fencedWrites: 1 } }), session ? { session } : {});
+  if (held.matchedCount === 0) throw new RebuildFenced(spaceId, buildId);
+}
+
+/** Give the build row back, if `buildId` still holds it. */
+export async function releaseTripleIndexBuild(spaceId: string, buildId: string): Promise<void> {
+  await buildCollection(spaceId).updateOne(asFilter<BuildRow>({ _id: 'build', buildId }), asUpdate<BuildRow>({ $set: { until: 0 } }));
+}
+
+/** The build that holds `spaceId`'s build row now, or `null` when none does. */
+export async function runningTripleIndexBuild(spaceId: string): Promise<{ buildId: string; startedAt: number } | null> {
+  const row = await buildCollection(spaceId).findOne(asFilter<BuildRow>({ _id: 'build' })) as BuildRow | null;
+  return row?.buildId && typeof row.until === 'number' && row.until > Date.now() ? { buildId: row.buildId, startedAt: row.startedAt ?? 0 } : null;
+}
+
+/**
+ * The swap's state write, in `session` (fenced by the caller): the index is `buildId`'s, of `formKey`, applied up to `appliedPos`, with
+ * `status`. Replaces whatever state the index had.
+ */
+export async function writeBuiltState(spaceId: string, state: Omit<TripleIndexState, '_id'>, session: ClientSession): Promise<void> {
+  // The replacement carries no `_id`: an upsert takes it from the filter.
+  await stateCollection(spaceId).replaceOne(asFilter<TripleIndexState>({ _id: 'state' }), { ...state }, { upsert: true, session });
+}
+
+/** Set the status of `buildId`'s index, in `session`, when the index is still that build's. */
+export async function setBuiltStatus(spaceId: string, buildId: string, status: TripleIndexStatus, session: ClientSession): Promise<void> {
+  await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state', buildId }), asUpdate<TripleIndexState>({ $set: { status } }), { session });
+}
 /** The write journal (`journal.ts`): the apply clears the rows it was handed, in its own transaction. */
 const journalCollection = (spaceId: string) => col<{ _id: string }>(spaceCollection(spaceId, 'rdfDirty'));
 
@@ -166,7 +258,7 @@ function statementIdsOf(row: RecordRow | undefined): string[] {
 }
 
 /** What one batch did: applied, found the index built for another form (now `stale`), or met a follower that holds the lease. */
-export type BatchOutcome = 'applied' | 'stale' | 'lease-lost' | 'not-started';
+export type BatchOutcome = 'applied' | 'stale' | 'lease-lost' | 'not-started' | 'building';
 
 export interface TripleIndexBatch {
   /** The form the batch's statements were computed with (`formKeyOf` of the meta snapshot). */
@@ -187,6 +279,15 @@ export interface TripleIndexBatch {
  * the batch's (the index is marked `stale` instead), when another follower holds the lease, or when the index has no state row.
  */
 export async function applyTripleIndexBatch(spaceId: string, batch: TripleIndexBatch): Promise<BatchOutcome> {
+  try {
+    return await applyInTransaction(spaceId, batch);
+  } catch (err) {
+    if (err instanceof BuildRunning) return 'building';
+    throw err;
+  }
+}
+
+async function applyInTransaction(spaceId: string, batch: TripleIndexBatch): Promise<BatchOutcome> {
   return inBoundedTransaction(async (session) => {
     const lease = await leaseCollection(spaceId).findOne(asFilter<LeaseRow>({ _id: 'lease' }), { session }) as LeaseRow | null;
     if (lease?.owner !== batch.owner) return 'lease-lost';
@@ -201,7 +302,14 @@ export async function applyTripleIndexBatch(spaceId: string, batch: TripleIndexB
     if (moved.matchedCount === 0) {
       return await stateCollection(spaceId).countDocuments(asFilter<TripleIndexState>({ _id: 'state' }), { session, limit: 1 }) === 0 ? 'not-started' : 'stale';
     }
-    await applyChanges(spaceId, batch.changes, session);
+    // A journal row is cleared only while no rebuild runs: a build swaps in what it read, and a row cleared after it read that record would
+    // take the record's change with it. The build row is written here, so a build that starts meanwhile conflicts with this transaction.
+    if ((batch.clearJournal?.length ?? 0) > 0) {
+      const build = await buildCollection(spaceId).findOneAndUpdate(asFilter<BuildRow>({ _id: 'build' }), asUpdate<BuildRow>({ $inc: { journalClears: 1 } }),
+        { upsert: true, returnDocument: 'after', session });
+      if (typeof build?.until === 'number' && build.until > Date.now()) throw new BuildRunning();
+    }
+    await applyRecordChanges(spaceId, batch.changes, session);
     for (const chunk of inChunks([...batch.clearJournal ?? []], ROWS_PER_COMMAND)) {
       await journalCollection(spaceId).deleteMany(asFilter<{ _id: string }>({ _id: { $in: chunk } }), { session });
     }
@@ -209,12 +317,23 @@ export async function applyTripleIndexBatch(spaceId: string, batch: TripleIndexB
   });
 }
 
-/** The diff of every change against its stored row, applied in `session`. */
-async function applyChanges(spaceId: string, changes: readonly RecordChange[], session: ClientSession): Promise<void> {
+/** A journal batch met a running rebuild: its transaction is aborted and the batch answers `building`. */
+class BuildRunning extends Error {
+  constructor() { super('a rebuild of the triple index runs: the journal is cleared after its swap'); this.name = 'BuildRunning'; }
+}
+
+/**
+ * The diff of every change against its stored row in `target` (the live collections, or a rebuild's own), applied in `session`: the one
+ * write of statements, counts and record rows, which the follower and a rebuild both go through.
+ */
+export async function applyRecordChanges(spaceId: string, changes: readonly RecordChange[], session: ClientSession,
+  target: IndexCollections = liveCollections(spaceId)): Promise<void> {
   if (changes.length === 0) return;
   const keys = changes.map(c => recordKeyOf(c.kind, c.id));
-  const stored = await readStoredById(spaceCollection(spaceId, 'rdfRecords'), keys, 'all', { session }) as unknown as Map<string, RecordRow>;
-  const ids = await termIds(spaceId, changes.flatMap(c => c.statements.flat()), session);
+  const stored = await readStoredById(target.records, keys, 'all', { session }) as unknown as Map<string, RecordRow>;
+  const ids = await termIds(spaceId, changes.flatMap(c => c.statements.flat()), session, target.terms);
+  const quadCollection = (_space: string) => col<QuadRow>(target.quads);
+  const recordCollection = (_space: string) => col<RecordRow>(target.records);
   const idOf = (key: string): number => {
     const id = ids.get(key);
     if (id === undefined || id > MAX_TERM_ID) throw new Error(`the triple index of space '${spaceId}' has no term id for a key it was given`);

@@ -32,6 +32,7 @@ import { schema_validateTool } from './schema-validate.js';
 import { helpTool } from './help.js';
 import { view_listTool, view_getTool, view_createTool, view_updateTool, view_deleteTool, view_copyTool, view_orphansTool, view_claimTool, view_purge_retiredTool, view_migrationTool } from './views.js';
 import { list_embed_jobsTool, retry_embed_recordTool, retry_embed_mediaTool, space_reindexTool, space_reembedTool } from './embed.js';
+import { space_rdf_rebuildTool, space_rdf_indexTool } from './rdf-index.js';
 import { list_forksTool, resolve_forkTool } from './forks.js';
 
 export type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
@@ -103,6 +104,8 @@ export const ALL_TOOLS: ToolHandler[] = [
   save_spaceTool,
   space_reindexTool,
   space_reembedTool,
+  space_rdf_rebuildTool,
+  space_rdf_indexTool,
   delete_space_dataTool,
   list_tokensTool,
   save_bulkTool,

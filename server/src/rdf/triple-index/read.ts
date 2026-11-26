@@ -63,7 +63,15 @@ const PAGE_GROWTH = 2;
 const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
 
 /** Why a member is read from its records, or that it is read from its index. */
-export type IndexVerdict = { read: 'index' } | { read: 'records'; why: 'absent' | 'stale' | 'other-form' | 'catching-up' | 'lagging' | 'journal' };
+export type IndexVerdict = { read: 'index'; buildId: string | null } | { read: 'records'; why: 'absent' | 'stale' | 'other-form' | 'catching-up' | 'lagging' | 'journal' };
+
+/**
+ * The build `spaceId`'s index is now (`null`: none, or one the follower started and no rebuild wrote). A query pins it in its verdict and
+ * asks again at its end (design-r2 R5): another answer means a rebuild swapped the collections it read.
+ */
+export async function indexBuildOf(spaceId: string): Promise<string | null> {
+  return (await readTripleIndexState(spaceId))?.buildId ?? null;
+}
 
 /**
  * How a query asks the follower to catch a space up: registered by the application at its start (`follow.ts` `followRecordWrites`), as the
@@ -85,8 +93,11 @@ function followInBackground(spaceId: string): void {
 /** The time a store call may take: what is left of `deadline`, at most {@link FIND_MAX_MS}, at least 1 ms. */
 const msLeft = (deadline: number): number => Math.max(1, Math.min(FIND_MAX_MS, Math.ceil(deadline - Date.now())));
 
-/** How many visible records and tombstones of `spaceId` stand above `appliedPos`, counted up to `CATCH_UP_MAX_LAG + 1`. */
-async function lagOf(spaceId: string, appliedPos: number, deadline: number): Promise<number> {
+/**
+ * How many visible records and tombstones of `spaceId` stand above `appliedPos`, counted up to `CATCH_UP_MAX_LAG + 1`: the barrier's
+ * positioned half, which the drift verify (`verify.ts`) asks too.
+ */
+export async function lagOf(spaceId: string, appliedPos: number, deadline: number): Promise<number> {
   const parts = [...RDF_KIND_COLLECTIONS.map(k => k.collection), 'tombstones' as const];
   let lag = 0;
   for (const part of parts) {
@@ -106,7 +117,7 @@ async function verdictNow(spaceId: string, meta: SpaceMeta, deadline: number): P
   if (lag > 0) return { verdict: { read: 'records', why: 'lagging' }, lag };
   if (await hasOutstandingJournalRows(spaceId)) return { verdict: { read: 'records', why: 'journal' }, lag: 1 };
   if (state.status !== 'ready') return { verdict: { read: 'records', why: 'catching-up' }, lag: 1 };
-  return { verdict: { read: 'index' }, lag: 0 };
+  return { verdict: { read: 'index', buildId: state.buildId ?? null }, lag: 0 };
 }
 
 /**
