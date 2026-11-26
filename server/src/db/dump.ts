@@ -27,6 +27,7 @@ import { log } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
 import { boundedClientOptions, closeWithinBound } from './bounded-client-options.js';
 import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
+import { isTripleIndexCollection } from '../rdf/triple-index/store.js';
 import { redactUri } from '../config/mongo-uri.js';
 
 const MANIFEST_VERSION = 1 as const;
@@ -119,7 +120,8 @@ export async function dumpDatabase(uri: string, destDir: string, opts: DumpOptio
     // of the dump, they are also left alone by a restore, which drops only what its dump names.
     const collectionNames = collectionInfos
       .map(c => c.name)
-      .filter(n => !n.startsWith('system.') && !READ_SPILL_COLLECTIONS.includes(n))
+      // The triple index (bundle-273) stays out too: it is derived from the records, and a restore drops it so the follower starts it again.
+      .filter(n => !n.startsWith('system.') && !READ_SPILL_COLLECTIONS.includes(n) && !isTripleIndexCollection(n))
       .sort();
 
     const manifestCollections: DumpManifest['collections'] = [];

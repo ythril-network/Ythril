@@ -80,9 +80,15 @@ const EXEMPT_COLLECTIONS = new Map([
   // can neither be raced by them nor refill them; the record writes the run makes (quiet stamps, rewrites) go to COVERED collections and ask the gate.
   ['schema_convert_run', 'the schema conversion run\'s own progress row: bookkeeping of a background pass, no record, local and never synced'],
   ['schema_convert_items', 'the records a conversion could not convert, as review findings derived from the records: never landed or restored by an act, re-derived by the next run'],
+  // Bundle-273 (Q-764): the triple index, derived from the records by its follower after each positioned write; a backup leaves it out and a
+  // restore drops it, so an act neither lands nor restores a row of it.
+  ['rdf_terms', 'the triple index\'s term dictionary, derived from the records by its follower: never landed or restored by an act'],
+  ['rdf_quads', 'the triple index\'s statements, derived from the records by its follower: never landed or restored by an act'],
+  ['rdf_records', 'the triple index\'s statement ids per record, derived from the records by its follower: never landed or restored by an act'],
+  ['rdf_state', 'the triple index\'s follower state and lease: bookkeeping of a derivation, no record'],
 ]);
-/** The fewest exemption rows: the eight derived or bookkeeping collections of bundle-266, and the two of the conversion run (bundle-284). Fewer means a row was dropped, not that a collection became covered. */
-const EXEMPT_COLLECTIONS_FLOOR = 10;
+/** The fewest exemption rows: the eight derived or bookkeeping collections of bundle-266, and the two of the conversion run (bundle-284), and the four of the triple index (bundle-273). Fewer means a row was dropped, not that a collection became covered. */
+const EXEMPT_COLLECTIONS_FLOOR = 14;
 
 /** The per-space collection suffixes, read from the registry the server builds every space collection name from. */
 const { SPACE_COLLECTIONS } = await import('../../server/dist/db/space-collection.js');

@@ -128,6 +128,14 @@ const EXEMPT = [
     why: 'the delete\'s settle: rows THIS instance landed at or after the position the removal began (less a lookback), to take back as stragglers. A one-off bound on what is deleted, not a page of positions a reader continues',
     holds: (e) => (/removalBegan\s*-\s*SETTLE_LOOKBACK_MICROS/.test(bodyOf(rawByFile.get(e.file) ?? '', e.function)) ? null : 'the range is not the removal\'s start position less the lookback'),
   },
+  // Bundle-273 (Q-764, design-r2 R1): the triple index's follower reads every visible row ABOVE `appliedPos` whatever the settled cap, which
+  // `readAfterPosition` exists to impose, and merges seven collections by position. A tie at a full batch's last position is left whole to the
+  // next batch (`withoutTrailingTie`, in `followOnce`), so no row of a tie is stepped past.
+  ...['ordering', 'range'].map((kind) => ({
+    file: 'server/src/rdf/triple-index/follow.ts', fn: 'changesAfter', kind, by: 'slot',
+    why: 'the triple index follower: every row above where it stands, uncapped (R1), merged across the record collections and tombstones by position; its caller leaves a trailing tie to the next batch',
+    holds: () => (/withoutTrailingTie\(/.test(rawByFile.get('server/src/rdf/triple-index/follow.ts') ?? '') ? null : 'the follower no longer leaves a trailing tie to the next batch'),
+  })),
 ];
 
 const exemptionFor = (e) => EXEMPT.find(x => x.kind === e.kind

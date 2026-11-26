@@ -74,6 +74,7 @@ import { indexRoutes, routeLabel } from './http/route-map.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
 import { isShuttingDown } from './lifecycle.js';
+import { followRecordWrites } from './rdf/triple-index/follow.js';
 import {
   httpRequestsTotal,
   httpRequestDurationSeconds,
@@ -92,6 +93,8 @@ const clientDist =
   path.resolve(__dirname, '..', '..', 'client', 'dist', 'browser');
 
 export function createApp() {
+  // Every settled positioned write brings its space's triple index up before it answers (bundle-273, Q-764). Idempotent.
+  followRecordWrites();
   const app = express();
 
   // ── Proxy trust ──────────────────────────────────────────────────────────
