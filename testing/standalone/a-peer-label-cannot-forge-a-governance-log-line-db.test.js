@@ -109,7 +109,8 @@ describe('a peer label cannot forge a governance log line', { skip }, () => {
     door.state.network = (req, res, next) => {
       if (req.method === 'GET' && req.path.endsWith('/votes')) {
         res.json({ rounds: [{
-          roundId: forged(ROUND), type: 'join', subjectInstanceId: 'subject-1', subjectLabel: 'Subject',
+          // A kind this pub/sub network opens (its publisher serves it): a join round is a forgery here and is refused, never adopted (Q-968).
+          roundId: forged(ROUND), type: 'meta_change', subjectInstanceId: 'subject-1', subjectLabel: 'Subject',
           // A live round as a peer sends one: gossip adopts only a round it can date, so `openedAt` is what reaches the adopt line.
           subjectUrl: 'https://subject.example', deadline, openedAt: new Date().toISOString(), createdAt: new Date().toISOString(),
           votes: [{ instanceId: forged(VOTER), vote: 'yes' }],
