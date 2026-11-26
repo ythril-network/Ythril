@@ -354,6 +354,15 @@ Every database operation of such a job is ended by `YTHRIL_HOUSEKEEPING_OP_TIMEO
 
 A job whose previous tick is still running **skips** the next one rather than starting a second run, counts it in `ythril_interval_tick_skipped_total{job}` and says so in the log at most once in a while; an error that escapes a tick is logged as `<job> failed:` and the job keeps its schedule. What this does not cover, because it is not a database operation: index builds, the bulk link conversion, the metric collectors (they have their own scrape budget), walks of the file system, and calls to a model.
 
+#### The SPARQL triple index and its read bound
+
+A space with RDF on keeps a triple index of its statements (collections `<space>_rdf_*`, left out of backups and rebuilt from the records).
+A SPARQL query reads a space from its index when the index is ready and caught up, and from its records otherwise, with the same answer
+([SPARQL API](04j-sparql-api.md#the-triple-index-and-when-a-query-reads-the-records)). The config key `sparql.maxIndexRowsRead` bounds the
+statements one query may read from the indexes, every pattern together: default 20 times `sparql.maxRecordsRead` (4 000 000 with that key's
+default), a whole number from 1 000 to 200 000 000, read live; a value outside the range refuses the config load or reload, naming the key.
+Past it the query is refused `413 sparql_too_much_read`.
+
 ---
 
 ### Check Setup Status (unauthenticated)

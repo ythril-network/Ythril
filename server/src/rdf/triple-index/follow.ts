@@ -35,7 +35,6 @@ import type { SpaceMeta } from '@ythril-network/schema';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { canonicalJsonHash } from '../../util/canonical-json.js';
 import { readStoredById } from '../../db/read-by-id.js';
 import { log, peerText } from '../../util/log.js';
 import { warnOnce, SAY_ONCE_WINDOW_MS } from '../../util/warn-once.js';
@@ -46,10 +45,11 @@ import { onSettled, settledPositionCap, type SettledHook } from '../../util/posi
 import { recordPositions } from '../../sync/record-position-stream.js';
 import { termKey } from './terms.js';
 import {
-  applyTripleIndexBatch, markTripleIndexStale, readTripleIndexState, releaseTripleIndexLease, startTripleIndex, takeTripleIndexLease,
+  applyTripleIndexBatch, formKeyOf, markTripleIndexStale, readTripleIndexState, releaseTripleIndexLease, startTripleIndex, takeTripleIndexLease,
   type RecordChange, type StatementKeys,
 } from './store.js';
 import { clearableJournalRows, journalAsksForRebuild, journalRecordWrites } from './journal.js';
+import { catchUpTripleIndexWith } from './read.js';
 
 /** The most records one batch applies, in one transaction. */
 export const BATCH_RECORDS = 500;
@@ -57,19 +57,8 @@ export const BATCH_RECORDS = 500;
 export const BATCHES_PER_RUN = 8;
 /** How long a follower's lease lasts; renewed each batch. */
 const LEASE_MS = 60_000;
-/**
- * The version of the record form the index is built for: raised when `recordTriples` or the term key changes what it writes, so every
- * index built before reads as another form (`stale`) and is rebuilt.
- */
-export const RDF_FORM_VERSION = 1;
-
 /** This process's name as a lease owner. */
 const OWNER = randomUUID();
-
-/** The key of the form `meta` gives: equal metas, equal keys. */
-export function formKeyOf(meta: SpaceMeta): string {
-  return canonicalJsonHash({ formVersion: RDF_FORM_VERSION, meta });
-}
 
 /**
  * The resolved meta of `spaceId` when its records have an RDF form now (`rdfSpaceState`, the one rule the exports ask); `null` when RDF is
@@ -113,14 +102,23 @@ const FOLLOW_AFTER_SETTLE: SettledHook<number> = { after: (spaceId, settledCap) 
 export function followRecordWrites(): void {
   onSettled(recordPositions, FOLLOW_AFTER_SETTLE);
   journalRecordWrites(wakeFollower);
+  catchUpTripleIndexWith(followTripleIndexNow);
 }
 
 /** A journal failure to wake the follower is said once per window and space: the next write, or the barrier's catch-up, runs it again. */
 const wakeFailed = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 
+/**
+ * Run `spaceId`'s follower up to the records stream's settled cap now: the read side's catch-up (`read.ts`, the query barrier), which
+ * resolves when a run that started after this call has finished.
+ */
+export function followTripleIndexNow(spaceId: string): Promise<void> {
+  return followTripleIndex(spaceId, () => settledPositionCap(recordPositions, spaceId));
+}
+
 /** Run `spaceId`'s follower after a journaled write, not awaited: the write has answered, and its rows keep the space outstanding meanwhile. */
 function wakeFollower(spaceId: string): void {
-  followTripleIndex(spaceId, () => settledPositionCap(recordPositions, spaceId)).catch((err: unknown) => wakeFailed(spaceId,
+  followTripleIndexNow(spaceId).catch((err: unknown) => wakeFailed(spaceId,
     () => log.warn(`Triple index of space '${peerText(spaceId)}': the follower after a journaled write failed; the next one runs it again: ${peerText(String(err))}`)));
 }
 

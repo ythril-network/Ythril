@@ -39,6 +39,7 @@ import { Readable } from 'node:stream';
 import { QueryEngine } from '@comunica/query-sparql-rdfjs';
 import { DataFactory } from 'n3';
 import { MAX_PATTERN_LENGTH, hasReDoSRisk } from '../util/redos.js';
+import { offerBatchBindJoin } from './batch-bind-join.js';
 import type { RdfJsLike } from './rdf-js-terms.js';
 import { ByteMeter, rowBytes, termBytes } from './answer-size.js';
 import {
@@ -65,8 +66,14 @@ const UPDATE_OPERATIONS: ReadonlySet<string> = new Set(['compositeupdate', 'dele
 const WALK_NODES_MAX = 1_000_000;
 
 let engine: QueryEngine | null = null;
-/** The engine, made on first use. */
-const engineOf = (): QueryEngine => (engine ??= new QueryEngine());
+/** The engine, made on first use, with the batched bind join offered beside its own (`batch-bind-join.ts`, design-r2 R8). */
+const engineOf = (): QueryEngine => {
+  if (engine) return engine;
+  const made = new QueryEngine();
+  offerBatchBindJoin(made);
+  engine = made;
+  return made;
+};
 
 /** A fetch that refuses: the engine is never to reach the network. */
 const refuseFetch = (): Promise<never> => Promise.reject(new Error('This server\'s SPARQL engine reads its own records only, never the network'));

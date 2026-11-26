@@ -147,7 +147,8 @@ export async function evaluateSparqlUpdate(
   if ('refusal' in checked) return checked;
   const source = createQuadSource(
     { members: [scope.spaceId], caller: scope.caller, ...(scope.fingerprintOf ? { fingerprintOf: scope.fingerprintOf } : {}) },
-    { deadline: opts.deadline, ...(opts.signal ? { signal: opts.signal } : {}), ...(opts.maxRecordsRead !== undefined ? { maxRecordsRead: opts.maxRecordsRead } : {}) },
+    // An Update plans on the records and seqs it read (`readRecords`, `lostRace`), so it is evaluated over the records, never the index.
+    { deadline: opts.deadline, index: false, ...(opts.signal ? { signal: opts.signal } : {}), ...(opts.maxRecordsRead !== undefined ? { maxRecordsRead: opts.maxRecordsRead } : {}) },
   );
   const changes = await changeSetOf(checked.algebra, source as unknown as UpdateSource, ownGraph, opts);
   return {
