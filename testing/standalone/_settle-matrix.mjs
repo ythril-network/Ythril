@@ -43,6 +43,18 @@ export const CANNOT_PASS_A_ROUND = {
   retry: 'concludes nothing: it hands owed space rounds back to the runner',
 };
 
+/**
+ * The cells no via can pass, each with its reason: a club and a pub/sub network admit and remove members directly and never open a join or a
+ * removal round, so one is a peer's forgery and never passes (Q-968; held by `a-pubsub-round-passes-on-the-publishers-cast-alone.test.js`).
+ */
+export const NEVER_PASSES = {
+  club: { kinds: ['join', 'remove'], why: 'a club admits and removes members directly and never opens a join or removal round (Q-968)' },
+  pubsub: { kinds: ['join', 'remove', 'space_addition'], why: 'a pub/sub network admits, removes and adds spaces directly and never opens a join, removal or space-addition round (Q-968)' },
+};
+
+/** Is the cell of `roundType` on `netType` one no via can pass ({@link NEVER_PASSES})? */
+export const cellNeverPasses = (roundType, netType) => (NEVER_PASSES[netType]?.kinds ?? []).includes(roundType);
+
 /** The union members a `export type Name = 'a' | 'b'` declaration lists, read from the server source — the set a new member joins. */
 export function declaredUnion(name) {
   const declared = new RegExp(`export type ${name}\\s*=([^;]+);`).exec(fs.readFileSync('server/src/config/types-networks.ts', 'utf8'));
@@ -196,9 +208,9 @@ export async function bootCell(dir, via, roundType, netType, peer) {
   }
   const site = via === 'local vote' ? 'cast' : via === 'peer vote' ? 'relay' : 'gossip';
   const scen = scenario(roundType, netType, site, peer.url);
-  // On pub/sub a deletion or wipe that passes by a vote is the PUBLISHER's, reaching a subscriber (D-40, X10): a publisher never passes
-  // one it did not open. So in those cells this instance subscribes — it pulls from P1, its publisher.
-  if (netType === 'pubsub' && (roundType === 'space_deletion' || roundType === 'space_wipe')) {
+  // On pub/sub a round that passes by a vote is the PUBLISHER's, reaching a subscriber (D-40, X10, Q-968): a publisher never passes one it did
+  // not open, and only the publisher's cast decides. So in every pub/sub cell this instance subscribes — it pulls from P1, its publisher.
+  if (netType === 'pubsub') {
     const publisher = scen.net.members.find(m => m.instanceId === P1);
     if (publisher) publisher.direction = 'pull';
   }
