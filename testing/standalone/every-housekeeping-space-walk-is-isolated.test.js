@@ -90,6 +90,11 @@ const SUBJECT_EXEMPTIONS = [
       + 'throws), so a failing or hung space cannot end the loop; the loop stops only when a walk says the store is not answering. It exists as a loop because the spaces that owe are read from the counter documents, not from the config.',
   },
   {
+    key: 'server/src/sync/positions-owed.ts:staleIndexesOfRepairedSpaces', head: /await owingSpaces\(\)/,
+    why: 'The re-upgrade detector\'s mark of the triple indexes of the spaces that owe a repair (review finding G2): one bounded `updateOne` per owing space, read from the counter documents as the tick above reads them, '
+      + 'not from the config. A failing store throws, which leaves the boot\'s hold armed (`detectReupgradeAtBoot`) and is retried by the job: it must not be isolated, or a space whose index was not marked would be served by the index.',
+  },
+  {
     key: 'server/src/sync/space-exchange.ts:exchangeSpacesWithMember', head: /\bexchange\b/,
     why: 'The sync cycle of one member over the network\'s spaces: its own question (a failed space makes the member\'s cycle incomplete and is '
       + 'reported in the cycle\'s result, push and pull are bounded by the fetch options), not a housekeeping walk. The plan names the sync '

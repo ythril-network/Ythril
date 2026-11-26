@@ -312,12 +312,12 @@ export const spaceIndexName = (ix: SpaceIndex): string => ix.options.name ?? Obj
 export const spaceIndexUnit = (ix: SpaceIndex): string => `index ${spaceIndexName(ix)} on ${SPACE_COLLECTIONS[ix.part]}`;
 
 /**
- * Build the declared index `ix` on the collection `collection`, which is `ix.part`'s collection of some space or a copy of it that is
- * swapped in later: the triple index's rebuild writes its dictionary into a collection of its own and builds the unique key there before
+ * Build the declared index `ix` on `ix.part`'s collection of `spaceId`, or on `copy`, a collection that is swapped in for it later: the triple index's rebuild writes its dictionary into a collection of its own and builds the unique key there before
  * the first page (`rdf/triple-index/rebuild.ts`, review finding F3). Idempotent.
  */
-export async function buildDeclaredIndexOn(collection: string, ix: SpaceIndex): Promise<void> {
-  await col(collection).createIndex({ ...ix.keys }, { ...ix.options });
+export async function buildDeclaredIndexOn(spaceId: string, ix: SpaceIndex, copy?: string): Promise<void> {
+  const collName = copy ?? spaceCollection(spaceId, ix.part);
+  await col(collName).createIndex({ ...ix.keys }, { ...ix.options });
 }
 
 /**
@@ -331,7 +331,7 @@ export async function buildSpaceIndex(
   if (ix.builder === 'guard') { await ensureEdgeGuardIndex(spaceId); return undefined; }
   if (ix.builder === 'edge-identity') { await buildEdgeIdentityIndex(spaceId); return undefined; }
   const collName = spaceCollection(spaceId, ix.part);
-  await buildDeclaredIndexOn(collName, ix);
+  await buildDeclaredIndexOn(spaceId, ix);
   // The indexes `ix` replaces ({@link SpaceIndex.replaces}) go only once `ix` is confirmed listed (`dropReplacedOnceListed`).
   if (ix.replaces?.length) await dropReplacedOnceListed(collName, [spaceIndexName(ix)], ix.replaces);
   return undefined;
