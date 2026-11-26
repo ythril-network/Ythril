@@ -17,6 +17,7 @@
  * - `<space>_rdf_records`: `{ _id: '<kind>:<id>', pos, q: Binary(the record's statement ids, sorted, 12 bytes each) }`. A record with no
  *   statements has no row.
  * - `<space>_rdf_state`: `{ _id: 'state', appliedPos, formKey, status }` and the follower's lease `{ _id: 'lease', owner, until }`.
+ * - `<space>_rdf_dirty`: the write journal (`journal.ts`); a batch deletes the rows it answers (`clearJournal`) in its transaction.
  *
  * A missing state row is an index that is not ready (a new space, a restore that dropped it, a delete and re-create).
  *
@@ -40,7 +41,7 @@ import type { RdfRecordKind } from '../record-triples.js';
 import { termIds, MAX_TERM_ID } from './terms.js';
 
 /** The space collections the index is: a backup leaves them out, since they are derived from the records and a restore drops them. */
-export const TRIPLE_INDEX_PARTS: readonly SpacePart[] = Object.freeze(['rdfTerms', 'rdfQuads', 'rdfRecords', 'rdfState'] satisfies SpacePart[]);
+export const TRIPLE_INDEX_PARTS: readonly SpacePart[] = Object.freeze(['rdfTerms', 'rdfQuads', 'rdfRecords', 'rdfState', 'rdfDirty'] satisfies SpacePart[]);
 const TRIPLE_INDEX_SUFFIXES: ReadonlySet<string> = new Set(TRIPLE_INDEX_PARTS.map(p => SPACE_COLLECTIONS[p]));
 
 /** Whether `name` is a collection of some space's triple index. */
@@ -71,6 +72,17 @@ const stateCollection = (spaceId: string) => col<TripleIndexState>(spaceCollecti
 const leaseCollection = (spaceId: string) => col<LeaseRow>(spaceCollection(spaceId, 'rdfState'));
 const quadCollection = (spaceId: string) => col<QuadRow>(spaceCollection(spaceId, 'rdfQuads'));
 const recordCollection = (spaceId: string) => col<RecordRow>(spaceCollection(spaceId, 'rdfRecords'));
+/** The write journal (`journal.ts`): the apply clears the rows it was handed, in its own transaction. */
+const journalCollection = (spaceId: string) => col<{ _id: string }>(spaceCollection(spaceId, 'rdfDirty'));
+
+/**
+ * Mark `spaceId`'s index `stale` (a rebuild, slice S4, makes it ready again), when it has a state row: for a change no record row can name
+ * (a journal row `*`, a record collection dropped or renamed, a writer around the db door). Never creates a state row: a space whose index
+ * has none is not ready already, and a row written under a name a rename is about to move into would stop the rename.
+ */
+export async function markTripleIndexStale(spaceId: string): Promise<void> {
+  await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state' }), asUpdate<TripleIndexState>({ $set: { status: 'stale' } }));
+}
 
 /** The `_id` of a record's row: its kind and id. */
 export const recordKeyOf = (kind: RdfRecordKind, id: string): string => `${kind}:${id}`;
@@ -146,9 +158,11 @@ export interface TripleIndexBatch {
   /** The follower's lease owner. */
   owner: string;
   changes: readonly RecordChange[];
-  /** Where `appliedPos` moves to (never backwards), and the status after the batch. */
+  /** Where `appliedPos` moves to (never backwards), and the status after the batch (left as it is when omitted: a journal batch). */
   appliedPos: number;
-  status: Exclude<TripleIndexStatus, 'stale'>;
+  status?: Exclude<TripleIndexStatus, 'stale'>;
+  /** The journal rows this batch answers (`journal.ts`), deleted in its transaction: a row goes only with the statements read after it. */
+  clearJournal?: readonly string[];
 }
 
 /**
@@ -167,11 +181,14 @@ export async function applyTripleIndexBatch(spaceId: string, batch: TripleIndexB
     // The state moves first, on the condition that it is this form's and not stale; the statements follow in the same transaction, so either
     // both land or neither does, and no read of the state stands before a write of it. `$max`: appliedPos never moves back.
     const moved = await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state', formKey: batch.formKey, status: { $ne: 'stale' } }),
-      asUpdate<TripleIndexState>({ $max: { appliedPos: batch.appliedPos }, $set: { status: batch.status } }), { session });
+      asUpdate<TripleIndexState>({ $max: { appliedPos: batch.appliedPos }, ...(batch.status !== undefined ? { $set: { status: batch.status } } : {}) }), { session });
     if (moved.matchedCount === 0) {
       return await stateCollection(spaceId).countDocuments(asFilter<TripleIndexState>({ _id: 'state' }), { session, limit: 1 }) === 0 ? 'not-started' : 'stale';
     }
     await applyChanges(spaceId, batch.changes, session);
+    for (const chunk of inChunks([...batch.clearJournal ?? []], ROWS_PER_COMMAND)) {
+      await journalCollection(spaceId).deleteMany(asFilter<{ _id: string }>({ _id: { $in: chunk } }), { session });
+    }
     return 'applied';
   });
 }

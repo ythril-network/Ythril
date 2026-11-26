@@ -112,6 +112,10 @@ const EXEMPT = {
     'brain/forks.ts:refuseForkRowsNamed', 'brain/forks.ts:forkRowsUnder', 'brain/forks.ts:remintForks', 'brain/forks.ts:assertForksFitTogether',
     'brain/forks.ts:forksOfSpace', 'brain/forks.ts:resolveFork', 'brain/forks.ts:resolveOrphan', 'brain/fork-counts.ts:forkCountsOf',
   ]),
+  // bundle-273 S2 (design-r2 R6): the unstamp reads the ids it writes, so the triple index's journal names each edge.
+  ...reasoned('it reads the ids of the stamped edges at a retyped entity to unstamp exactly those: a fork row\'s stamp was judged against the old type too, so it loses it with the rest', [
+    'brain/retyped-entity-edges.ts:unstampEdgesOfRetypedEntity',
+  ]),
   ...reasoned('it reads one row by id to ask whether it IS a fork (the refusal of an ordinary edit), or removes fork rows a 5.6 build cannot read', [
     'brain/write-at-read-version.ts:writeAtReadVersion', 'sync/positions-rollback.ts:rollBackForks',
     // An applied tombstone's cascade asks which tombstoned subjects are still held before it removes their forks (Q-624 §7, R7).

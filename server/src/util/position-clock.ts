@@ -173,6 +173,15 @@ export function onSettled<P extends number | string>(stream: PositionStream<P>, 
 
 /** The floors held in this async context: a stamp inside one of its space has not committed when its write returns. */
 const floorsHeld = new AsyncLocalStorage<readonly { readonly stream: PositionStream; readonly spaceId: string }[]>();
+/**
+ * Whether the calling async context runs inside a floor of `spaceId` on `stream` ({@link withPositionFloorHeld}). A positioned write in a
+ * transaction OUTSIDE one settles its stamp before its commit, so the stream's settled hook runs while its record is not yet visible: the
+ * triple index's journal (`rdf/triple-index/journal.ts`) asks this to journal such a write as well (bundle-273, Q-764 S2, contract row 3).
+ */
+export function insideFloorOf(stream: PositionStream, spaceId: string): boolean {
+  return floorsHeld.getStore()?.some(f => f.stream === stream && f.spaceId === spaceId) ?? false;
+}
+
 /** A failing settle is said once per window per stream and space, not once per write: a repeat is the same news. */
 const settleFailures = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 

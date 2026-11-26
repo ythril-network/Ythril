@@ -42,13 +42,14 @@ import { warnOnce, SAY_ONCE_WINDOW_MS } from '../../util/warn-once.js';
 import { RDF_READ_FIELDS, recordTriples, type RdfRecordKind } from '../record-triples.js';
 import { RDF_KIND_COLLECTIONS, rdfKindCollection } from '../rdf-members.js';
 import { rdfSpaceState } from '../rdf-space-state.js';
-import { onSettled, type SettledHook } from '../../util/position-clock.js';
+import { onSettled, settledPositionCap, type SettledHook } from '../../util/position-clock.js';
 import { recordPositions } from '../../sync/record-position-stream.js';
 import { termKey } from './terms.js';
 import {
-  applyTripleIndexBatch, readTripleIndexState, releaseTripleIndexLease, startTripleIndex, takeTripleIndexLease,
+  applyTripleIndexBatch, markTripleIndexStale, readTripleIndexState, releaseTripleIndexLease, startTripleIndex, takeTripleIndexLease,
   type RecordChange, type StatementKeys,
 } from './store.js';
+import { clearableJournalRows, journalAsksForRebuild, journalRecordWrites } from './journal.js';
 
 /** The most records one batch applies, in one transaction. */
 export const BATCH_RECORDS = 500;
@@ -111,6 +112,16 @@ const FOLLOW_AFTER_SETTLE: SettledHook<number> = { after: (spaceId, settledCap) 
  */
 export function followRecordWrites(): void {
   onSettled(recordPositions, FOLLOW_AFTER_SETTLE);
+  journalRecordWrites(wakeFollower);
+}
+
+/** A journal failure to wake the follower is said once per window and space: the next write, or the barrier's catch-up, runs it again. */
+const wakeFailed = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
+
+/** Run `spaceId`'s follower after a journaled write, not awaited: the write has answered, and its rows keep the space outstanding meanwhile. */
+function wakeFollower(spaceId: string): void {
+  followTripleIndex(spaceId, () => settledPositionCap(recordPositions, spaceId)).catch((err: unknown) => wakeFailed(spaceId,
+    () => log.warn(`Triple index of space '${peerText(spaceId)}': the follower after a journaled write failed; the next one runs it again: ${peerText(String(err))}`)));
 }
 
 /** One run: see the module docblock. */
@@ -121,35 +132,69 @@ async function followOnce(spaceId: string, settledCap: () => Promise<number>): P
   try {
     const state = await readTripleIndexState(spaceId) ?? await startTripleIndex(spaceId, formKeyOf(first));
     if (state.status === 'stale') return;
-    // The cap is read before any row: every record below it was visible when the rows were read.
-    const cap = await settledCap();
-    let after = state.appliedPos;
-    for (let batch = 1; ; batch++) {
-      const meta = formMetaOf(spaceId);
-      if (meta === null) return;
-      const read = await changesAfter(spaceId, after);
-      // A full batch may have rows after it: `appliedPos` stops at its last row (and below the cap), and the next batch reads on above it.
-      // Rows tied at the last position (a legacy band can tie) are left whole to the next batch, or a row of the tie past the cut is never read.
-      const full = read.length === BATCH_RECORDS;
-      const rows = full ? withoutTrailingTie(read) : read;
-      if (full && rows.length === 0) {
-        tiedBatch(spaceId, () => log.warn(`Triple index of space '${peerText(spaceId)}': more than ${BATCH_RECORDS} rows share one position; it stays catching-up until a rebuild`));
-        return;
-      }
-      const lastPos = rows.length > 0 ? rows[rows.length - 1]!.pos : after;
-      const more = full && batch < BATCHES_PER_RUN;
-      const outcome = await applyTripleIndexBatch(spaceId, {
-        formKey: formKeyOf(meta), owner: OWNER,
-        changes: await currentForms(spaceId, meta, rows),
-        appliedPos: full ? Math.min(lastPos, cap - 1) : cap - 1,
-        status: full ? 'catching-up' : 'ready',
-      });
-      if (outcome !== 'applied' || !more) return;
-      after = lastPos;
-      if (!(await takeTripleIndexLease(spaceId, OWNER, LEASE_MS))) return;
-    }
+    if (!(await followPositions(spaceId, state.appliedPos, settledCap))) return;
+    await followJournal(spaceId);
   } finally {
     await releaseTripleIndexLease(spaceId, OWNER);
+  }
+}
+
+/**
+ * The journal's part of a run (`journal.ts`), after the positioned part: a row `*` marks the index stale; otherwise the rows that may be
+ * cleared (done, or abandoned) are read FIRST, then the records they name, and each batch applies those records' current forms and deletes
+ * exactly those rows in one transaction. A row read as not done stays for a later run, so a write still in flight is never passed.
+ */
+async function followJournal(spaceId: string): Promise<void> {
+  for (let batch = 1; batch <= BATCHES_PER_RUN; batch++) {
+    if (await journalAsksForRebuild(spaceId)) { await markTripleIndexStale(spaceId); return; }
+    const rows = await clearableJournalRows(spaceId, BATCH_RECORDS);
+    if (rows.length === 0) return;
+    const meta = formMetaOf(spaceId);
+    if (meta === null) return;
+    // Each named record as a re-read (the tombstone path of `currentForms`): its stored row now, or no statements when it is gone.
+    const named: PositionedRow[] = [];
+    for (const { key } of rows) {
+      const cut = key.indexOf(':');
+      const kind = key.slice(0, cut) as RdfRecordKind;
+      if (cut > 0 && RDF_KIND_COLLECTIONS.some(c => c.kind === kind)) named.push({ pos: 0, kind, id: key.slice(cut + 1), tombstone: true, doc: null });
+    }
+    const outcome = await applyTripleIndexBatch(spaceId, {
+      formKey: formKeyOf(meta), owner: OWNER, changes: await currentForms(spaceId, meta, named), appliedPos: 0, clearJournal: rows.map(r => r._id),
+    });
+    if (outcome !== 'applied' || rows.length < BATCH_RECORDS) return;
+    if (!(await takeTripleIndexLease(spaceId, OWNER, LEASE_MS))) return;
+  }
+}
+
+/** The positioned part of a run: false when the run must stop (the index went stale, the lease was lost, the space lost its form). */
+async function followPositions(spaceId: string, appliedPos: number, settledCap: () => Promise<number>): Promise<boolean> {
+  // The cap is read before any row: every record below it was visible when the rows were read.
+  const cap = await settledCap();
+  let after = appliedPos;
+  for (let batch = 1; ; batch++) {
+    const meta = formMetaOf(spaceId);
+    if (meta === null) return false;
+    const read = await changesAfter(spaceId, after);
+    // A full batch may have rows after it: `appliedPos` stops at its last row (and below the cap), and the next batch reads on above it.
+    // Rows tied at the last position (a legacy band can tie) are left whole to the next batch, or a row of the tie past the cut is never read.
+    const full = read.length === BATCH_RECORDS;
+    const rows = full ? withoutTrailingTie(read) : read;
+    if (full && rows.length === 0) {
+      tiedBatch(spaceId, () => log.warn(`Triple index of space '${peerText(spaceId)}': more than ${BATCH_RECORDS} rows share one position; it stays catching-up until a rebuild`));
+      return true;
+    }
+    const lastPos = rows.length > 0 ? rows[rows.length - 1]!.pos : after;
+    const more = full && batch < BATCHES_PER_RUN;
+    const outcome = await applyTripleIndexBatch(spaceId, {
+      formKey: formKeyOf(meta), owner: OWNER,
+      changes: await currentForms(spaceId, meta, rows),
+      appliedPos: full ? Math.min(lastPos, cap - 1) : cap - 1,
+      status: full ? 'catching-up' : 'ready',
+    });
+    if (outcome !== 'applied') return false;
+    if (!more) return true;
+    after = lastPos;
+    if (!(await takeTripleIndexLease(spaceId, OWNER, LEASE_MS))) return false;
   }
 }
 
