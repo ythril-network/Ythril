@@ -37,7 +37,7 @@ import { getDb, col, asFilter, asUpdate } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { inBoundedTransaction } from '../../db/bounded-transaction.js';
 import { idKeysetPage } from '../../db/id-keyset-page.js';
-import { buildSpaceIndex, TRIPLE_INDEX_INDEXES } from '../../spaces/space-indexes.js';
+import { buildDeclaredIndexOn, buildSpaceIndex, TRIPLE_INDEX_INDEXES } from '../../spaces/space-indexes.js';
 import { settledPositionCap } from '../../util/position-clock.js';
 import { recordPositions } from '../../sync/record-position-stream.js';
 import { log, outsideRequest, peerText } from '../../util/log.js';
@@ -51,6 +51,7 @@ import {
   RebuildFenced, type IndexCollections, type RecordChange, type TripleIndexStatus,
 } from './store.js';
 import { formMetaOf, projectionOf, statementsOf } from './follow.js';
+import { journalRowAbandonedMs } from './journal.js';
 
 export { RebuildFenced };
 
@@ -92,8 +93,18 @@ export async function beginTripleIndexBuild(spaceId: string, opts: { leaseMs?: n
   if (!(await claimTripleIndexBuild(spaceId, buildId, leaseMs))) return null;
   const startCap = await settledPositionCap(recordPositions, spaceId);
   const startedAt = Date.now();
-  await col<Document>(spaceCollection(spaceId, 'rdfDirty')).updateMany(asFilter<Document>({ done: true, at: { $lte: startedAt } }), asUpdate<Document>({ $set: { seenBy: buildId } }));
-  return { spaceId, buildId, formKey: formKeyOf(meta), startCap, startedAt, leaseMs, target: buildCollectionsOf(spaceId, buildId) };
+  // The rows this build answers: done before its start, and the rows of a writer that died (older than `journalRowAbandonedMs`, as the
+  // follower clears them): a `*` row nobody marks done is otherwise never cleared and asks for a rebuild at every tick (finding F1).
+  const abandonedBefore = startedAt - journalRowAbandonedMs();
+  await col<Document>(spaceCollection(spaceId, 'rdfDirty')).updateMany(
+    asFilter<Document>({ at: { $lte: startedAt }, $or: [{ done: true }, { at: { $lt: abandonedBefore } }] }), asUpdate<Document>({ $set: { seenBy: buildId } }));
+  // The fill looks terms up by `k` for every page: the unique key is on the build's dictionary before the first page (finding F3), where it
+  // would otherwise be built after the swap and every lookup scan the dictionary so far.
+  const termsIndex = TRIPLE_INDEX_INDEXES.find(ix => ix.part === 'rdfTerms');
+  if (termsIndex === undefined) throw new Error('the triple index declares no index on its dictionary');
+  const target = buildCollectionsOf(spaceId, buildId);
+  await buildDeclaredIndexOn(target.terms, termsIndex);
+  return { spaceId, buildId, formKey: formKeyOf(meta), startCap, startedAt, leaseMs, target };
 }
 
 /**

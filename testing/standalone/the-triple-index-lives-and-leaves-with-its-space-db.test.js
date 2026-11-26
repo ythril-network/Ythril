@@ -4,8 +4,8 @@
  *
  * ## The rules
  *
- * 1. **A rename carries the index.** The four collections are `SPACE_COLLECTIONS` suffixes (`rdf_terms`, `rdf_quads`, `rdf_records`,
- *    `rdf_state`), so the rename's prefix move takes them, rows and all, and the old names are gone.
+ * 1. **A rename carries the index.** The collections are `SPACE_COLLECTIONS` suffixes (`rdf_terms`, `rdf_quads`, `rdf_records`,
+ *    `rdf_state`, and the journal's `rdf_dirty`), so the rename's prefix move takes them, rows and all, and the old names are gone.
  * 2. **A delete takes the index.** No `<space>_rdf_*` collection outlives the space.
  * 3. **A backup leaves the index out, and a restore drops it.** The dump names no `rdf_*` collection (it is derived, and a restore rebuilds
  *    it); a restore drops the index collections the backup does not hold, so a missing index reads as not ready.
@@ -36,7 +36,8 @@ const X = 'tix-drop';
 const OFF = 'tix-off';
 const ON = 'tix-on';
 const STAMP = '2026-03-04T05:06:07.000Z';
-const INDEX = ['rdf_quads', 'rdf_records', 'rdf_state', 'rdf_terms'];
+// The journal's collection too: its indexes (review finding G5) are built when the follower starts the index, which makes it.
+const INDEX = ['rdf_dirty', 'rdf_quads', 'rdf_records', 'rdf_state', 'rdf_terms'];
 const TMP = process.env.TEMP ?? process.env.TMPDIR ?? '/tmp';
 
 let d, stream, lifecycle, rename, dump, restore;

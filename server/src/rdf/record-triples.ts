@@ -396,7 +396,7 @@ export function recordTriples(meta: SpaceMeta, kind: RdfRecordKind, doc: unknown
   const idField = kind === 'file' ? d['path'] ?? d['_id'] : d['_id'];
   if (!isText(idField) || (kind !== 'link' && !recordAddressable(kind, idField))) return none('unaddressable');
   if (kind !== 'link' && kind !== 'file' && d['forkOf'] !== undefined && d['forkOf'] !== null) return none('fork');
-  if (kind === 'file' && [d['parentFileId'], d['deletedAt'], d['feedMarker']].some(v => v !== undefined && v !== null)) return none('not-live');
+  if (kind === 'file' && [d['parentFileId'], d['deletedAt'], d['feedMarker']].some(v => v !== undefined)) return none('not-live');
   const f = new Form(meta, kind, idField, opts);
   const done = (): RecordTriplesResult => ({ quads: f.quads, counts: { skippedValues: f.skipped, untypedTemporals: f.untypedTemporals } });
 

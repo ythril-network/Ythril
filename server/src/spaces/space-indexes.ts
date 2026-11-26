@@ -292,6 +292,11 @@ export const TRIPLE_INDEX_INDEXES: readonly SpaceIndex[] = Object.freeze<SpaceIn
   { part: 'rdfTerms', keys: { k: 1 }, options: { name: 'k_unique', unique: true }, policy: 'throw' },
   { part: 'rdfQuads', keys: { p: 1, o: 1, s: 1 }, options: { name: 'p_o_s' }, policy: 'throw' },
   { part: 'rdfQuads', keys: { o: 1, s: 1, p: 1 }, options: { name: 'o_s_p' }, policy: 'throw' },
+  // The write journal (`rdf/triple-index/journal.ts`): the follower asks for a `*` row and for the rows it may clear (done, or older than a
+  // bound) on every run, and a rebuild marks rows as its own. Without these every run scans a collection that grows with the writes.
+  { part: 'rdfDirty', keys: { key: 1 }, options: { name: 'key_1' }, policy: 'throw' },
+  { part: 'rdfDirty', keys: { done: 1, at: 1 }, options: { name: 'done_1_at_1' }, policy: 'throw' },
+  { part: 'rdfDirty', keys: { at: 1 }, options: { name: 'at_1' }, policy: 'throw' },
 ]);
 
 /** The TTL sweep's part of {@link SPACE_INDEXES}. */
@@ -307,6 +312,15 @@ export const spaceIndexName = (ix: SpaceIndex): string => ix.options.name ?? Obj
 export const spaceIndexUnit = (ix: SpaceIndex): string => `index ${spaceIndexName(ix)} on ${SPACE_COLLECTIONS[ix.part]}`;
 
 /**
+ * Build the declared index `ix` on the collection `collection`, which is `ix.part`'s collection of some space or a copy of it that is
+ * swapped in later: the triple index's rebuild writes its dictionary into a collection of its own and builds the unique key there before
+ * the first page (`rdf/triple-index/rebuild.ts`, review finding F3). Idempotent.
+ */
+export async function buildDeclaredIndexOn(collection: string, ix: SpaceIndex): Promise<void> {
+  await col(collection).createIndex({ ...ix.keys }, { ...ix.options });
+}
+
+/**
  * Build one declared index on one space. Idempotent: an index already there is a no-op. Throws what the build threw; the policy is
  * the caller's to apply. Answers what a keyset build did (for the background pass's line), nothing for the others.
  */
@@ -317,7 +331,7 @@ export async function buildSpaceIndex(
   if (ix.builder === 'guard') { await ensureEdgeGuardIndex(spaceId); return undefined; }
   if (ix.builder === 'edge-identity') { await buildEdgeIdentityIndex(spaceId); return undefined; }
   const collName = spaceCollection(spaceId, ix.part);
-  await col(collName).createIndex({ ...ix.keys }, { ...ix.options });
+  await buildDeclaredIndexOn(collName, ix);
   // The indexes `ix` replaces ({@link SpaceIndex.replaces}) go only once `ix` is confirmed listed (`dropReplacedOnceListed`).
   if (ix.replaces?.length) await dropReplacedOnceListed(collName, [spaceIndexName(ix)], ix.replaces);
   return undefined;

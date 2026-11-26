@@ -9,7 +9,8 @@
  *
  * ## When a member is read from its index (contract row 1)
  *
- * All of: the index has a state row, its `status` is `ready`, its `formKey` is the key of the member's form now, and the barrier holds: no
+ * All of: the index has a state row and a build id (a rebuild wrote it: the follower reads by position and never reads a record without a
+ * `pos`, so an index only the follower started may miss records and is never read, finding G1), its `status` is `ready`, its `formKey` is the key of the member's form now, and the barrier holds: no
  * visible record or tombstone of the space stands above `appliedPos` (R1: a write that committed above a held floor counts, so a query never
  * sees an acknowledged write's old statements) and no journal row is outstanding (`hasOutstandingJournalRows`, every row, done or not).
  * When only the barrier fails and the lag is at most {@link CATCH_UP_MAX_LAG} records, the follower runs once, within
@@ -36,6 +37,7 @@ import { spaceCollection } from '../../db/space-collection.js';
 import { log, peerText } from '../../util/log.js';
 import { warnOnce, SAY_ONCE_WINDOW_MS } from '../../util/warn-once.js';
 import { inChunks } from '../../util/chunks.js';
+import { yieldToEventLoop } from '../../util/yield-to-event-loop.js';
 import { xsd, type Term } from '../literals.js';
 import { toRdfJsTerm, type RdfJsTerm } from '../rdf-js-terms.js';
 import { RDF_KIND_COLLECTIONS } from '../rdf-members.js';
@@ -60,10 +62,14 @@ const ROWS_PER_PAGE = 1_000;
  */
 const FIRST_PAGE_ROWS = 100;
 const PAGE_GROWTH = 2;
+/** The most entries a query's term cache holds per space and kind: past it a term is looked up again when asked for again (finding G6). */
+export const CACHE_TERMS_MAX = 200_000;
+/** The row-against-pattern tests of a batched read between two `check()` calls (and a turn of the event loop). */
+const FILTER_TESTS_PER_CHECK = 10_000;
 const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
 
 /** Why a member is read from its records, or that it is read from its index. */
-export type IndexVerdict = { read: 'index'; buildId: string | null } | { read: 'records'; why: 'absent' | 'stale' | 'other-form' | 'catching-up' | 'lagging' | 'journal' };
+export type IndexVerdict = { read: 'index'; buildId: string } | { read: 'records'; why: 'absent' | 'unbuilt' | 'stale' | 'other-form' | 'catching-up' | 'lagging' | 'journal' };
 
 /**
  * The build `spaceId`'s index is now (`null`: none, or one the follower started and no rebuild wrote). A query pins it in its verdict and
@@ -111,13 +117,16 @@ export async function lagOf(spaceId: string, appliedPos: number, deadline: numbe
 async function verdictNow(spaceId: string, meta: SpaceMeta, deadline: number): Promise<{ verdict: IndexVerdict; lag: number }> {
   const state = await readTripleIndexState(spaceId);
   if (state === null) return { verdict: { read: 'records', why: 'absent' }, lag: Infinity };
+  // G1: the follower reads by position, so it never reads a record without a `pos`; only a rebuild reads every row. An index no rebuild wrote
+  // is never served, whatever its status says, and the upkeep (`verify.ts`, reason `missing`) builds it.
+  if (typeof state.buildId !== 'string') return { verdict: { read: 'records', why: 'unbuilt' }, lag: Infinity };
   if (state.status === 'stale') return { verdict: { read: 'records', why: 'stale' }, lag: Infinity };
   if (state.formKey !== formKeyOf(meta)) return { verdict: { read: 'records', why: 'other-form' }, lag: Infinity };
   const lag = await lagOf(spaceId, state.appliedPos, deadline);
   if (lag > 0) return { verdict: { read: 'records', why: 'lagging' }, lag };
   if (await hasOutstandingJournalRows(spaceId)) return { verdict: { read: 'records', why: 'journal' }, lag: 1 };
   if (state.status !== 'ready') return { verdict: { read: 'records', why: 'catching-up' }, lag: 1 };
-  return { verdict: { read: 'index', buildId: state.buildId ?? null }, lag: 0 };
+  return { verdict: { read: 'index', buildId: state.buildId }, lag: 0 };
 }
 
 /**
@@ -128,8 +137,8 @@ export async function indexVerdict(spaceId: string, meta: SpaceMeta, deadline: n
   const first = await verdictNow(spaceId, meta, deadline);
   if (first.verdict.read === 'index') return first.verdict;
   const why = first.verdict.why;
-  if (why === 'stale' || why === 'other-form' || first.lag > CATCH_UP_MAX_LAG) {
-    if (why !== 'stale') followInBackground(spaceId);
+  if (why === 'stale' || why === 'unbuilt' || why === 'other-form' || first.lag > CATCH_UP_MAX_LAG) {
+    if (why !== 'stale' && why !== 'unbuilt') followInBackground(spaceId);
     return first.verdict;
   }
   const wait = Math.max(0, (deadline - Date.now()) * CATCH_UP_SHARE);
@@ -232,6 +241,8 @@ export interface IndexReadOptions {
   check(): void;
   /** The refusal the read of row cap+1 throws. */
   tooMuch(): Error;
+  /** The most entries each of a space's two term caches holds ({@link CACHE_TERMS_MAX} when absent); a term past it is looked up again. */
+  cacheTermsMax?: number;
 }
 
 /** One query's reads of the indexes of its members: the term caches and the row count live as long as the query. */
@@ -241,7 +252,8 @@ export class IndexRead {
   private readonly idCache = new Map<string, Map<string, number | null>>();
   private readonly termCache = new Map<string, Map<number, RdfJsTerm>>();
   private read = 0;
-  constructor(private readonly opts: IndexReadOptions) {}
+  private readonly cacheMax: number;
+  constructor(private readonly opts: IndexReadOptions) { this.cacheMax = opts.cacheTermsMax ?? CACHE_TERMS_MAX; }
 
   /** Quad rows read so far. */
   rowsRead(): number { return this.read; }
@@ -259,38 +271,55 @@ export class IndexRead {
   }
 
   /** The ids of every stored key of `keys` in `space` (absent keys map to null), looked up once per query. */
-  private async lookUpKeys(space: string, keys: readonly string[]): Promise<void> {
+  private async lookUpKeys(space: string, keys: readonly string[]): Promise<Map<string, number | null>> {
     const cache = this.ids(space);
-    const missing = [...new Set(keys.map(storedKeyOf))].filter(k => !cache.has(k));
+    // The answer is the call's own map, so a cache that stopped growing (G6) never takes a key away from the pattern asking for it.
+    const found = new Map<string, number | null>();
+    const missing: string[] = [];
+    for (const k of new Set(keys.map(storedKeyOf))) {
+      const hit = cache.get(k);
+      if (hit !== undefined) found.set(k, hit); else missing.push(k);
+    }
     for (const chunk of inChunks(missing, IDS_PER_FIND)) {
       this.opts.check();
       const rows = await col<TermRow>(spaceCollection(space, 'rdfTerms')).find(asFilter<TermRow>({ k: { $in: chunk } }), { projection: { _id: 1, k: 1 }, maxTimeMS: msLeft(this.opts.deadline) }).toArray();
-      for (const k of chunk) cache.set(k, null);
-      for (const row of rows) cache.set(row.k, row._id);
+      for (const k of chunk) found.set(k, null);
+      for (const row of rows) found.set(row.k, row._id);
+      for (const k of chunk) if (cache.size < this.cacheMax) cache.set(k, found.get(k)!);
     }
+    return found;
   }
 
-  /** The slots of a pattern, its bound terms looked up already: an unground triple term is free (the caller filters by its parts). */
-  private slotsOf(space: string, terms: readonly [PatternSlot, PatternSlot, PatternSlot]): Slots {
-    const cache = this.ids(space);
+  /** The slots of a pattern, its bound terms looked up already (`found`): an unground triple term is free (the caller filters by its parts). */
+  private slotsOf(found: ReadonlyMap<string, number | null>, terms: readonly [PatternSlot, PatternSlot, PatternSlot]): Slots {
     return terms.map((t): number[] | null => {
       if (!isBound(t) || (t.termType === 'Quad' && !isGround(t))) return null;
-      return keysOfTerm(t).map(k => cache.get(storedKeyOf(k))).filter((id): id is number => typeof id === 'number');
+      return keysOfTerm(t).map(k => found.get(storedKeyOf(k))).filter((id): id is number => typeof id === 'number');
     }) as Slots;
   }
 
-  /** The RDF/JS terms of `ids` in `space`, read by one find per thousand ids not in the query's cache. */
+  /** The RDF/JS terms of `ids` in `space`, read by one find per thousand ids not in the query's cache. The answer is the call's own map. */
   private async termsOf(space: string, ids: Iterable<number>): Promise<Map<number, RdfJsTerm>> {
     const cache = this.terms(space);
-    const missing = [...new Set(ids)].filter(id => !cache.has(id));
+    const result = new Map<number, RdfJsTerm>();
+    const missing: number[] = [];
+    for (const id of new Set(ids)) {
+      const hit = cache.get(id);
+      if (hit !== undefined) result.set(id, hit); else missing.push(id);
+    }
     for (const chunk of inChunks(missing, IDS_PER_FIND)) {
       this.opts.check();
       const rows = await col<TermRow>(spaceCollection(space, 'rdfTerms')).find(asFilter<TermRow>({ _id: { $in: chunk } }), { projection: { _id: 1, k: 1, v: 1 }, maxTimeMS: msLeft(this.opts.deadline) }).toArray();
       // A term read here is known by its key too: a later batch binding it (a join's next side) needs no lookup of it.
       const keys = this.ids(space);
-      for (const row of rows) { cache.set(row._id, toRdfJsTerm(termOfKey(row.v ?? row.k))); keys.set(row.k, row._id); }
+      for (const row of rows) {
+        const term = toRdfJsTerm(termOfKey(row.v ?? row.k));
+        result.set(row._id, term);
+        if (cache.size < this.cacheMax) cache.set(row._id, term);
+        if (keys.size < this.cacheMax) keys.set(row.k, row._id);
+      }
     }
-    return cache;
+    return result;
   }
 
   /** The rows of `filters` (one find; an `$or` when several), each counted against the cap. */
@@ -331,8 +360,8 @@ export class IndexRead {
    */
   async *match(space: string, files: boolean, graph: N3.NamedNode, terms: readonly [PatternSlot, PatternSlot, PatternSlot]): AsyncGenerator<N3.Quad, void, undefined> {
     const bound = terms.filter((t): t is PatternTerm => isBound(t) && isGround(t)).flatMap(keysOfTerm);
-    await this.lookUpKeys(space, bound);
-    const slots = this.slotsOf(space, terms);
+    const found = await this.lookUpKeys(space, bound);
+    const slots = this.slotsOf(found, terms);
     if (!slots.every(x => x === null || x.length > 0)) return;
     const filters = filtersOf(slots);
     const where: Document = filters.length === 1 ? filters[0]! : { $or: filters };
@@ -366,21 +395,34 @@ export class IndexRead {
   async matchMany(space: string, files: boolean, graph: N3.NamedNode, patterns: ReadonlyArray<readonly [PatternSlot, PatternSlot, PatternSlot]>): Promise<N3.Quad[][]> {
     if (patterns.length > IndexRead.BATCH) throw new Error(`one index read answers at most ${IndexRead.BATCH} patterns`);
     const bound = patterns.flatMap(p => p.filter((t): t is PatternTerm => isBound(t) && isGround(t)).flatMap(keysOfTerm));
-    await this.lookUpKeys(space, bound);
-    const slots = patterns.map(p => this.slotsOf(space, p));
+    const found = await this.lookUpKeys(space, bound);
+    const slots = patterns.map(p => this.slotsOf(found, p));
     const live = slots.filter(s => s.every(x => x === null || x.length > 0));
     const filters = live.flatMap(filtersOf);
     // A free pattern reads every row: no other filter narrows it.
     const rows = await this.rowsOf(space, files, filters.some(f => Object.keys(f).length === 0) ? [{}] : dedupe(filters));
     const quads = await this.quadsOf(space, graph, rows);
-    return slots.map(s => (s.every(x => x === null || x.length > 0) ? quads.filter((_, i) => rowFits(rows[i]!, s)) : []));
+    // Rows times patterns tests: the loop checks for a caller that left, and gives the event loop a turn, as the reads do (finding G6).
+    const answers: N3.Quad[][] = [];
+    let tested = 0;
+    for (const s of slots) {
+      const fit: N3.Quad[] = [];
+      if (s.every(x => x === null || x.length > 0)) {
+        for (let i = 0; i < rows.length; i++) {
+          if (rowFits(rows[i]!, s)) fit.push(quads[i]!);
+          if (++tested % FILTER_TESTS_PER_CHECK === 0) { this.opts.check(); await yieldToEventLoop(); }
+        }
+      }
+      answers.push(fit);
+    }
+    return answers;
   }
 
   /** An estimate of the statements of a pattern in `space`, for the engine's planner: a count bounded by the cap. */
   async estimate(space: string, files: boolean, terms: readonly [PatternSlot, PatternSlot, PatternSlot]): Promise<number> {
     const bound = terms.filter((t): t is PatternTerm => isBound(t) && isGround(t)).flatMap(keysOfTerm);
-    await this.lookUpKeys(space, bound);
-    const slots = this.slotsOf(space, terms);
+    const found = await this.lookUpKeys(space, bound);
+    const slots = this.slotsOf(found, terms);
     if (!slots.every(x => x === null || x.length > 0)) return 0;
     const filters = filtersOf(slots);
     const where: Document = filters.length === 1 ? filters[0]! : { $or: filters };
