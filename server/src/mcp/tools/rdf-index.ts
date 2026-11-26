@@ -17,7 +17,8 @@ export const space_rdf_rebuildTool: ToolHandler = {
   description: 'Rebuild the SPARQL triple index of one space from its records: the repair when its index is stale, missing or drifted. '
     + 'Returns as soon as the rebuild STARTS; it runs in the background, and SPARQL queries of the space read its records meanwhile '
     + '(slower, same answers). Poll `space_rdf_index` until `status` is `ready` on a new `buildId` and `rebuilding` is false. A rebuild '
-    + 'reads every record of the space once. A second call while one runs joins it. A space with RDF off is refused (409 `rdf_off`). '
+    + 'reads every record of the space once. A second call while one runs joins it. A space with RDF off is refused (409 `rdf_off`), and so '
+    + 'is one whose rebuild another instance runs (409 `rebuild_busy`: poll `space_rdf_index`, or ask again when it has ended). '
     + 'Needs the knowledge admin right on the space.',
   mutating: true,
   spaceRequired: true,
@@ -28,7 +29,7 @@ export const space_rdf_rebuildTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const started = startTripleIndexRebuild(ctx.callSpace);
+    const started = await startTripleIndexRebuild(ctx.callSpace);
     if (!started.ok) return toolErrorResult(`${started.error} (${started.code})`, started.status);
     const out = { status: started.status, spaceId: started.spaceId };
     return { content: [{ type: 'text' as const, text: JSON.stringify(out) }], structuredContent: out };

@@ -12,9 +12,14 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { docker, dockerOk, dockerPlain, pinnedImage, sleep, variantOf } from './env.mjs';
+import { DEFAULT_NAME_PREFIX, docker, dockerOk, dockerPlain, pinnedImage, sleep, variantOf } from './env.mjs';
 
-export const oxigraphNames = (size) => ({ container: `b271-oxigraph-${size}`, volume: `b271-oxigraph-${size}` });
+/**
+ * The names a run with `prefix` (`env.mjs` `namePrefixOf`: `--name-prefix`, else the work folder) gives its Oxigraph container and volume,
+ * as `ythril.mjs` `ythrilNames` names Ythril's: two runs with different prefixes share none, so one run's `oxigraphUp`, which removes its own
+ * names first, never removes another's (finding H1).
+ */
+export const oxigraphNames = (size, prefix = DEFAULT_NAME_PREFIX) => ({ container: `${prefix}-oxigraph-${size}`, volume: `${prefix}-oxigraph-${size}` });
 
 export function statePath(work, name) {
   return join(work, 'state', `${name}.json`);
@@ -28,12 +33,12 @@ export function ensureImage(ref) {
   return digest;
 }
 
-export async function oxigraphUp(work, size) {
+export async function oxigraphUp(work, size, prefix = DEFAULT_NAME_PREFIX) {
   const variant = variantOf(work, size);
   const image = pinnedImage('oxigraph');
   const digest = ensureImage(image);
-  const { container, volume } = oxigraphNames(size);
-  oxigraphDown(size);
+  const { container, volume } = oxigraphNames(size, prefix);
+  oxigraphDown(size, prefix);
   dockerOk(['volume', 'create', volume]);
 
   const t0 = process.hrtime.bigint();
@@ -59,8 +64,8 @@ export async function oxigraphUp(work, size) {
   return state;
 }
 
-export function oxigraphDown(size) {
-  const { container, volume } = oxigraphNames(size);
+export function oxigraphDown(size, prefix = DEFAULT_NAME_PREFIX) {
+  const { container, volume } = oxigraphNames(size, prefix);
   dockerPlain(['rm', '-f', container]);
   dockerPlain(['volume', 'rm', '-f', volume]);
 }

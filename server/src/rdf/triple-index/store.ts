@@ -32,7 +32,7 @@
 import { Binary, type ClientSession } from 'mongodb';
 import type { SpaceMeta } from '@ythril-network/schema';
 import { canonicalJsonHash } from '../../util/canonical-json.js';
-import { col, asFilter, asUpdate, asBulk } from '../../db/mongo.js';
+import { col, getDb, asFilter, asUpdate, asBulk } from '../../db/mongo.js';
 import { spaceCollection, parseSpaceCollection, SPACE_COLLECTIONS, type SpacePart } from '../../db/space-collection.js';
 import { inBoundedTransaction } from '../../db/bounded-transaction.js';
 import { inChunks } from '../../util/chunks.js';
@@ -174,6 +174,28 @@ export async function runningTripleIndexBuild(spaceId: string): Promise<{ buildI
 export async function writeBuiltState(spaceId: string, state: Omit<TripleIndexState, '_id'>, session: ClientSession): Promise<void> {
   // The replacement carries no `_id`: an upsert takes it from the filter.
   await stateCollection(spaceId).replaceOne(asFilter<TripleIndexState>({ _id: 'state' }), { ...state }, { upsert: true, session });
+  // The verify's cursors (`verify.ts`) count the old dictionary's ids and the old record rows: the new index starts them from the first
+  // (finding F10). Here, so no swap can state a new index and keep the old cursors.
+  await col<{ _id: string }>(spaceCollection(spaceId, 'rdfState')).deleteOne(asFilter<{ _id: string }>({ _id: 'verify' }), { session });
+}
+
+/**
+ * Drop every build collection of `spaceId` that is not `keepBuildId`'s: what a build that ended without dropping its own (its process was
+ * killed in the fill, or the space was renamed under it) left behind. Only a build that holds the build row may call it: no other build of
+ * the space writes then, so every other build collection is an orphan (review point U3). A collection that cannot be dropped is left for
+ * the next build; answers the names dropped.
+ */
+export async function dropOrphanBuildCollections(spaceId: string, keepBuildId: string): Promise<string[]> {
+  const own = new Set(Object.values(buildCollectionsOf(spaceId, keepBuildId)));
+  // `<space>_`: a space id has no `_`, so the prefix names this space's collections alone.
+  const prefix = spaceCollection(spaceId, 'rdfState').slice(0, -SPACE_COLLECTIONS.rdfState.length);
+  const names = (await getDb().listCollections({}, { nameOnly: true }).toArray()).map(c => c.name)
+    .filter(n => n.startsWith(prefix) && BUILD_COLLECTION.test(n.slice(prefix.length)) && !own.has(n));
+  const dropped: string[] = [];
+  for (const name of names) {
+    try { await getDb().dropCollection(name); dropped.push(name); } catch { /* left for the next build */ }
+  }
+  return dropped;
 }
 
 /** Set the status of `buildId`'s index, in `session`, when the index is still that build's. */

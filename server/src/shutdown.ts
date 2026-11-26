@@ -14,7 +14,7 @@
  *  2. Scheduling closes, a reload in flight is waited for; then every job and worker is stopped, so nothing starts during the drain.
  *  3. The HTTP drain, and ALONGSIDE it the wait for sync cycles in flight: a running cycle stops at its next page and answers, bounded by
  *     {@link CYCLE_WAIT_MS} and never by more than the drain has left, so the two share one budget (Docker's 10 s stop grace) instead of adding up.
- *  4. The final flushes, the config, `closeMongo`, `exit`.
+ *  4. The triple index rebuilds in flight are awaited, bounded ({@link REBUILD_WAIT_MS}); the final flushes, the config, `closeMongo`, `exit`.
  */
 import type { Server } from 'http';
 import { getConfig, flushConfig } from './config/loader.js';
@@ -45,6 +45,9 @@ export interface ShutdownOptions {
  * five seconds is far above a page on a healthy store and still inside the drain. Cut down to what the drain has left, never added to it.
  */
 const CYCLE_WAIT_MS = 5_000;
+
+/** The most a shutdown waits for triple index rebuilds in flight: a fill stops at its next page, a swap in progress is a few renames. */
+const REBUILD_WAIT_MS = 5_000;
 
 /**
  * Wait, bounded, for the sync cycles running now to stop at their page and answer. A cycle that does not stop in time is named (by network) and
@@ -200,6 +203,13 @@ export async function runShutdown(opts: ShutdownOptions): Promise<void> {
     }),
     waitForSyncCycles(Math.min(CYCLE_WAIT_MS, httpDrainMs)),
   ]);
+  // A triple index rebuild in flight (the upkeep's, or one an admin started) stops at its next page, as `beginShutdown` ended its fill, and is
+  // awaited here, bounded: none runs on into `closeMongo`. The upkeep job was stopped above, so no tick starts another. A swap the close
+  // cuts is left `stale`, which the upkeep rebuilds after the next start (review finding F2).
+  const { awaitTripleIndexRebuilds } = await import('./rdf/triple-index/rebuild.js');
+  if (!(await awaitTripleIndexRebuilds(REBUILD_WAIT_MS))) {
+    log.warn(`Shutdown: a triple index rebuild still ran after ${REBUILD_WAIT_MS}ms — ended by the database closing; its index is rebuilt after the next start`);
+  }
   // The final flush: what requests that finished during the drain above emitted is in the dispatcher's rows now, and `closeMongo` is
   // below. Before the inference stop, which is slower and has nothing to do with the retry queue.
   await drainFirstDeliveries({ withinMs: DRAIN_MS }).then(

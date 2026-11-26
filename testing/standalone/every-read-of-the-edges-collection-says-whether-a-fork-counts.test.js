@@ -170,6 +170,9 @@ const EXEMPT = {
   ...reasoned('the drift verify recomputes a rolling sample of edge rows with the record form and compares each with its record row: a fork row must be in the sample, since its expected statements (none) are compared too', [
     'rdf/triple-index/verify.ts:verifyTripleIndex',
   ]),
+  ...reasoned('the drift verify (review finding F9) asks whether the record a record row names is stored at all, by `_id` and with no field read: a fork row is stored (its row states nothing, which the comparison of the other direction holds), so only a record row whose edge row is gone is drift; a clause would call the row of a mere fork a stray and rebuild the index for it at every verify', [
+    'rdf/triple-index/verify.ts:rowsWithoutRecords',
+  ]),
 };
 
 const INDEX = moduleIndex(SERVER_CODE_ROOTS);
