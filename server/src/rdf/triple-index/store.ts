@@ -179,12 +179,13 @@ export async function runningTripleIndexBuild(spaceId: string): Promise<{ buildI
  * The swap's state write, in `session` (fenced by the caller): the index is `buildId`'s, of `formKey`, applied up to `appliedPos`, with
  * `status`. Replaces whatever state the index had.
  */
-export async function writeBuiltState(spaceId: string, state: Omit<TripleIndexState, '_id'>, session: ClientSession): Promise<void> {
-  // The whole row is replaced, but the write counter carries on, raised by one: a swap is a change of the index, and a counter that went back
-  // could read as an earlier index again (`read.ts` keeps counts under it). A pipeline, so the old counter is read in the same write.
-  await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state' }), [
-    { $replaceWith: { $mergeObjects: [{ $literal: { ...state, _id: 'state' } }, { writes: { $add: [{ $ifNull: ['$writes', 0] }, 1] } }] } },
-  ] as never, { upsert: true, session }); // `as never`: the driver's update type takes no pipeline of `$replaceWith`.
+export async function writeBuiltState(spaceId: string, state: Omit<TripleIndexState, '_id' | 'writes'>, session: ClientSession): Promise<void> {
+  // Every field of the row is set (a row holds no other), but the write counter carries on, raised by one: a swap is a change of the index,
+  // and a counter that went back could read as an earlier index again (`read.ts` keeps counts under it).
+  const { buildId, ...rest } = state;
+  await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state' }),
+    asUpdate<TripleIndexState>({ $set: buildId === undefined ? rest : { ...rest, buildId }, ...RAISE_WRITES, ...(buildId === undefined ? { $unset: { buildId: '' } } : {}) }),
+    { upsert: true, session });
   // The verify's cursors (`verify.ts`) count the old dictionary's ids and the old record rows: the new index starts them from the first
   // (finding F10). Here, so no swap can state a new index and keep the old cursors.
   await col<{ _id: string }>(spaceCollection(spaceId, 'rdfState')).deleteOne(asFilter<{ _id: string }>({ _id: 'verify' }), { session });

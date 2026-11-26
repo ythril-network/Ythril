@@ -54,6 +54,7 @@ import { spaceCollection } from '../../db/space-collection.js';
 import { log, peerText } from '../../util/log.js';
 import { warnOnce, SAY_ONCE_WINDOW_MS } from '../../util/warn-once.js';
 import { inChunks } from '../../util/chunks.js';
+import { LruMap } from '../../util/lru-map.js';
 import { yieldToEventLoop } from '../../util/yield-to-event-loop.js';
 import { xsd, type Term } from '../literals.js';
 import { toRdfJsTerm, type RdfJsTerm } from '../rdf-js-terms.js';
@@ -531,19 +532,9 @@ export const KEPT_COUNTS_MAX = 10_000;
  * an index that changed after it; a rebuild has another build id. A space deleted and made again starts another build. What it prevents:
  * a term lookup and a count of `rdf_quads` per free pattern per query, most of a small query's planning.
  */
-const keptCounts = new Map<string, number>();
-function keptCount(key: string): number | undefined {
-  const n = keptCounts.get(key);
-  if (n === undefined) return undefined;
-  keptCounts.delete(key);
-  keptCounts.set(key, n);
-  return n;
-}
-function keepCount(key: string, n: number): void {
-  keptCounts.delete(key);
-  keptCounts.set(key, n);
-  while (keptCounts.size > KEPT_COUNTS_MAX) keptCounts.delete(keptCounts.keys().next().value as string);
-}
+const keptCounts = new LruMap<string, number>(KEPT_COUNTS_MAX);
+const keptCount = (key: string): number | undefined => keptCounts.get(key);
+const keepCount = (key: string, n: number): void => keptCounts.set(key, n);
 
 /** Filters once each (two bindings of one join may ask the same lookup). */
 function dedupe(filters: readonly Document[]): Document[] {

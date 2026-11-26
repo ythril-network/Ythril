@@ -14,9 +14,9 @@
 import { col, isVectorSearchAvailable, asFilter } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
 import { NotFoundError, NotEmbeddedYetError, notFoundSentence } from '../util/errors.js';
-import type { EmbeddingResult } from './embedding.js';
-import { embedQuery } from './query-embedding-cache.js';
-import { timePhase } from '../http/phase-timer.js';
+import { embed, prepareInput, type EmbeddingResult } from './embedding.js';
+import { QueryEmbeddingCache, QUERY_EMBEDDINGS_MAX, QUERY_EMBEDDING_TTL_MS } from './query-embedding-cache.js';
+import { timePhase, beginPhase } from '../http/phase-timer.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { needsReindex } from '../spaces/_shared.js';
 // The pure half — merge, rank and the text projections. Moved out to pay back part of this file's
@@ -92,6 +92,18 @@ export const MIN_RECALL_BUDGET_MS = 250;
  * budget into a guaranteed timeout. A small floor means the last hop still gets a real chance.
  */
 export const MIN_SEARCH_DEADLINE_MS = 100;
+
+/** The query vectors of this process (`query-embedding-cache.ts` says what the cache keeps and what it must not). */
+const queryVectors = new QueryEmbeddingCache<EmbeddingResult>({ max: QUERY_EMBEDDINGS_MAX, ttlMs: QUERY_EMBEDDING_TTL_MS });
+
+/**
+ * The query vector of `text` under the embedding configuration now: kept per (prepared text, model, endpoint), or embedded once. The
+ * key is built here, from the same `prepareInput` the model call uses, so a changed model, endpoint or prefix scheme is never a hit.
+ */
+function embedQuery(text: string): Promise<EmbeddingResult> {
+  const cfg = getEmbeddingConfig();
+  return queryVectors.get({ input: prepareInput(text, 'query', cfg), model: cfg.model, endpoint: cfg.baseUrl ?? 'local' }, () => embed(text, 'query'));
+}
 
 /**
  * Await per-type searches, keeping what answered and flagging what could not.
@@ -346,9 +358,13 @@ export async function recall(
   // queries a channel that can actually see them. Best-effort throughout: a space with no text index
   // contributes an empty channel and the vector order stands unchanged.
   // `fused` says whether ONE fusion ranked this whole pool, which is what lets the rerank cap trust it.
-  const fused = hybridSearchEnabled()
-    && await timePhase('lexical', () => applyLexicalFusion(spaceId, query, embResult.vector, activeTypes, perTypeK, allResults, guaranteed, tags, filter,
-      opts?.observeLexical));
+  const endLexical = beginPhase('lexical');
+  let fused: boolean;
+  try {
+    fused = hybridSearchEnabled()
+      && await applyLexicalFusion(spaceId, query, embResult.vector, activeTypes, perTypeK, allResults, guaranteed, tags, filter,
+        opts?.observeLexical);
+  } finally { endLexical(); }
 
   // Phase 3: rerank the candidate pool, if a cross-encoder is configured. Best-effort by construction —
   // `rerankPool` leaves the fused order untouched when the reranker has no opinion.
