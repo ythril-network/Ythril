@@ -358,7 +358,10 @@ export function edgeRefusal(
     }
   }
   if (subject?.minted) view.mint(subject.id);
-  const existing = view.triplet({ from, to, label, fromKind: opts?.fromKind, toKind: opts?.toKind });
+  // An edge this batch deletes and writes again is the same record (its identity is its triplet): converged onto the deleted one, and the
+  // group drops the delete (`commitWriteGroup`), never two plans of one id.
+  const triplet = { from, to, label, fromKind: opts?.fromKind, toKind: opts?.toKind };
+  const existing = view.triplet(triplet) ?? view.deletedTriplet(triplet);
 
   /*
    * THE SCHEMA IS ENFORCED HERE, so that no caller can reach the collection around it — owner's ruling,

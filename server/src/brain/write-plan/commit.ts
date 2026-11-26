@@ -374,6 +374,64 @@ export interface LinkReconcile {
   minted: boolean;
 }
 
+/** The connections a record's write wants, by derived link id. A record naming the same id twice is one connection — the Map dedupes it. */
+function wantedLinks(r: LinkReconcile): Map<string, { to: string; toKind: RefKind }> {
+  const wanted = new Map<string, { to: string; toKind: RefKind }>();
+  for (const toKind of Object.keys(r.desired) as RefKind[]) {
+    for (const to of r.desired[toKind] ?? []) wanted.set(linkIdFor(r.from, r.fromKind, to, toKind), { to, toKind });
+  }
+  return wanted;
+}
+
+/**
+ * The stored link rows of the classes each of `records` names, by record (`existingBy[i]`), with each row's version. The one read of "what is
+ * stored" for the reconcile and for the count of what a converge will drop ({@link countDroppedLinkRows}): a minted record, and one naming no
+ * class, has none read. `session`: read inside a write group's transaction.
+ */
+async function readExistingLinkRows(spaceId: string, records: readonly LinkReconcile[], session?: ClientSession) {
+  const linksColl = col<LinkDoc>(spaceCollection(spaceId, 'links'));
+  const existingBy = records.map(() => [] as string[]);
+  const seqOfExisting = new Map<string, number | undefined>();
+  const toRead = records.map((r, i) => ({ r, i })).filter(({ r }) => !r.minted && Object.keys(r.desired).length > 0);
+  for (const chunk of inChunks(toRead, READ_CHUNK)) {
+    const rows = await linksColl.find(asFilter<LinkDoc>({
+      spaceId,
+      // Only the classes each write TOUCHED: a patch naming `linkEntities` alone must not disturb fact links.
+      $or: chunk.map(({ r }) => ({ from: r.from, fromKind: r.fromKind, toKind: { $in: Object.keys(r.desired) } })),
+    }), { projection: { _id: 1, from: 1, fromKind: 1, toKind: 1, seq: 1 }, ...(session ? { session } : {}) }).toArray() as Array<Pick<LinkDoc, '_id' | 'from' | 'fromKind' | 'toKind' | 'seq'>>;
+    for (const { r, i } of chunk) {
+      const classes = new Set(Object.keys(r.desired));
+      const mine = rows.filter(row => row.from === r.from && row.fromKind === r.fromKind && classes.has(row.toKind));
+      existingBy[i] = mine.map(row => row._id);
+      // The seq each row has, so the tombstone of one this reconcile removes carries it (`writeTombstones`).
+      for (const row of mine) seqOfExisting.set(row._id, row.seq);
+    }
+  }
+  return { existingBy, seqOfExisting };
+}
+
+/**
+ * How many stored link rows a non-additive {@link reconcileLinkRows} of `records` removes: the rows of the classes each names that its write no
+ * longer wants. Read before a write group's session opens, so the group's ceilings count the removals and their tombstones.
+ */
+export async function countDroppedLinkRows(spaceId: string, records: readonly LinkReconcile[]): Promise<number> {
+  const { existingBy } = await readExistingLinkRows(spaceId, records);
+  let dropped = 0;
+  records.forEach((r, i) => {
+    const wanted = wantedLinks(r);
+    dropped += existingBy[i]!.filter(id => !wanted.has(id)).length;
+  });
+  return dropped;
+}
+
+/** A group's reconcile would remove more link rows than its ceilings counted: rows arrived after the count. Nothing was removed. */
+export class LinkRemovalsOverCount extends Error {
+  constructor(readonly counted: number, readonly found: number) {
+    super(`a reconcile would remove ${found} link row(s), and the ${counted} it was counted for were all it may remove`);
+    this.name = 'LinkRemovalsOverCount';
+  }
+}
+
 /**
  * Make each record's link rows equal what its write says — the one writer of link rows.
  *
@@ -393,42 +451,21 @@ export interface LinkReconcile {
  * for the caller to check after its commit (`runAfterCommit`); `takenBack` stays empty.
  *
  * @param opts.additive create and never delete — the link conversion's question, see `reconcileLinks`.
+ * @param opts.removalCeiling inside a transaction: the rows the caller counted this reconcile would remove ({@link countDroppedLinkRows}); more
+ * rows to remove than that throws {@link LinkRemovalsOverCount} before any is removed.
  */
 export async function reconcileLinkRows(
   spaceId: string, records: readonly LinkReconcile[],
-  opts: { additive?: boolean } & ({ session?: undefined; owed?: undefined } | { session: ClientSession; owed: LandedLinkRow[] }) = {},
+  opts: { additive?: boolean } & ({ session?: undefined; owed?: undefined; removalCeiling?: undefined }
+    | { session: ClientSession; owed: LandedLinkRow[]; removalCeiling?: number }) = {},
 ): Promise<Array<{ added: number; removed: number; takenBack: string[] }>> {
   const { session } = opts;
   const inSession = session ? { session } : {};
   // Refused before the rows are read; the removals and additions below are admitted and counted again, at the instant they are made.
   assertSpaceTakesWrites(spaceId, 'links');
-  const wantedBy = records.map(r => {
-    const wanted = new Map<string, { to: string; toKind: RefKind }>();
-    for (const toKind of Object.keys(r.desired) as RefKind[]) {
-      // A record naming the same id twice is one connection — the Map dedupes it by the derived id.
-      for (const to of r.desired[toKind] ?? []) wanted.set(linkIdFor(r.from, r.fromKind, to, toKind), { to, toKind });
-    }
-    return wanted;
-  });
-
+  const wantedBy = records.map(wantedLinks);
+  const { existingBy, seqOfExisting } = await readExistingLinkRows(spaceId, records, session);
   const linksColl = col<LinkDoc>(spaceCollection(spaceId, 'links'));
-  const existingBy = records.map(() => [] as string[]);
-  const seqOfExisting = new Map<string, number | undefined>();
-  const toRead = records.map((r, i) => ({ r, i })).filter(({ r }) => !r.minted && Object.keys(r.desired).length > 0);
-  for (const chunk of inChunks(toRead, READ_CHUNK)) {
-    const rows = await linksColl.find(asFilter<LinkDoc>({
-      spaceId,
-      // Only the classes each write TOUCHED: a patch naming `linkEntities` alone must not disturb fact links.
-      $or: chunk.map(({ r }) => ({ from: r.from, fromKind: r.fromKind, toKind: { $in: Object.keys(r.desired) } })),
-    }), { projection: { _id: 1, from: 1, fromKind: 1, toKind: 1, seq: 1 }, ...inSession }).toArray() as Array<Pick<LinkDoc, '_id' | 'from' | 'fromKind' | 'toKind' | 'seq'>>;
-    for (const { r, i } of chunk) {
-      const classes = new Set(Object.keys(r.desired));
-      const mine = rows.filter(row => row.from === r.from && row.fromKind === r.fromKind && classes.has(row.toKind));
-      existingBy[i] = mine.map(row => row._id);
-      // The seq each row has, so the tombstone of one this reconcile removes carries it (`writeTombstones`).
-      for (const row of mine) seqOfExisting.set(row._id, row.seq);
-    }
-  }
 
   const removals: string[] = [];
   const additions: Array<{ _id: string; r: LinkReconcile; at: number; to: string; toKind: RefKind }> = [];
@@ -440,6 +477,9 @@ export async function reconcileLinkRows(
     for (const [_id, { to, toKind }] of added) additions.push({ _id, r, at: i, to, toKind });
     return { added: added.length, removed: removed.length, takenBack: [] as string[] };
   });
+  // A group counted the rows its converges drop before its session opened: more rows read than were counted means rows arrived since, and the
+  // group's ceilings did not count them. Refused before anything is removed.
+  if (opts.removalCeiling !== undefined && removals.length > opts.removalCeiling) throw new LinkRemovalsOverCount(opts.removalCeiling, removals.length);
 
   const tombstones = col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'));
   const now = new Date().toISOString();

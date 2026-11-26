@@ -127,8 +127,10 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
     ? chronoEmbedText(fields.title, fields.type, status, left.description, left.tags ?? [], left.properties)
     : chronoEmbedText(fields.title, fields.type, status, fields.description, tags, fields.properties);
   // Suppression wins over `waitForEmbedding`, on the record the write LEAVES (`Q-194`).
+  // A removal of the flag leaves the entry with none, which is `false` to the decision (never "state nothing": that reads the stored `true`).
   const { suppressed, vector } = await vectorBeforeWrite({
-    spaceId, kind: 'chrono', existing, schemaKey: { type: fields.type }, stated: opts?.suppressEmbeddings,
+    spaceId, kind: 'chrono', existing, schemaKey: { type: fields.type },
+    stated: 'suppressEmbeddings' in folded.unset ? false : opts?.suppressEmbeddings,
     wanted: opts?.waitForEmbedding === true,
     planMeta: trusted?.planMeta !== undefined ? write.meta : undefined,
     text: () => embedText,
