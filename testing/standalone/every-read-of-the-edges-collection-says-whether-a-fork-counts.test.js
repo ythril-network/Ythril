@@ -152,6 +152,10 @@ const EXEMPT = {
   ...reasoned('the relink reads every edge of a record, forks included, because the fork must follow its subject (re-minted, design section 7)', [
     'brain/merge.ts:relinkTally',
   ]),
+  // ── the triple index follows every row (bundle-273, design-r2 R7): a fork row is read so its statements are dropped, never stated
+  ...reasoned('the triple index follower reads every edge row with no filter (R7): the record form gives a fork row no statements, so a row that became a fork drops what it stated', [
+    'rdf/triple-index/follow.ts:changesAfter', 'rdf/triple-index/follow.ts:currentForms',
+  ]),
 };
 
 const INDEX = moduleIndex(SERVER_CODE_ROOTS);

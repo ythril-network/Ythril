@@ -283,6 +283,17 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
  */
 export const POSITION_WORK_INDEXES: readonly SpaceIndex[] = SPACE_INDEXES.filter(ix => ix.builder === 'keyset' || 'pos' in ix.keys);
 
+/**
+ * The triple index's own indexes (bundle-273, Q-764, `rdf/triple-index/store.ts`): the dictionary's unique key and the two statement orders
+ * beside the `{s,p,o}` `_id`. Not part of {@link SPACE_INDEXES}: a space with RDF off has no index collection, so `initSpace`, the background
+ * pass and a restore build none of them; the follower builds them when it starts a space's index, and a restore drops the index whole.
+ */
+export const TRIPLE_INDEX_INDEXES: readonly SpaceIndex[] = Object.freeze<SpaceIndex[]>([
+  { part: 'rdfTerms', keys: { k: 1 }, options: { name: 'k_unique', unique: true }, policy: 'throw' },
+  { part: 'rdfQuads', keys: { p: 1, o: 1, s: 1 }, options: { name: 'p_o_s' }, policy: 'throw' },
+  { part: 'rdfQuads', keys: { o: 1, s: 1, p: 1 }, options: { name: 'o_s_p' }, policy: 'throw' },
+]);
+
 /** The TTL sweep's part of {@link SPACE_INDEXES}. */
 export const SWEEP_INDEXES: readonly SpaceIndex[] = SPACE_INDEXES.filter(ix => ix.sweep === true);
 

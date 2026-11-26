@@ -176,6 +176,9 @@ const EXEMPT = {
   // ── it must SEE the flagged row, through the `_id` pager (Q-481)
   'server/src/files/leaked-rows-repair.ts:derivedRowsPage': 'the leaked-rows repair reads every row by `_id`, any kind and flagged ones included, and decides each itself: a derived row whose parent is gone is removed, a flagged one is kept by its own `deletedAt` check; a predicate on the read would make the cursor skip the rows it decides on and could wedge a page on a run of rows it excluded',
   'server/src/spaces/schema-validate-door.ts:walkStored': 'the stored-data schema validation walks every record of each member collection by `_id`, files included, because a flagged row is stored data the schema still governs; its `progress.total` counts the whole collection, and a predicate here would make the walk answer for fewer rows than it says it checked',
+  // ── it must SEE the flagged row, so its statements go (bundle-273, design-r2 R7)
+  'server/src/rdf/triple-index/follow.ts:changesAfter': 'the triple index follower reads every file row above where it stands, soft deletes and feed markers included: the record form gives such a row no statements, so a file that was deleted drops what it stated; a predicate would hide the deletion and keep its statements',
+  'server/src/rdf/triple-index/follow.ts:currentForms': 'reads the current row of a record a tombstone names, with no predicate, for the same reason: a flagged row has no form and its statements are dropped',
 };
 
 const INDEX = moduleIndex(SERVER_CODE_ROOTS);

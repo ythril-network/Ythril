@@ -404,6 +404,9 @@ const EVERY = 'every';
 const SITES = [
   { file: 'server/src/sync/arrivals.ts', sites: 1, kind: 'sliced', reason: 'a peer\'s page, sliced by bytes and by count' },
   { file: 'server/src/sync/tombstone-apply.ts', sites: 1, kind: 'sliced', reason: 'a peer\'s tombstone page: 5000 counted, each op carries an unbounded id twice' },
+  // Bundle-273 (Q-764): the triple index's batch, inside the follower's bounded transaction, sliced by bytes and by count.
+  { file: 'server/src/rdf/triple-index/store.ts', sites: 2, kind: 'sliced', reason: 'one follower batch\'s statement counts and record rows: up to 500 records, a record\'s statement ids unbounded, sliced by bytes and by count' },
+  { file: 'server/src/rdf/triple-index/terms.ts', sites: 1, kind: 'sliced', reason: 'one follower batch\'s new dictionary terms: a literal key can be long, sliced by bytes and by count' },
   { file: 'server/src/brain/edge-rekey.ts', sites: 1, kind: 'chunked', cap: 'ROWS_PER_BULK_COMMAND', reason: 'edge rows, 1000 at a time; an edge document is nowhere near 16 KiB' },
   { file: 'server/src/brain/tombstones.ts', sites: 1, kind: 'chunked', cap: 'ROWS_PER_BULK_COMMAND', reason: 'tombstones, 1000 at a time; a tombstone is an id and four fields' },
   { file: 'server/src/sync/resolved-elsewhere.ts', sites: 1, kind: 'chunked', cap: 'ROWS_PER_BULK_COMMAND', reason: 'decision marks on fork rows (Q-624), 1000 at a time; each op is an id and one bounded array' },

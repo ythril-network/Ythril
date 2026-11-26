@@ -39,9 +39,15 @@
  *    5.6 seq, at most `MAX_SYNC_SEQ`), so a wall clock reading before 2005-09-05T05:58:26.843Z refuses to stamp
  *    (`positions_clock_unusable`) instead of handing out a position a peer's carried mark already covers.
  *
+ *  - **A settled write runs the stream's hook** ({@link onSettled}) before it returns (the records stream's triple index, bundle-273), and a stamp
+ *    inside a floor of its space leaves it to the floor, whose transaction commits later. Its failure never fails the write.
+ *
  * `last` is per space and per process. Tests set the wall clock through {@link setPositionClockSourceForTest}.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { HorizonHolds, heldWhile, type Hold, type HoldWording } from './horizon-holds.js';
+import { log, peerText } from './log.js';
+import { warnOnce, SAY_ONCE_WINDOW_MS } from './warn-once.js';
 import { MAX_SYNC_SEQ } from './seq.js';
 import { PositionClockUnusable, PositionsSeedUnavailable } from './errors.js';
 
@@ -70,6 +76,12 @@ export interface PositionStreamConfig<U extends PositionUnit> {
   readonly onSeedFailure?: SeedFailurePolicy;
 }
 
+/**
+ * What runs after a write a stream held has settled, before the write returns ({@link onSettled}). Handed the space's settled cap, read when
+ * it asks. A method of an object, not a function: a method's parameters are bivariant, so a stream of numbers stays a
+ * `PositionStream<number | string>` to the clock's functions.
+ */
+export interface SettledHook<P extends number | string> { after(spaceId: string, settledCap: () => Promise<P>): Promise<void> }
 /** This instance's clock for one space: the last position it handed out, in the stream's unit. */
 interface Clock { last: number }
 
@@ -101,6 +113,8 @@ export class PositionStream<P extends number | string = number | string> {
   readonly clocks = new Map<string, Promise<Clock>>();
   /** @internal The wall clock (epoch ms), replaceable for a test. */
   now: () => number;
+  /** @internal What runs after a held write settles: set once, by {@link onSettled}. */
+  settle: SettledHook<P> | undefined = undefined;
 
   constructor(
     readonly name: string,
@@ -144,6 +158,38 @@ export function createPositionStream(cfg: PositionStreamConfig<PositionUnit>): P
   // (`a-horizon-hold-has-one-primitive-and-every-instance-calls-it`).
   const holds: HorizonHolds<number | string> = new HorizonHolds<number | string>(cfg.wording ?? defaultWording(cfg.name));
   return new PositionStream(cfg.name, cfg.unit, cfg.seed, cfg.now ?? Date.now, holds, cfg.onSeedFailure ?? { policy: 'refuse' });
+}
+
+/**
+ * Run `hook` after every write `stream` holds has settled, before the write returns: the records stream's triple index follower registers
+ * here at the application's start (`rdf/triple-index/follow.ts`), so a door answers after its statements are indexed. Not run for a stamp
+ * inside a floor of the same space ({@link withPositionFloorHeld}: the transaction has not committed; the floor's own settle runs after
+ * it). Its failure is logged and never fails the write. One hook per stream: registering the same one again is a no-op, another throws.
+ */
+export function onSettled<P extends number | string>(stream: PositionStream<P>, hook: SettledHook<P>): void {
+  if (stream.settle !== undefined && stream.settle !== hook) throw new Error(`${stream.name}: a hook after a settled write is registered already`);
+  stream.settle = hook;
+}
+
+/** The floors held in this async context: a stamp inside one of its space has not committed when its write returns. */
+const floorsHeld = new AsyncLocalStorage<readonly { readonly stream: PositionStream; readonly spaceId: string }[]>();
+/** A failing settle is said once per window per stream and space, not once per write: a repeat is the same news. */
+const settleFailures = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
+
+/**
+ * Run the stream's `afterSettle` for `spaceId` once a held write has settled, unless the write sits inside a floor of the same space. Never
+ * throws: the write has landed, and its answer is the write's.
+ */
+async function afterSettled<P extends number | string>(stream: PositionStream<P>, spaceId: string): Promise<void> {
+  const hook = stream.settle;
+  if (hook === undefined) return;
+  if (floorsHeld.getStore()?.some(f => f.stream === (stream as PositionStream) && f.spaceId === spaceId)) return;
+  try {
+    await hook.after(spaceId, () => settledPositionCap(stream, spaceId));
+  } catch (err) {
+    settleFailures(`${stream.name}\0${spaceId}`, () => log.warn(
+      `${peerText(stream.name)}: the work after a settled write of space '${peerText(spaceId)}' failed; the write stands and the next one runs it again: ${peerText(String(err))}`));
+  }
 }
 
 /**
@@ -220,7 +266,9 @@ export async function withPositionHeld<P extends number | string, T>(
   clock.last = first + count - 1;
   const holds = stream.holds;
   const hold = holds.enter(spaceId, stream.encode(first), holder);
-  return heldWhile(holds, spaceId, hold, () => write(stream.encode(first)));
+  const result = await heldWhile(holds, spaceId, hold, () => write(stream.encode(first)));
+  await afterSettled(stream, spaceId);
+  return result;
 }
 
 /**
@@ -241,7 +289,10 @@ export async function withPositionFloorHeld<P extends number | string, T>(
   const floor = stream.next(clock);
   clock.last = Math.max(clock.last, floor - 1);
   const holds = stream.holds;
-  return heldWhile(holds, spaceId, holds.enter(spaceId, stream.encode(floor), holder), fn);
+  const inside = [...(floorsHeld.getStore() ?? []), { stream: stream as PositionStream, spaceId }];
+  const result = await floorsHeld.run(inside, () => heldWhile(holds, spaceId, holds.enter(spaceId, stream.encode(floor), holder), fn));
+  await afterSettled(stream, spaceId);
+  return result;
 }
 
 /**

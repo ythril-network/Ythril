@@ -87,6 +87,12 @@ export const SPACE_COLLECTIONS = {
   // (`brain/schema-convert-items.ts`). Both local, never synced and never hashed; a restore drops them and never loads them.
   schemaConvertRun: 'schema_convert_run',
   schemaConvertItems: 'schema_convert_items',
+  // The space's triple index (bundle-273, Q-764, `rdf/triple-index/`): derived from the records, local, never synced, hashed or dumped;
+  // a restore drops it and the follower starts it again.
+  rdfTerms: 'rdf_terms',
+  rdfQuads: 'rdf_quads',
+  rdfRecords: 'rdf_records',
+  rdfState: 'rdf_state',
 } as const;
 
 export type SpacePart = keyof typeof SPACE_COLLECTIONS;
