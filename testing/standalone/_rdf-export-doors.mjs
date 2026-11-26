@@ -54,6 +54,9 @@ export async function openRdfExportDoors({ suite, spaces }) {
   async function seed(space, kind, docs) {
     if (docs.length === 0) return;
     await doors.col(doors.spaceCollection(space, COLLECTION[kind])).insertMany(docs.map(d => storedRecord(kind, d)));
+    // The space is held to its records (its triple index marked `stale`), as `_sparql-doors.mjs` `seed` holds it: the suites that seed state
+    // the records path's rules (bundle-273, Q-764 S3); the index path's are stated by the S3 specs.
+    await doors.col(doors.spaceCollection(space, 'rdfState')).updateOne({ _id: 'state' }, { $set: { status: 'stale' }, $setOnInsert: { appliedPos: 0, formKey: '' } }, { upsert: true });
   }
 
   /** Empty every seeded collection of `space`. */

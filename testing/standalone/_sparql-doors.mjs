@@ -43,10 +43,15 @@ export async function openSparqlDoors({ suite, spaces, monitorCommands = false }
     }),
   });
 
-  /** Insert `docs` (stored shapes) into the kind's collection of `space`. */
+  /**
+   * Insert `docs` (stored shapes) into the kind's collection of `space`, and hold the space to its records: its triple index is marked
+   * `stale`, so every query reads the records (bundle-273, Q-764 S3). The suites that seed state the records path's rules (its record cap,
+   * its store failures, its counts); the index path's are stated by the S3 specs, which land their records through the records stream.
+   */
   async function seed(space, kind, docs) {
     if (docs.length === 0) return;
     await doors.col(doors.spaceCollection(space, COLLECTION[kind])).insertMany(docs.map(d => storedRecord(kind, d)));
+    await doors.col(doors.spaceCollection(space, 'rdfState')).updateOne({ _id: 'state' }, { $set: { status: 'stale' }, $setOnInsert: { appliedPos: 0, formKey: '' } }, { upsert: true });
   }
 
   const path = (space, params = {}) => {

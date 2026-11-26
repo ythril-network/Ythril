@@ -57,6 +57,10 @@ const READER = 'server/src/db/read-by-id.ts';
  * function that defines them.
  */
 const ALLOWED = new Map([
+  // bundle-273 (Q-764 S3): the triple index's dictionary, read by term id.
+  ['server/src/rdf/triple-index/read.ts:<module>',
+    'the terms of a query\'s index rows, by their dictionary ids (`<space>_rdf_terms`, integer ids, a thousand per find, cached for the query):'
+    + ' a dictionary row is no record, and its key is turned into the term the records path would write.'],
   // bundle-268 (Q-744): the size of schema version texts, read without the texts.
   ['server/src/spaces/type-standing.ts:textSizesOf',
     'the byte size of each of some schema version texts in a space\'s private `<space>_schema_snapshots` (`$strLenBytes`, no text shipped), so'

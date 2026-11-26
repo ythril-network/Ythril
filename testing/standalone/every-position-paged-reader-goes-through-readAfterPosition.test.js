@@ -128,6 +128,13 @@ const EXEMPT = [
     why: 'the delete\'s settle: rows THIS instance landed at or after the position the removal began (less a lookback), to take back as stragglers. A one-off bound on what is deleted, not a page of positions a reader continues',
     holds: (e) => (/removalBegan\s*-\s*SETTLE_LOOKBACK_MICROS/.test(bodyOf(rawByFile.get(e.file) ?? '', e.function)) ? null : 'the range is not the removal\'s start position less the lookback'),
   },
+  // Bundle-273 (Q-764 S3, design-r2 R1): the query barrier counts the rows above `appliedPos`, whatever the cap, to know whether the index
+  // holds every visible write: a bounded count, no page and no order.
+  {
+    file: 'server/src/rdf/triple-index/read.ts', fn: 'lagOf', kind: 'range', by: 'slot',
+    why: 'the triple index barrier: how many visible rows stand above `appliedPos` (R1, whatever the settled cap), a count bounded by the catch-up lag, not a page of positions a reader continues',
+    holds: (e) => (/countDocuments\(/.test(bodyOf(rawByFile.get(e.file) ?? '', e.function)) ? null : 'the barrier no longer counts: a read of rows above appliedPos must go through readAfterPosition'),
+  },
   // Bundle-273 (Q-764, design-r2 R1): the triple index's follower reads every visible row ABOVE `appliedPos` whatever the settled cap, which
   // `readAfterPosition` exists to impose, and merges seven collections by position. A tie at a full batch's last position is left whole to the
   // next batch (`withoutTrailingTie`, in `followOnce`), so no row of a tie is stepped past.
