@@ -56,6 +56,9 @@ function recordDoors(id) {
 describe('a SPARQL view is refused by the record doors and the Update', { skip }, () => {
   before(async () => {
     d = await openSparqlDoors({ suite: 'q762-doors', spaces: [{ id: S }] });
+    // A traverse reads the space's link records, which a space is marked as having once its links are converted: a space seeded straight into
+    // its collections is not, and would refuse every traverse for that, so the plain view's traverse is held to an answer below.
+    await d.loader.mutateConfig(cfg => { cfg.spaces.find(s => s.id === S).completeLinkage = true; });
     await d.seed(S, 'entity', [{ _id: 'e1', name: SECRET, type: 'Person', createdAt: STAMP, updatedAt: STAMP }]);
     tok = await d.mint('q762-doors', { [S]: d.row({ knowledge: 'write' }) });
     const made = await d.rest(tok.key, 'POST', '/api/views', { name: 'q762-construct', members: [S], sparql: { query: QUERY } });
@@ -78,6 +81,8 @@ describe('a SPARQL view is refused by the record doors and the Update', { skip }
     for (const [door, call] of Object.entries(recordDoors('@q762-plain'))) {
       const a = await call();
       assert.equal(codeOf(a), undefined, `${door}: a plain view refused as a construct one: ${fmt(a)}`);
+      // A traverse of a plain view's member is answered: holding it to no construct code alone would pass a 500 as well.
+      if (door.endsWith('traverse')) assert.equal(a.status, 200, `${door}: a plain view's traverse: ${fmt(a)}`);
       // The filters read the member; recall needs an embedder this suite has not, so it is held only to not being refused as a construct.
       if (door.endsWith('filter')) {
         assert.deepEqual(viewMembersOf(a), [S], `${door}: ${fmt(a)}`);
