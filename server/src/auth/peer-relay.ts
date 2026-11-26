@@ -13,8 +13,9 @@
  * cast (compat)"* and then resolved the reporter as `callerPeerId ?? body.instanceId`, so with no peer id the
  * reporter became the cast's own instance: the two always matched, `acceptVoteCast` took the own-cast path,
  * and a network with `requireSignedVotes` accepted an unsigned cast attributed to any instance, on any round.
- * The rounds include `remove`, `space_deletion` and `space_wipe`, and for `club` and `pubsub` one yes with no
- * veto carries.
+ * The rounds include `space_deletion` and `space_wipe`, and for a `club` one yes with no veto carries, for
+ * `pubsub` the publisher's yes alone (Q-968: every subscriber's own yes carried a round there before it; a
+ * `remove` is a round neither type opens).
  *
  * ## Three values, not a boolean
  *

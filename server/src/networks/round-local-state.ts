@@ -54,9 +54,15 @@ export function openRoundHere(net: NetworkConfig, round: VoteRound): VoteRound {
   return round;
 }
 
-/** Why a round a peer served is not adopted — a short phrase, counted per pass and said once as a debug line. */
+/**
+ * Why a round a peer served is not adopted — a short phrase, counted per pass and said as one debug line. The one reason said at warn
+ * (once per network, member and window, by the sync pass) is {@link NEVER_OPENED_REFUSAL}: no honest member serves such a round.
+ */
 export type AdoptionRefusal = 'past its deadline or undatable' | 'deadline beyond what a network allows' | 'already recorded here'
-  | 'proposed by a subscriber' | 'a kind this network type never opens' | 'malformed';
+  | 'proposed by a subscriber' | typeof NEVER_OPENED_REFUSAL | 'malformed';
+
+/** The refusal of a round of a kind the network's type never opens (`roundKindNeverOpenedOn`): a peer's forgery, never an older release's honest round. */
+export const NEVER_OPENED_REFUSAL = 'a kind this network type never opens' as const;
 
 /**
  * Does the round's `openedAt` lie ahead of this instance's clock by more than the one clock tolerance the server names (X11)? Such a
@@ -84,7 +90,7 @@ export function adoptionRefusal(net: NetworkConfig, peerRound: VoteRound, now: n
   if (roundDeadlineBeyondCap(peerRound)) return 'deadline beyond what a network allows';
   if ((net.roundOutcomes ?? []).some(e => e.roundId === peerRound.roundId)) return 'already recorded here';
   // Q-968: a join or removal on a club or pub/sub, which admit and remove members directly, is a peer's forgery whoever serves it.
-  if (roundKindNeverOpenedOn(net, peerRound.type)) return 'a kind this network type never opens';
+  if (roundKindNeverOpenedOn(net, peerRound.type)) return NEVER_OPENED_REFUSAL;
   // D-40, Q-968: on pub/sub every other member is a subscriber, so a round a publisher did not open is a subscriber's, of EVERY kind: its
   // deletion, wipe or rebase is its own local act (Q-748), and its schema change or space addition is not its to decide. A publisher holds
   // none of them, decided from this instance's role, never from a field a relayer could set; no verdict is ever adopted from a peer.

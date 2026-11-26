@@ -22,7 +22,7 @@
 import type { NetworkConfig, NetworkMember, SpaceConfig, VoteCast, VoteRound } from '../config/types.js';
 import { takeServedRdfBases } from '../spaces/rdf-settle.js';
 import { IncomingVoteRound } from '../networks/round-shape.js';
-import { adoptPeerRound, adoptionRefusal, roundOpenedAhead, type AdoptionRefusal } from '../networks/round-local-state.js';
+import { adoptPeerRound, adoptionRefusal, roundOpenedAhead, NEVER_OPENED_REFUSAL, type AdoptionRefusal } from '../networks/round-local-state.js';
 import { roundIsOpen } from '../networks/round-state.js';
 import { acceptVoteCast, castForWire, convertRecordsSignedByProposer } from '../util/signing.js';
 import { recordPeerConcluded } from './peer-concluded-evidence.js';
@@ -62,6 +62,26 @@ function noteClockAhead(net: NetworkConfig, member: NetworkMember, round: VoteRo
   clockAheadSaid(`${net.id} ${member.instanceId}`, () => log.warn(
     `Vote gossip: ${peerText(member.label)} serves rounds of network ${peerText(net.id)} opened ahead of this instance's clock `
     + `(round ${peerText(round.roundId)} openedAt ${peerText(String(round.openedAt))}). Adopted; keep instance clocks within 40 minutes (NTP).`));
+}
+
+/**
+ * Say what a pass did not adopt (`refused`, per reason: the second answer of {@link takeServedRounds}). One debug line for all of it, and (Q-968) a
+ * warn line for a round of a kind the network's type never opens: no honest member serves a join, removal or (pub/sub) space addition there, so
+ * it is a peer's forgery and an operator should see it. The warn goes through `saidOnce` (`refusedGovernancePull`: once per network, member and
+ * window, so a peer serving it every cycle is one line). A round "proposed by a subscriber" stays at debug: an older subscriber opens one honestly.
+ */
+export function sayRefusedRounds(
+  net: NetworkConfig, member: NetworkMember, refused: ReadonlyMap<AdoptionRefusal, number>,
+  saidOnce: (key: string, report: () => void) => boolean,
+): void {
+  const forged = refused.get(NEVER_OPENED_REFUSAL);
+  if (forged) {
+    saidOnce(`never-opened ${net.id} ${member.instanceId}`, () => log.warn(
+      `Vote gossip: ${peerText(member.label)} served ${forged} round(s) of a kind network ${peerText(net.id)} (${net.type}) never opens, not adopted`));
+  }
+  if (refused.size > 0) {
+    log.debug(`Vote gossip: did not adopt ${peerText([...refused].map(([why, n]) => `${n} round(s) ${why}`).join(', '))} from ${peerText(member.label)}`);
+  }
 }
 
 /**
