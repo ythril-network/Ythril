@@ -77,6 +77,9 @@ const REQUESTS = {
   // The RDF import (bundle-270): one entity as JSON-LD, which the door reads from a JSON body. A space another act holds takes no import: the
   // door answers that act's code before it registers an act of its own, and no record of the file lands.
   'POST /api/brain/spaces/:spaceId/import/rdf': { query: { format: 'jsonld' }, body: { '@context': { name: 'http://schema.org/name' }, '@id': 'https://example.org/actheld409/imported-during', name: 'Imported during' }, coll: 'entities', match: { name: 'Imported during' } },
+  // SPARQL Update (bundle-272, Q-761): an INSERT DATA of one entity, sent as the protocol's own media type (`text` under `contentType`, not JSON);
+  // a standing act refuses it with its own code, and the entity is not stored.
+  'POST /api/brain/spaces/:spaceId/sparql/update': { contentType: 'application/sparql-update', text: 'INSERT DATA { <https://example.org/actheld409/entity/updated-during> a <https://w3id.org/ythril/ns#Entity>, <https://example.org/actheld409/vocab/entity/person> ; <http://www.w3.org/2000/01/rdf-schema#label> "Updated during" }', coll: 'entities', match: { name: 'Updated during' } },
 };
 
 /** Derived routes under the prefix that are not one write of a record, each with why. */
@@ -157,8 +160,8 @@ describe('a write a standing act refuses answers 409 with its code on every REST
       const query = req.query ? `?${new URLSearchParams(req.query)}` : '';
       const res = await fetch(`${server.url}${url}${query}`, {
         method,
-        headers: { Authorization: `Bearer ${adminKey}`, ...(req.body ? { 'Content-Type': 'application/json' } : {}) },
-        ...(req.body ? { body: JSON.stringify(req.body) } : {}),
+        headers: { Authorization: `Bearer ${adminKey}`, ...(req.text !== undefined ? { 'Content-Type': req.contentType } : req.body ? { 'Content-Type': 'application/json' } : {}) },
+        ...(req.text !== undefined ? { body: req.text } : req.body ? { body: JSON.stringify(req.body) } : {}),
         signal: AbortSignal.timeout(20_000),
       });
       const text = await res.text();
