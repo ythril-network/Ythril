@@ -28,7 +28,7 @@ const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 process.env['DATA_ROOT'] = path.join(tmpDir, 'data');
 
-const GOOD = { timeoutMs: 20_000, maxRecordsRead: 50_000, maxResults: 500, maxResultBytes: 2_097_152, maxRecordsChanged: 200 };
+const GOOD = { timeoutMs: 20_000, maxRecordsRead: 50_000, maxResults: 500, maxResultBytes: 2_097_152, maxRecordsChanged: 200, maxIndexRowsRead: 600_000 };
 const base = { instanceId: 'sparql-limits-test', instanceLabel: 'test', tokens: [], networks: [], spaces: [{ id: 'general', label: 'General', folders: [] }] };
 const write = (sparql) => fs.writeFileSync(CONFIG_PATH, JSON.stringify({ ...base, ...(sparql === undefined ? {} : { sparql }) }, null, 2), { mode: 0o600 });
 

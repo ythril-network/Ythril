@@ -43,6 +43,8 @@ const PAGER = 'server/src/db/id-keyset-page.ts';
  * An entry whose function no longer holds a shape fails below, so a row cannot outlive what it excuses.
  */
 const EXEMPT = {
+  // bundle-273 (Q-764 S3): an index lookup, not a page.
+  'server/src/rdf/triple-index/read.ts:filterOf': 'a triple index row\'s `_id` is its statement packed as (s, p, o); a range on it is a lookup of every statement of one subject (and predicate) on the primary index, read in one bounded find, never a page a caller continues',
   'server/src/brain/queue-embed-sweep.ts:kindsFrom': 'the embed sweep resumes per kind with `_id > lastId` inside ONE aggregate stream that computes `holdsVector` and carries a total `$limit` across kinds; a page per kind would be a different walk. Whether it converts is the owner\'s D-57',
   'server/src/util/seq-keyset.ts:isoKeysetFilters': 'the `_id` is the TIE under another primary key (an ISO time): the page is ordered by that key, and `_id` only breaks a tie inside one value of it',
   'server/src/util/position-keyset.ts:positionKeysetFilters': 'the `_id` is the TIE under another primary key (`pos`, a record\'s position): the page is ordered by position, and `_id` only breaks a tie inside one position (the legacy band has them)',

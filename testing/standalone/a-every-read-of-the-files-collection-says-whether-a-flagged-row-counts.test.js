@@ -178,6 +178,7 @@ const EXEMPT = {
   'server/src/spaces/schema-validate-door.ts:walkStored': 'the stored-data schema validation walks every record of each member collection by `_id`, files included, because a flagged row is stored data the schema still governs; its `progress.total` counts the whole collection, and a predicate here would make the walk answer for fewer rows than it says it checked',
   // ── it must SEE the flagged row, so its statements go (bundle-273, design-r2 R7)
   'server/src/rdf/triple-index/follow.ts:changesAfter': 'the triple index follower reads every file row above where it stands, soft deletes and feed markers included: the record form gives such a row no statements, so a file that was deleted drops what it stated; a predicate would hide the deletion and keep its statements',
+  'server/src/rdf/triple-index/read.ts:lagOf': 'the query barrier counts every file row above the index\'s appliedPos, soft deletes and feed markers included: the follower applies those rows too (R7), so one not yet applied is a lag like any other',
   'server/src/rdf/triple-index/follow.ts:currentForms': 'reads the current row of a record a tombstone names, with no predicate, for the same reason: a flagged row has no form and its statements are dropped',
 };
 

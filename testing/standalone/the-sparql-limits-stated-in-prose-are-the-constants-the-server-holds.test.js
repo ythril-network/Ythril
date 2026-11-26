@@ -42,7 +42,7 @@ const tool = ALL_TOOLS.find(t => t.name === 'sparql_query') ?? assert.fail('no s
 
 describe('the limits the docs state are the constants the server holds', () => {
   it('the keys are found (a floor, so an empty scan is not a clean one)', () => {
-    assert.deepEqual([...KEYS].sort(), ['maxRecordsChanged', 'maxRecordsRead', 'maxResultBytes', 'maxResults', 'timeoutMs']);
+    assert.deepEqual([...KEYS].sort(), ['maxIndexRowsRead', 'maxRecordsChanged', 'maxRecordsRead', 'maxResultBytes', 'maxResults', 'timeoutMs']);
     assert.equal(SLOT_FAMILIES.sparql.instance >= 1 && SLOT_FAMILIES.sparql.perCaller >= 1, true);
   });
 

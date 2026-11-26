@@ -160,6 +160,9 @@ const EXEMPT = {
   ...reasoned('the triple index follower reads every edge row with no filter (R7): the record form gives a fork row no statements, so a row that became a fork drops what it stated', [
     'rdf/triple-index/follow.ts:changesAfter', 'rdf/triple-index/follow.ts:currentForms',
   ]),
+  ...reasoned('the query barrier counts every edge row above the index\'s appliedPos, fork rows included: the follower applies those rows too (R7), so a fork row not yet applied is a lag like any other', [
+    'rdf/triple-index/read.ts:lagOf',
+  ]),
 };
 
 const INDEX = moduleIndex(SERVER_CODE_ROOTS);
