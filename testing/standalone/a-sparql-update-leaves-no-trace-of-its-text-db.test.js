@@ -28,6 +28,7 @@ import { openSparqlDoors, rdfMeta, baseOf } from './_sparql-doors.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'spu-trace';
+const STRICT = 'spu-trace-strict';
 const OP = 'brain.sparql_update';
 /** A marker no answer, code or sentence of the server holds: found anywhere, it came from the Update's text. */
 const MARK = 'zq7updmark';
@@ -45,12 +46,16 @@ const fields = (row) => Object.fromEntries((row.changes ?? []).map(c => [c.field
 
 describe('a SPARQL Update leaves no trace of its text', { skip }, () => {
   before(async () => {
-    d = await openSparqlDoors({ suite: 'q761-trace', spaces: [{ id: S }] });
-    const e = (id, nick) => ({ _id: id, spaceId: S, name: `N ${id}`, type: 'person', properties: { nick }, seq: 1, createdAt: STAMP, updatedAt: STAMP });
+    d = await openSparqlDoors({
+      suite: 'q761-trace',
+      spaces: [{ id: S }, { id: STRICT, meta: rdfMeta(STRICT, { validationMode: 'strict', typeSchemas: { entity: { person: { propertySchemas: { status: { type: 'string', enum: ['open', 'closed'] } } } } } }) }],
+    });
+    const e = (id, nick, space = S) => ({ _id: id, spaceId: space, name: `N ${id}`, type: 'person', properties: { nick }, seq: 1, createdAt: STAMP, updatedAt: STAMP });
     await d.seed(S, 'entity', [e('e1', 'a'), e('e2', 'b'), e('e3', 'c'), e('gone', 'g')]);
+    await d.seed(STRICT, 'entity', [e('e1', 'a', STRICT)]);
     // Converted AND marked (`completeLinkage`), as every space is after its first boot: a delete reads the links naming its record.
-    await (await import('../../server/dist/brain/links-conversion.js')).convertAndMarkSpaces([{ id: S }]);
-    tok = await d.mint('spu-trace', { [S]: d.row({ knowledge: 'write' }) });
+    await (await import('../../server/dist/brain/links-conversion.js')).convertAndMarkSpaces([{ id: S }, { id: STRICT }]);
+    tok = await d.mint('spu-trace', { [S]: d.row({ knowledge: 'write' }), [STRICT]: d.row({ knowledge: 'write' }) });
     dispatcher = await import('../../server/dist/webhooks/dispatcher.js');
     store = await import('../../server/dist/webhooks/store.js');
     hook = (await store.createWebhook({ url: 'http://127.0.0.1:9/spu', secret: 'spu-trace-secret' })).id;
@@ -99,6 +104,27 @@ describe('a SPARQL Update leaves no trace of its text', { skip }, () => {
       assert.equal(fields(r).recordsChanged, 0, `a refused Update is recorded as changing ${fields(r).recordsChanged} records`);
       assert.match(String(fields(r).outcome), /^sparql_/, `a refused Update's outcome is not its code: ${JSON.stringify(fields(r))}`);
     }
+  });
+
+  it('a strict schema refusal of a value carries the field path and the value\'s kind and length, never the value, on every door', async () => {
+    // A string that fits the property's type and breaks its enum: the translation takes it, so it is the planner's schema refusal that answers.
+    const AGE = `${baseOf(STRICT)}vocab/entity/person#status`;
+    // One at a time: an Update holds its caller's slot until it ends.
+    const { lines, result } = await logLinesDuring(async () => {
+      const got = {};
+      for (const door of ['rest', 'mcp', 'tool']) got[door] = await d.sparqlUpdate(door, tok.key, STRICT, `INSERT DATA { <${baseOf(STRICT)}entity/e1> <${AGE}> "${MARK}" }`);
+      return got;
+    });
+    for (const [door, a] of Object.entries(result)) {
+      assert.equal(a.code, 'sparql_update_refused', fmt(a));
+      assert.ok(a.text.includes('properties.status'), `${door}: the refusal does not name the field path: ${fmt(a)}`);
+      assert.ok(!a.text.includes(MARK), `${door}: the refusal sends the caller's value back: ${fmt(a)}`);
+      assert.ok(!JSON.stringify(a.body ?? {}).includes(MARK), `${door}: the refusal's body sends the caller's value back`);
+    }
+    assert.equal(result.rest.body?.refusals?.[0]?.violation?.introduced?.[0]?.value, `a literal of ${MARK.length} characters`, 'the value is not named by its kind and length');
+    assert.deepEqual(lines.filter(l => l.includes(MARK)), [], 'a log line repeats the value');
+    const rows = await auditRowsOf(d.door.mongo, { operation: OP });
+    assert.deepEqual(rows.filter(r => JSON.stringify(r).includes(MARK)).map(r => r.method), [], 'an audit row holds the value');
   });
 
   it('an Update that landed emits one bulk.write from sparql.update with its deleted count, and each deleted record its own event', async () => {

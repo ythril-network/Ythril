@@ -23,7 +23,7 @@ const BASE = `https://${S}.example.org/ld/${S}/`;
 const NICK = `${BASE}vocab/entity/person#nick`;
 const Y = 'https://w3id.org/ythril/ns#';
 
-let admin, readOnly, noFiles, entityId, viewId;
+let admin, readOnly, readRung, noFiles, entityId, viewId;
 const tokenIds = [];
 
 async function update(door, token, space, text) {
@@ -65,6 +65,8 @@ describe('a SPARQL Update needs the write rung and stays in its space', () => {
     const f = await post(INSTANCES.a, admin, '/api/write_file', { space: S, path: 'secret/plan.txt', content: 'secret' });
     assert.ok(f.status < 300, `write a file: ${f.status} ${JSON.stringify(f.body)}`);
     readOnly = await mintWith('rt-spu-read', legacyRights({ spaces: [S], readOnly: true }));
+    // Not read-only: a per-space rung of `read`. `denyReadOnly` never sees it, so only the route's and the tool's rights rows refuse it (B9).
+    readRung = await mintWith('rt-spu-readrung', { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [S]: { knowledge: 'read', files: 'none', schema: 'none', dataQuality: 'none', networks: 'none' } } });
     noFiles = await mintWith('rt-spu-nofiles', { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [S]: { knowledge: 'write', files: 'none', schema: 'none', dataQuality: 'none', networks: 'none' } } });
     const v = await post(INSTANCES.a, admin, '/api/views', { name: `rtspu${RUN}`, members: [S] });
     assert.ok(v.status < 300, `view: ${v.status} ${JSON.stringify(v.body)}`);
@@ -78,6 +80,34 @@ describe('a SPARQL Update needs the write rung and stays in its space', () => {
   });
 
   const write = () => `DELETE { ?s <${NICK}> ?v } INSERT { ?s <${NICK}> "pwned" } WHERE { ?s <${NICK}> ?v }`;
+
+  /** `sparql_update` on MCP proper: a refusal is a 200 carrying `isError`, or an error of the protocol for a tool the token is not shown. */
+  async function mcpUpdate(token, space, text) {
+    const r = await fetch(`${INSTANCES.a}/mcp`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'sparql_update', arguments: { space, update: text } } }),
+    });
+    const body = await r.text();
+    const data = /^(?:event|data):/m.test(body) ? body.split('\n').find(l => l.startsWith('data:'))?.slice(5) ?? '{}' : body;
+    let rpc = {}; try { rpc = JSON.parse(data); } catch { /* not JSON */ }
+    return { status: r.status, refused: rpc.result?.isError === true || !!rpc.error, text: body };
+  }
+
+  for (const [who, token] of [['a read-only token', () => readOnly], ['a token whose rung in the space is read, not read-only', () => readRung]]) {
+    for (const door of ['rest', 'tool', 'mcp']) {
+      it(`${door}: ${who} is refused and writes nothing`, async () => {
+        if (door === 'mcp') {
+          const a = await mcpUpdate(token(), S, write());
+          assert.ok(a.refused, `the tool was answered: ${a.status} ${a.text.slice(0, 300)}`);
+        } else {
+          const a = await update(door, token(), S, write());
+          assert.equal(a.status, 403, fmt(a));
+        }
+        assert.equal(await nickOf(), 'kept');
+      });
+    }
+  }
 
   for (const door of ['rest', 'tool']) {
     it(`${door}: a token without knowledge write is refused and writes nothing`, async () => {
