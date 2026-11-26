@@ -27,7 +27,12 @@ export const SPARQL_UPDATE_OUTPUT_SCHEMA = {
   properties: {
     inserted: COUNTS, converged: COUNTS, deleted: COUNTS, recordsChanged: { type: 'integer' }, attempts: { type: 'integer' },
     ids: { type: 'object', description: 'The ids of the records the Update inserted, by kind.' },
-    statements: { type: 'object', properties: { removed: { type: 'integer' }, inserted: { type: 'integer' } } },
+    statements: {
+      type: 'object', description: 'What became of the Update\'s statements: taken (part of a write; `removed` and `inserted` count only these), noops (no record held the removed value, or already held the inserted one) and notTaken (left out: recorded and dropped by the space\'s mode, or owned by the server).',
+      properties: { removed: { type: 'integer' }, inserted: { type: 'integer' }, taken: { type: 'integer' }, noops: { type: 'integer' }, notTaken: { type: 'integer' } },
+    },
+    reasons: { type: 'array', description: 'The statements the space\'s mode recorded and dropped, named by their subject and predicate and the value\'s kind and length, with the rule (`code`, `message`, `kept`, `count`).', items: { type: 'object' } },
+    notTaken: { type: 'array', description: 'The statements left out on purpose (the server owns them), grouped by why, named as `reasons` are.', items: { type: 'object' } },
   },
   required: ['inserted', 'converged', 'deleted', 'recordsChanged', 'attempts'],
 } as const;
@@ -66,6 +71,8 @@ export const sparql_updateTool: ToolHandler = {
       spaceId: ctx.callSpace, update: a['update'], usingGraphUri: a['using-graph-uri'], usingNamedGraphUri: a['using-named-graph-uri'],
       caller: ctx.callerRecord ?? { rights: ctx.rights ?? null }, callerKey: ctx.rateKey, ...(ctx.actor ? { actor: ctx.actor } : {}),
       fingerprintOf: schemaFingerprintOf,
+      // An Update that throws still leaves its row of counts (outcome `failed`). ToolContext carries no abort signal, so no `signal` is passed on this door.
+      recordAudit: (audit) => ctx.recordAuditChanges?.(auditChangesOf(audit)),
     });
     ctx.recordAuditChanges?.(auditChangesOf(answer.audit));
     if (!answer.ok) throw toolRefusalOfAct(answer.status as ToolRefusalStatus, answer.error, answer.body);

@@ -125,6 +125,8 @@ sparqlUpdateRouter.post('/spaces/:spaceId/sparql/update', globalRateLimit, requi
       const answer: SparqlUpdateAnswer = await sparqlUpdateAct({
         spaceId, update: params.data.update, usingGraphUri: params.data['using-graph-uri'], usingNamedGraphUri: params.data['using-named-graph-uri'],
         caller: token, callerKey: slotCallerKey(req), actor: webhookToken(req), fingerprintOf: schemaFingerprintOf, signal: abortWhenClientGoes(res),
+        // An Update that throws still leaves its row of counts (outcome `failed`), before the failure is answered.
+        recordAudit: (audit) => { req.auditChangesExplicit = auditChangesOf(audit); },
       });
       req.auditChangesExplicit = auditChangesOf(answer.audit);
       if (answer.ok) { res.status(answer.status).json(answer.body); return; }
