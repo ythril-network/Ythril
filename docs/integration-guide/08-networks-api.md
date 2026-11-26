@@ -133,7 +133,7 @@ POST /api/networks
 }
 ```
 
-**Network types**: `closed` (unanimous vote), `democratic` (majority), `club` (proposer only), `braintree` (tree hierarchy), `pubsub` (auto-join publisher/subscriber, push-only).
+**Network types**: `closed` (unanimous vote), `democratic` (majority), `club` (proposer only), `braintree` (tree hierarchy), `pubsub` (auto-join publisher/subscriber, push-only; only the publisher's cast decides a round, and a subscriber's schema edit stays on the subscriber and opens no round). A club or pub/sub network admits and removes members directly and never opens a join or removal round; one a peer serves is refused (`Q-968`).
 
 **`votingDeadlineHours`** (optional, 1–72, default 24): how long a vote round on this network stays open. A round is open until its deadline and never after it: it is not listed as open, a cast on it is refused naming the deadline, and the round is concluded as expired (kept, with how it ended, on [Vote Outcomes](#vote-outcomes)).
 

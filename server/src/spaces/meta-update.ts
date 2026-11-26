@@ -53,6 +53,8 @@ import {
   UpdateSpaceBody, libraryRefRefusal, parseSpaceMeta,
   stripServerOwnedMeta, stripServerOwnedSpace,
 } from './body-schemas.js';
+import { actsLocallyOn } from '../networks/network-role.js';
+import { commitOwnMetaEdit } from './effective-meta.js';
 import type { TypeSchemasZ, ParsedSpaceMeta } from './body-schemas.js';
 import { metaFieldKind } from './meta-fields.js';
 import type { z } from 'zod';
@@ -679,7 +681,8 @@ export function planSpaceMetaUpdate(input: {
   if (steps.length > 0 && mergedMeta !== undefined) {
     const cfg = getConfig();
     const edit = { base, incoming: parsed.data.meta as Partial<SpaceMeta>, mode: parsed.data.typeSchemasMode ?? 'merge' as const, merged: mergedMeta, targetNetwork };
-    const reached = cfg.networks.filter(n => n.spaces.includes(space.id) && (targetNetwork === undefined || n.id === targetNetwork));
+    // A pub/sub subscriber's edit opens no round there (Q-968): that network is not reached, as the apply below decides.
+    const reached = cfg.networks.filter(n => n.spaces.includes(space.id) && !actsLocallyOn(n) && (targetNetwork === undefined || n.id === targetNetwork));
     // A networked save is held to what its round carries, by the check every member makes of it (`roundStepIssue`, S2/S3): one check, one pair. A
     // space in no network has no round: its steps are held to its effective schema before the edit and after it.
     const issue = reached.length > 0
@@ -936,8 +939,11 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
 
   // Network voting: a networked space PROPOSES a meta change rather than applying it.
   if (mergedMeta !== undefined) {
-    // F-39.5: a proposal to one network opens its round there alone; any other edit, on every network carrying it.
-    const networkedIn = cfg.networks.filter(n => n.spaces.includes(id) && (plan.targetNetwork === undefined || n.id === plan.targetNetwork));
+    // F-39.5: a proposal to one network opens its round there alone; any other edit, on every network carrying it — but never on a pub/sub
+    // network this instance subscribes to (Q-968; owner, 2026-11-26): a subscriber's schema edit is its own, lands in its own definitions
+    // below, and the publisher's layer outranks it. A network-wide change is the publisher's to make. A round opened there passed on the
+    // subscriber's own yes and, adopted by the publisher, changed the network's schema for every member.
+    const networkedIn = cfg.networks.filter(n => n.spaces.includes(id) && !actsLocallyOn(n) && (plan.targetNetwork === undefined || n.id === plan.targetNetwork));
     if (networkedIn.length > 0) {
       const rounds: RoundAnswer[] = [];
       const layers: LayerOutcome[] = [];
@@ -947,7 +953,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
       for (const net of networkedIn) {
         /*
          * Opened, signed and EVALUATED through the one open path (`proposeRound`), because the proposer's yes may already be
-         * enough (`Q-49`): on club and pub/sub one yes passes a round, and a closed network with no other member needs only ours.
+         * enough (`Q-49`): on a club the proposer's yes passes a round, on pub/sub the publisher's (Q-968), and a closed network with no
+         * other member needs only ours.
          * The round stays in the list either way, concluded or not, so peers learn of it exactly as before — and the members are
          * told `meta_change_pending` from the same module every opener tells them through.
          */
@@ -1030,12 +1037,18 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     documentExtraction: _rawMode, recordTtlDays: _rawTtl, unknownWriteFields: _rawUnknownWriteFields, convertRecords: _heldOutOfTheSpace, ...storablePatch
   } = patchData;
   // F-39.2: a space in no network has no layer, so its own definitions ARE the edited meta — kept in step, or a stale
-  // `ownMeta` would come back the next time a network sends this space a layer.
+  // `ownMeta` would come back the next time a network sends this space a layer. A pub/sub subscriber's edit (Q-968) reaches here too, on a
+  // space that holds its publisher's layer: the edit is its own definitions, and the space runs on them laid under every layer, so the
+  // publisher's layer outranks the edit and stays in the meta (written as the edit alone, the layer's types would leave the space).
   const held = getConfig().spaces.find(s => s.id === id);
-  if (held?.ownMeta && mergedMeta !== undefined) held.ownMeta = replicatedMetaOf(mergedMeta) as SpaceMeta;
+  const layered = held?.ownMeta !== undefined && mergedMeta !== undefined && layersFor(getConfig(), id).length > 0;
+  // Layered: the one writer of own definitions sets them and rebuilds the meta from them and the layers; the rest of the patch follows.
+  if (layered && !commitOwnMetaEdit(id, () => mergedMeta!)) return { outcome: 'not_found' };
+  if (!layered && held?.ownMeta && mergedMeta !== undefined) held.ownMeta = replicatedMetaOf(mergedMeta) as SpaceMeta;
+  const { meta: _sentMeta, ...rest } = storablePatch;
   const updated = updateSpace(id, {
-    ...storablePatch,
-    meta: mergedMeta,
+    ...rest,
+    ...(layered ? {} : { meta: mergedMeta }),
     ...(plan.hasDocExtraction ? { documentExtraction: plan.documentExtraction } : {}),
   });
   // The stored vectors follow the flag, which is what the userguide has always said happens: `updateSpace` asks for

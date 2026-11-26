@@ -21,7 +21,8 @@ import { applyDecidedOwnMetaEdit, storeNetworkLayer } from '../spaces/effective-
 import { carriedLocalId } from './space-map.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { sendNotice } from '../networks/notify-members.js';
-import { publishesOn } from '../networks/network-role.js';
+import { actsLocallyOn } from '../networks/network-role.js';
+import { pubsubDecider, roundKindNeverOpenedOn } from '../networks/round-decider.js';
 import { parseMetaRound, type MetaRoundParse, type MetaRoundProposal } from './meta-round-merge.js';
 import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import type { ParsedSpaceMeta } from '../spaces/body-schemas.js';
@@ -175,6 +176,11 @@ export function roundVerdict(
   // 2026-09-25: "of course a proposer votes yes ... require the yes but set it automatically". Dropping it there let a peer
   // name any member as proposer and so drop that member's vote from the quorum).
   const { voters, localInstanceId, localIsVotedOn } = votersOf(net, round);
+  // Q-968: a round of a kind this network type never opens (a join or removal on a club or pub/sub, which admit and remove directly) is a
+  // peer's forgery: it never passes here, whatever casts it carries, and ends at its deadline.
+  if (roundKindNeverOpenedOn(net, round.type)) return roundPastDeadline(round, now) ? 'expired' : null;
+  // Q-968: on pub/sub the publisher's cast alone decides, its veto included; every other cast counts nothing.
+  if (net.type === 'pubsub') return pubsubVerdict(net, round, localInstanceId, now);
   const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
   if (vetoCount > 0) return 'vetoed';
   if (roundPastDeadline(round, now)) return 'expired';
@@ -209,6 +215,7 @@ export function roundVerdict(
 
   const yesCount = round.votes.filter(v => v.vote === 'yes').length;
 
+  // `pubsub` returned above, through `pubsubVerdict`.
   let passed = false;
   switch (net.type) {
     case 'closed':
@@ -244,20 +251,32 @@ export function roundVerdict(
       break;
     }
     case 'club':
-      // For Club: only the inviter (first yes voter) decides
+      // For Club: the proposer decides — any member's yes with no veto passes a round, as documented (docs/network-types.md). A club never
+      // opens a join or removal round (it admits and removes directly), so a served one was refused above.
       passed = yesCount >= 1 && vetoCount === 0;
-      break;
-    case 'pubsub':
-      // For Pubsub: the publisher (first yes voter) decides — except that a deletion or wipe on a network where THIS instance is the
-      // publisher passes only when it opened the round (D-40, X10). Every other such round there is a subscriber's, whose deletion or
-      // wipe is its own local act; one an older publisher adopted before the upgrade would otherwise pass at the next gossip or relay
-      // and empty the publisher's space for every subscriber. Decided from the local role and a local field, never a wire field.
-      // A rebase is of the delete family (Q-748): a subscriber cannot rebase the publisher's space either.
-      passed = yesCount >= 1 && vetoCount === 0
-        && !(isDeleteVoteRound(round.type) && publishesOn(net) && round.proposedHere !== true);
       break;
   }
   return passed ? 'passed' : null;
+}
+
+/**
+ * How `round` stands on the pub/sub network `net` (Q-968): only the decider's cast counts — its veto vetoes, its yes passes — and every other
+ * cast counts nothing. The decider is the publisher (`pubsubDecider`, from local topology); with none derivable nothing passes.
+ *
+ * - On the PUBLISHER a round passes only when it opened it (`proposedHere`, a local field): every other round there is a subscriber's, and one an
+ *   older publisher adopted before the upgrade would otherwise pass on the publisher's own later cast. It expires instead.
+ * - A SUBSCRIBER's own deletion, wipe or rebase is its local act (D-40, Q-748): its own yes decides it here, no other member holds it (the
+ *   publisher refuses to adopt it), and `ownYesCarries` answers "acts now" for it.
+ */
+function pubsubVerdict(net: NetworkConfig, round: VoteRound, localInstanceId: string, now: number): 'vetoed' | 'expired' | 'passed' | null {
+  const ownLocalAct = isDeleteVoteRound(round.type) && round.proposedHere === true && actsLocallyOn(net);
+  const decider = ownLocalAct ? localInstanceId : pubsubDecider(net, localInstanceId);
+  const decisive = decider === null ? undefined : round.votes.find(v => v.instanceId === decider);
+  if (decisive?.vote === 'veto') return 'vetoed';
+  if (roundPastDeadline(round, now)) return 'expired';
+  if (decisive?.vote !== 'yes') return null;
+  if (decider === localInstanceId && round.proposedHere !== true) return null;
+  return 'passed';
 }
 
 /**

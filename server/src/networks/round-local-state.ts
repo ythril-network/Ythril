@@ -26,8 +26,9 @@
  */
 import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
-import { isDeleteVoteRound, isSpaceActRound, roundDeadlineBeyondCap, roundPastDeadline } from './round-state.js';
+import { isSpaceActRound, roundDeadlineBeyondCap, roundPastDeadline } from './round-state.js';
 import { publishesOn } from './network-role.js';
+import { roundKindNeverOpenedOn } from './round-decider.js';
 import { hasRoundShape, canonicalRoundWipeTypes } from './round-shape.js';
 import { DEFAULT_STAMP_SKEW_WARN_MINUTES } from '../brain/stamp-skew.js';
 
@@ -55,7 +56,7 @@ export function openRoundHere(net: NetworkConfig, round: VoteRound): VoteRound {
 
 /** Why a round a peer served is not adopted — a short phrase, counted per pass and said once as a debug line. */
 export type AdoptionRefusal = 'past its deadline or undatable' | 'deadline beyond what a network allows' | 'already recorded here'
-  | 'proposed by a subscriber' | 'malformed';
+  | 'proposed by a subscriber' | 'a kind this network type never opens' | 'malformed';
 
 /**
  * Does the round's `openedAt` lie ahead of this instance's clock by more than the one clock tolerance the server names (X11)? Such a
@@ -82,10 +83,12 @@ export function adoptionRefusal(net: NetworkConfig, peerRound: VoteRound, now: n
   if (roundPastDeadline(peerRound, now)) return 'past its deadline or undatable';
   if (roundDeadlineBeyondCap(peerRound)) return 'deadline beyond what a network allows';
   if ((net.roundOutcomes ?? []).some(e => e.roundId === peerRound.roundId)) return 'already recorded here';
-  // D-40: on pub/sub a subscriber's deletion or wipe is its own local act. A publisher holds no round it did not open of the delete
-  // family — every other instance there is a subscriber — decided from this instance's role, never from a field a relayer could set. A
-  // rebase is of that family (Q-748, review finding 12): held, it would be served open to every other subscriber until its deadline.
-  if (isDeleteVoteRound(peerRound.type) && publishesOn(net)) return 'proposed by a subscriber';
+  // Q-968: a join or removal on a club or pub/sub, which admit and remove members directly, is a peer's forgery whoever serves it.
+  if (roundKindNeverOpenedOn(net, peerRound.type)) return 'a kind this network type never opens';
+  // D-40, Q-968: on pub/sub every other member is a subscriber, so a round a publisher did not open is a subscriber's, of EVERY kind: its
+  // deletion, wipe or rebase is its own local act (Q-748), and its schema change or space addition is not its to decide. A publisher holds
+  // none of them, decided from this instance's role, never from a field a relayer could set; no verdict is ever adopted from a peer.
+  if (publishesOn(net)) return 'proposed by a subscriber';
   return null;
 }
 

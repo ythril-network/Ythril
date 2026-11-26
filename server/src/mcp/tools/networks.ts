@@ -75,7 +75,7 @@ export const network_createTool: ToolHandler = {
       label: { type: 'string', minLength: 1, maxLength: 200, description: 'A display name, 1-200 characters. Peers see it too: it travels with the invite.' },
       type: { type: 'string', enum: ['closed', 'democratic', 'club', 'braintree', 'pubsub'],
         description: 'How joins and changes are governed: closed (unanimous), democratic (majority, any veto blocks), '
-          + 'club (the inviter decides), braintree (every ancestor up to the root), pubsub (publisher pushes, anyone subscribes).' },
+          + 'club (the proposer decides), braintree (every ancestor up to the root), pubsub (publisher pushes, anyone subscribes; only the publisher\'s cast decides a round).' },
       spaces: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 1, maxItems: MAX_SPACE_IDS, description: 'Local space ids it carries — each must exist, and you need the right on EVERY one, or the whole create is refused naming the short ones.' },
       votingDeadlineHours: { type: 'integer', minimum: 1, maximum: MAX_VOTING_DEADLINE_HOURS, default: 24, description: `Hours a vote round stays open (1-${MAX_VOTING_DEADLINE_HOURS}, default 24); a round nobody concludes by then fails.` },
       syncSchedule: { type: 'string', description: 'A cron expression, e.g. "*/15 * * * *". Omit for manual sync only. One the scheduler cannot run is refused.' },
@@ -226,7 +226,8 @@ export const network_voteTool: ToolHandler = {
     + 'instance-admin rights.\n\n'
     + 'A CAST CAN CONCLUDE THE ROUND, and a concluded round takes effect here at once: a passed join admits the '
     + 'member, a passed removal ejects one, a passed space deletion or wipe empties the space on this instance, a '
-    + 'passed space addition adds it. A single veto stops a deletion or wipe. Voting again replaces your earlier cast.\n\n'
+    + 'passed space addition adds it. A single veto stops a deletion or wipe. Voting again replaces your earlier cast. On '
+    + 'a pub/sub network only the publisher\'s cast counts: a subscriber\'s yes or veto decides nothing.\n\n'
     + 'A CAST ON A ROUND PAST ITS DEADLINE IS REFUSED (409, code `round_expired`) naming the deadline, and nothing is '
     + 'recorded; a round already concluded, or one that does not exist, is a 404.',
   admin: true,
@@ -386,7 +387,7 @@ export const network_forkTool: ToolHandler = {
     properties: {
       id: networkIdSchema,
       label: { type: 'string', minLength: 1, maxLength: 200, description: 'A display name for the new network, 1-200 characters.' },
-      type: { type: 'string', enum: ['closed', 'club'], default: 'closed', description: 'The new network\'s governance: closed (unanimous) or club (the organiser decides). Default closed.' },
+      type: { type: 'string', enum: ['closed', 'club'], default: 'closed', description: 'The new network\'s governance: closed (unanimous) or club (the proposer decides). Default closed.' },
       votingDeadlineHours: { type: 'integer', minimum: 1, maximum: MAX_VOTING_DEADLINE_HOURS, description: `Hours a vote stays open, 1-${MAX_VOTING_DEADLINE_HOURS}; omitted, the source network's value, or 24.` },
       spaces: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: MAX_SPACE_IDS, description: 'Local space ids it carries; omitted, the source network\'s. Required when the source is no longer here.' },
     },
