@@ -449,10 +449,11 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
   }
   if (caller.id) netAfter.spaceOrigins = recordOrigin(netAfter.spaceOrigins ?? {}, localId, caller.id);
   saveConfig(after);
-  // Q-60: a space proposed by a passed round waited with the schema that round carried; it arrives with it.
+  // Q-60: a space proposed by a passed round waited with the schema that round carried; it arrives with it. Not marked seeded: what it carried is
+  // the schema as of the round, which may have changed while the space waited, so the heal takes the current one from the admitter (Q-966).
   if (entry.meta) {
     const { acceptNetworkLayer } = await import('../sync/space-meta-pull.js');
-    acceptNetworkLayer(netAfter.id, localId, entry.meta, `accepted pending space '${spaceId}'`, 'layer');
+    acceptNetworkLayer(netAfter.id, localId, entry.meta, `accepted pending space '${spaceId}'`);
   }
   return { status: 200, body: networkView(netAfter), audit: { before, after: pendingSnapshot(netAfter) } };
 }

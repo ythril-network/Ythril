@@ -1,7 +1,7 @@
 /**
  * An unchanged schema layer writes nothing (`F-39.2` follow-up, found in the pre-ship lens pass).
  *
- * `pullSpaceMetaFromUpstream` runs for every space on every sync cycle and hands what it receives to
+ * `pullNetworkSchema` runs for every space on every sync cycle and hands what it receives to
  * `storeNetworkLayer`. It stored the layer and recomputed unconditionally, and the recompute saved the config even
  * when nothing had changed — a full config rewrite per space per cycle, the write loop this repo has met before
  * (`versionCheckedAt` stamped every round turned an idle network into a continuous write loop).

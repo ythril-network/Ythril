@@ -12,7 +12,7 @@ import { requireAuth } from '../../auth/middleware.js';
 import { getConfig } from '../../config/loader.js';
 import { replicatedMetaOf, servedMetaFor } from '../../sync/replicated-meta.js';
 import { isDirectionalNetwork } from '../../networks/network-spaces.js';
-import { createdHere, seededAs } from '../../networks/schema-standing.js';
+import { servedNetworkPart } from '../../networks/schema-standing.js';
 import { refusePeerReach, refuseSchemaRung } from './_shared.js';
 import { registerSchemaSnapshotRoute } from './schema-snapshot.js';
 import { inlineResolvableRefs } from '../../spaces/schema-validation.js';
@@ -35,14 +35,10 @@ syncMetaRouter.get('/meta', syncRateLimit, requireAuth, (req, res) => {
     const layer = net?.schemaLayers?.[spaceId];
     // Q-60: library references written inline where this instance can resolve them — a peer's library is its own.
     const meta = inlineResolvableRefs(replicatedMetaOf(servedMetaFor(space, layer ? { networkId, meta: layer } : undefined)));
-    // Q-966: on a voted network, the network's own part, which is what a joiner or a healing member stores as the network's layer. The
-    // creator's own definitions are the network's, and so are a proposer's of a space it proposed; any other member holds the network's
-    // schema as its LAYER, and its own definitions are not the network's to hand on (what a joiner stored would depend on who invited it).
+    // Q-966: on a voted network, the network's own part, which is what a joiner or a healing member stores as the network's layer, and whether
+    // it is the whole schema (`servedNetworkPart` decides both).
     if (net && !isDirectionalNetwork(net) && net.spaces.includes(spaceId)) {
-      const seeded = seededAs(net, spaceId);
-      const ownIsNetworks = createdHere(net, space) || seeded === 'own';
-      const network = ownIsNetworks ? meta : inlineResolvableRefs(replicatedMetaOf(layer ?? {}));
-      res.json({ meta, network, networkSeeded: ownIsNetworks || seeded === 'layer' });
+      res.json({ meta, ...servedNetworkPart(net, spaceId, meta, () => inlineResolvableRefs(replicatedMetaOf(layer ?? {}))) });
       return;
     }
     res.json({ meta });

@@ -25,6 +25,7 @@
  * Never throws. A schema that cannot be fetched or merged is logged and the data sync goes on: the owner's rule for
  * schema is that it never stops data.
  */
+import { isDeepStrictEqual } from 'node:util';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
 import { readPeerMeta, withoutBrokenLibraryRefs } from '../spaces/body-schemas.js';
@@ -35,7 +36,7 @@ import { isDirectionalNetwork, isUpstreamPeer } from '../networks/network-spaces
 import { admitterOf, createdHere, layerSeeded, markLayerSeeded } from '../networks/schema-standing.js';
 import { peerSafeFetch } from './peer-fetch.js';
 import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
-import { layerRefusals, type LayerRefusals } from './layer-refusals.js';
+import { layerRefusals } from './layer-refusals.js';
 
 /**
  * May this instance take network `net`'s schema for local space `spaceId` from `memberId` now? Its upstream on a pub/sub or tree network; on a
@@ -49,7 +50,7 @@ export function mayTakeLayerFrom(net: NetworkConfig, memberId: string | undefine
   if (!memberId || !live || layerSeeded(live, spaceId)) return false;
   // The instance that CREATED the network never takes one: its own definitions are where the network's schema began, and a layer
   // pulled back from a member would sit in front of them (a layer outranks own definitions) and change the variation it serves.
-  if (createdHere(live, cfg.spaces.find(s => s.id === spaceId))) return false;
+  if (createdHere(live)) return false;
   return memberId === admitterOf(live);
 }
 
@@ -65,11 +66,14 @@ export async function pullNetworkSchema(
   if (!mayTakeLayerFrom(net, member.instanceId, spaceId)) return false;
   const voted = !isDirectionalNetwork(net);
   const from = voted ? `member ${member.label}` : `upstream ${member.label}`;
-  return fetchNetworkLayer({ networkId: net.id, peerUrl: member.url, from, spaceId, remoteSpaceId, init: opts(), turn, voted, memberId: member.instanceId });
+  return fetchNetworkLayer({ networkId: net.id, peerUrl: member.url, from, spaceId, remoteSpaceId, init: opts(), turn, memberId: voted ? member.instanceId : undefined });
 }
 
 /** What the door answers (`api/sync/meta.ts`): `network` and `networkSeeded` only for a voted network the instance carries the space of. */
 interface MetaAnswer { meta?: unknown; network?: unknown; networkSeeded?: boolean }
+
+/** The layer network `networkId` holds here for local space `spaceId`, as stored. */
+const storedLayer = (networkId: string, spaceId: string): unknown => getConfig().networks.find(n => n.id === networkId)?.schemaLayers?.[spaceId];
 
 /**
  * Fetch network `networkId`'s schema for `remoteSpaceId` from the member at `peerUrl` and keep it as that network's layer
@@ -77,27 +81,31 @@ interface MetaAnswer { meta?: unknown; network?: unknown; networkSeeded?: boolea
  * (`Q-966`, `sync/join-layers.ts`), so both ask the same door the same way and read its answer the same way. Never throws: a refusal or a
  * failure is logged (a hold is not a failure) and answers `false`.
  *
- * `voted` marks the member as the ADMITTER of a voted network (`memberId`): the network's part of the answer is read, a layer taken whole from
- * it marks the space seeded, and a refusal is held against it for a backoff (`sync/layer-refusals.ts`). A member whose own schema is not
- * seeded says so (`networkSeeded: false`) and its answer is not taken: what it holds may be only a round's changed fields. `deadline` is a
- * signal the caller cut the fetch with (the join's): its abort is the caller's to report, not a failure of this member.
+ * `memberId` is given for the ADMITTER of a voted network, and only then: the network's part of the answer is read, a layer is marked seeded only
+ * when the answer says `networkSeeded: true` (an older door's answer has no such key, may be stored, and leaves the space unseeded so the heal asks
+ * again), and a refusal is held against the member for a backoff (`sync/layer-refusals.ts`), the wait doubling at each one; an answer that is
+ * taken, changed or not, clears it. A member whose own schema is not seeded says so (`networkSeeded: false`) and its answer is not taken: what it
+ * holds may be only a round's changed fields. The layer is read before the ask and stored only if it is the same when the answer arrives: a passed
+ * round may have written into it meanwhile, and the older answer must not overwrite it (the next cycle asks again). `deadline` is a signal the
+ * caller cut the fetch with (the join's): its abort is the caller's to report, not a failure of this member. `onRefusal` takes the reason of a
+ * refusal in place of the log line, for a caller that says them together (the join's, once for all its spaces).
  */
 export async function fetchNetworkLayer(args: {
   networkId: string; peerUrl: string; from: string; spaceId: string; remoteSpaceId: string; init: RequestInit; turn?: ExchangeTurn;
-  voted?: boolean; memberId?: string; deadline?: AbortSignal; refusals?: LayerRefusals;
+  memberId?: string; deadline?: AbortSignal; onRefusal?: (what: string) => void;
 }): Promise<boolean> {
-  const { networkId, peerUrl, from, spaceId, remoteSpaceId, init, turn, voted = false, memberId, deadline, refusals = layerRefusals } = args;
-  const backoff = voted && memberId !== undefined;
-  if (backoff && !refusals.mayAsk(networkId, memberId, spaceId)) return false;
+  const { networkId, peerUrl, from, spaceId, remoteSpaceId, init, turn, memberId, deadline, onRefusal } = args;
+  const voted = memberId !== undefined;
+  if (voted && !layerRefusals.mayAsk(networkId, memberId, spaceId)) return false;
   const refused = (what: string): false => {
     // One warning per backoff step: a refusal is only recorded when the member was asked, which is once per step.
-    if (backoff) {
-      const waitMs = refusals.refused(networkId, memberId, spaceId);
-      log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}': ${peerText(what)}; not asked again for ${Math.round(waitMs / 60_000)} min`);
-    } else log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}': ${peerText(what)}`);
+    const waitMs = voted ? layerRefusals.refused(networkId, memberId, spaceId) : undefined;
+    if (onRefusal) onRefusal(what);
+    else log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}': ${peerText(what)}${waitMs === undefined ? '' : `; not asked again for ${Math.round(waitMs / 60_000)} min`}`);
     return false;
   };
   try {
+    const before = voted ? storedLayer(networkId, spaceId) : undefined;
     const q = new URLSearchParams({ spaceId: remoteSpaceId, networkId });
     const resp = await peerSafeFetch(`${peerUrl}/api/sync/meta?${q}`, { ...init, signal: turnSignal(init.signal, turn) });
     if (!resp.ok) {
@@ -110,12 +118,18 @@ export async function fetchNetworkLayer(args: {
       return lasting ? refused(`HTTP ${resp.status}`) : (log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}': HTTP ${resp.status}`), false);
     }
     const answer = await boundedJson<MetaAnswer>(resp, 'sync peer');
-    if (backoff) refusals.answered(networkId, memberId, spaceId);
     // A member that has not healed itself says so, and what it serves as the network's schema is then not the network's whole one.
     if (voted && answer.networkSeeded === false) return false;
+    // A round applied while this ask was in flight wrote into the layer: the answer predates it, and the next cycle asks again.
+    if (voted && !isDeepStrictEqual(storedLayer(networkId, spaceId), before)) {
+      log.info(`Schema for '${peerText(spaceId)}': the layer changed while ${peerText(from)} was asked; asking again at the next cycle`);
+      return false;
+    }
     const incoming = voted && answer.network !== undefined ? answer.network : answer.meta;
-    const taken = takeNetworkLayer(networkId, spaceId, incoming, from, voted ? 'layer' : undefined);
-    if (taken.refused && backoff) refusals.refused(networkId, memberId, spaceId);
+    const taken = takeNetworkLayer(networkId, spaceId, incoming, from, voted && answer.networkSeeded === true ? 'layer' : undefined);
+    // Only a layer that was taken clears the member's backoff: one refused whole is a refusal, and the wait grows.
+    if (taken.refused) refused(`refused whole, nothing merged: ${taken.why}`);
+    else if (voted) layerRefusals.answered(networkId, memberId, spaceId);
     return taken.changed;
   } catch (err) {
     if (deadline?.aborted) return false;
@@ -131,18 +145,16 @@ export async function fetchNetworkLayer(args: {
  * the layer it becomes, and both leave out only a type whose library reference neither side can resolve.
  * Never throws; `from` names the source in the log. `seeded` says what this layer is to the space once it is stored: the network's
  * WHOLE schema for it (`'layer'`), which the heal then never takes again (`networks/schema-standing.ts`), or `undefined` for one that may be partial.
- * `refused` is a layer the reader would not take, which no later ask of the same member changes.
+ * `refused` is a layer the reader would not take, with `why`, which no later ask of the same member changes: the caller says it (`acceptNetworkLayer`
+ * logs it, the fetch above holds it against the member and says it once per backoff step).
  */
-export function takeNetworkLayer(networkId: string, spaceId: string, incoming: unknown, from: string, seeded?: 'layer'): { changed: boolean; refused: boolean } {
+export function takeNetworkLayer(networkId: string, spaceId: string, incoming: unknown, from: string, seeded?: 'layer'): { changed: boolean; refused: boolean; why?: string } {
   try {
     // Validated on its own, as the layer it becomes (F-39.2) — merged into nothing, so nothing local rides along. Read as a
     // TOLERANT reader (R6-7): what this release knows is kept and what it has never heard of is named, not a reason to refuse the
     // layer. A field that is known and WRONG still refuses it whole.
     const read = readPeerMeta(incoming);
-    if (!read.ok) {
-      log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}' refused whole, nothing merged: ${peerText(read.message)}`);
-      return { changed: false, refused: true };
-    }
+    if (!read.ok) return { changed: false, refused: true, why: read.message };
     // Q-60: a type naming a library entry this instance lacks is left out, and only it. The sender inlines every
     // reference it can resolve, so what remains is one the sender could not resolve either; refusing the whole
     // schema for it cost the member every other type and the space's posture.
@@ -164,5 +176,7 @@ export function takeNetworkLayer(networkId: string, spaceId: string, incoming: u
 
 /** {@link takeNetworkLayer}, answering only whether the local meta changed: for the stores that carry the whole schema (a passed `space_addition`, an accepted pending space). */
 export function acceptNetworkLayer(networkId: string, spaceId: string, incoming: unknown, from: string, seeded?: 'layer'): boolean {
-  return takeNetworkLayer(networkId, spaceId, incoming, from, seeded).changed;
+  const taken = takeNetworkLayer(networkId, spaceId, incoming, from, seeded);
+  if (taken.refused) log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}' refused whole, nothing merged: ${peerText(taken.why)}`);
+  return taken.changed;
 }

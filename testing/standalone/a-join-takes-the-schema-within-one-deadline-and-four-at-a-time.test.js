@@ -14,9 +14,11 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import http from 'node:http';
 import { listenOnPrivateAddress } from '../_shared/local-server.mjs';
 import { privateHostAddress, privateAddressSkipReason } from './_private-address.mjs';
+import { configureSpaces } from './_configured-spaces.mjs';
 
 process.env['SYNC_ALLOW_PRIVATE_PEERS'] = 'true';
 const skip = privateAddressSkipReason();
@@ -27,9 +29,12 @@ let inFlight = 0;
 let peak = 0;
 const asked = new Set();
 let takeLayersAtJoin;
+let configDir;
 
 before(async () => {
   if (skip) return;
+  // The fetch reads the stored layer before it asks (a round may write into it meanwhile), so a config is loaded.
+  configDir = (await configureSpaces(['general'], 'join-layers')).dir;
   ({ takeLayersAtJoin } = await import('../../server/dist/sync/join-layers.js'));
   door = await listenOnPrivateAddress(http.createServer((req, res) => {
     const u = new URL(req.url ?? '/', 'http://x.invalid');
@@ -46,7 +51,10 @@ before(async () => {
   }), privateHostAddress());
 });
 
-after(() => door?.close());
+after(async () => {
+  await door?.close();
+  if (configDir) fs.rmSync(configDir, { recursive: true, force: true });
+});
 
 const entries = (n, tag) => Array.from({ length: n }, (_, i) => ({ networkId: `${tag}-${i}`, localId: `${tag}-${i}` }));
 const run = (n, tag, extra) => takeLayersAtJoin({

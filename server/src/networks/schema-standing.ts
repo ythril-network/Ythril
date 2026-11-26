@@ -8,33 +8,30 @@
  * answer here decides one thing the heal and the door must agree on:
  *
  * - `createdHere`: the instance that created the network never takes a layer (its own definitions are where the network's schema began), and
- *   serves them as the network's. A network stored before 5.2.0 has no `origin`, which everywhere else reads as JOINED; a creator of that age is
- *   told apart by what it holds: no `origin`, no `admittedVia`, and own definitions for the space.
- * - `admitterOf`: the one member a layer may be taken from. A network stored before the admitter was recorded has none, and the member the join
- *   pushed first (`members[0]`, the inviter) is it; any member answering would let one that has not healed hand over a bare meta.
+ *   serves them as the network's. `origin` says it and nothing else does: a network stored before 5.2.0 has none, which everywhere else reads as
+ *   JOINED, and no other field tells a creator of that age from a joiner (the create path and the join path both write `joinedBy`,
+ *   `spaceOrigins` and `createdAt`). Owning definitions never proves creation: a pre-5.2 joiner that proposed a change owns them too, and read as
+ *   the creator it never healed. A pre-5.2 creator therefore reads as a member that has not healed: it serves `networkSeeded: false`, so no
+ *   joiner takes its layer for the whole schema, and it takes a layer only from the member that admitted it, once that member serves one whole.
+ * - `admitterOf`: the one member a layer may be taken from. A network stored before the admitter was recorded has none, and so has one whose
+ *   admitter has left; the member the join pushed first (`members[0]`) is it. Any member answering would let one that has not healed hand over
+ *   a bare meta.
  * - `layerSeeded` / `markLayerSeeded`: the heal runs while the layer is not SEEDED, never only while it is absent: a layer a passed round wrote
  *   onto nothing holds that round's changed fields, and a member holding only those was never healed.
+ * - `servedNetworkPart`: what the door answers as the network's schema, so a test reaches the decision the route used to hold inline.
  */
-import type { NetworkConfig, SpaceConfig } from '../config/types.js';
+import type { NetworkConfig } from '../config/types.js';
 import { getConfig, saveConfig } from '../config/loader.js';
-import { replicatedMetaOf } from '../sync/replicated-meta.js';
 
-type Standing = Pick<NetworkConfig, 'origin' | 'admittedVia'>;
-
-/** Does this instance's own definitions for the space hold anything a network could have been given? */
-function holdsOwnDefinitions(space: Pick<SpaceConfig, 'ownMeta' | 'meta'> | undefined): boolean {
-  return Object.keys(replicatedMetaOf(space?.ownMeta ?? space?.meta)).length > 0;
+/** Did this instance create `net`? Only `origin` says so; an absent one reads as joined (see the file's header for what that costs a pre-5.2 creator). */
+export function createdHere(net: Pick<NetworkConfig, 'origin'>): boolean {
+  return net.origin === 'created';
 }
 
-/** Did this instance create `net`, as far as it can tell for `space`? An absent `origin` reads as joined, but for a creator that predates the field. */
-export function createdHere(net: Standing, space: Pick<SpaceConfig, 'ownMeta' | 'meta'> | undefined): boolean {
-  if (net.origin !== undefined) return net.origin === 'created';
-  return net.admittedVia === undefined && holdsOwnDefinitions(space);
-}
-
-/** The member a layer may be taken from: who admitted this instance, or the member the join pushed first when that was not recorded. */
+/** The member a layer may be taken from: who admitted this instance while it is still a member, else the member the join pushed first. */
 export function admitterOf(net: Pick<NetworkConfig, 'admittedVia' | 'members'>): string | undefined {
-  return net.admittedVia ?? net.members[0]?.instanceId;
+  if (net.admittedVia !== undefined && net.members.some(m => m.instanceId === net.admittedVia)) return net.admittedVia;
+  return net.members[0]?.instanceId;
 }
 
 /** Does this instance hold the network's whole schema for the space (`'layer'`), or is its own definitions the network's (`'own'`)? */
@@ -44,6 +41,21 @@ export function seededAs(net: Pick<NetworkConfig, 'schemaLayerSeeded'>, spaceId:
 
 /** Is the space's schema in this network settled here: the heal has nothing to take? */
 export const layerSeeded = (net: Pick<NetworkConfig, 'schemaLayerSeeded'>, spaceId: string): boolean => seededAs(net, spaceId) !== undefined;
+
+/**
+ * What `GET /api/sync/meta` answers for a space of a voted network as the network's own part, and whether it is the whole schema. The creator's own
+ * definitions are the network's, and so are a proposer's of a space it proposed; any other member holds the network's schema as its LAYER and its
+ * own definitions are not the network's to hand on (what a joiner stored would depend on who invited it). `networkSeeded` is false for a member
+ * that has not healed, whose layer may be only a round's changed fields: its answer is never taken as the whole schema. `layer` is read only when
+ * it is what is served.
+ */
+export function servedNetworkPart<T>(
+  net: Pick<NetworkConfig, 'origin' | 'schemaLayerSeeded'>, spaceId: string, own: T, layer: () => T,
+): { network: T; networkSeeded: boolean } {
+  const seeded = seededAs(net, spaceId);
+  const ownIsNetworks = createdHere(net) || seeded === 'own';
+  return { network: ownIsNetworks ? own : layer(), networkSeeded: ownIsNetworks || seeded === 'layer' };
+}
 
 /**
  * Record that the space's schema is settled in network `networkId` here, saving the config only when the mark changes (a pull that finds
