@@ -2,8 +2,8 @@
  * Re-key what an older rename left under a space's OLD local id (`Q-133`).
  *
  * Before Q-133 a rename moved a network's space list and its alias, but not the two things a network keeps keyed by
- * the LOCAL id: the schema layer the network governs (`schemaLayers`) and who established the membership
- * (`spaceOrigins`). They stayed under the old name — so the network's layer dropped out of the space's effective
+ * the LOCAL id: the schema layer the network governs (`schemaLayers`, and from 5.2.0 its seeded mark `schemaLayerSeeded`) and who established the
+ * membership (`spaceOrigins`). They stayed under the old name — so the network's layer dropped out of the space's effective
  * meta and the leave rule could no longer find who joined it. The dev instance's network showed exactly that: layers
  * under `flows`, `y-projects` and `y-twin` beside the live ones.
  *
@@ -51,8 +51,10 @@ export function migrateNetworkSpaceKeys(config: Pick<Config, 'networks'>): boole
       const layers = rekey(net.schemaLayers as Keyed | undefined, net.spaces, alias, 'schema layer', net.id);
       const origins = rekey(net.spaceOrigins as Keyed | undefined, net.spaces, alias, 'membership origin', net.id);
       const unread = rekey(net.schemaLayerUnread as Keyed | undefined, net.spaces, alias, 'schema layer note', net.id);
+      const seeded = rekey(net.schemaLayerSeeded as Keyed | undefined, net.spaces, alias, 'schema layer mark', net.id);
       if (layers) { net.schemaLayers = layers as typeof net.schemaLayers; changed = true; }
       if (unread) { net.schemaLayerUnread = unread as typeof net.schemaLayerUnread; changed = true; }
+      if (seeded) { net.schemaLayerSeeded = seeded as typeof net.schemaLayerSeeded; changed = true; }
       if (origins) { net.spaceOrigins = origins as typeof net.spaceOrigins; changed = true; }
     } catch (err) {
       log.warn(`Network ${peerText(net.id)}: could not re-key its per-space entries (will retry next boot): ${peerText(err)}`);

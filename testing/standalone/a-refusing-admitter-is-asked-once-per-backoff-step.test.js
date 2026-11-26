@@ -13,9 +13,11 @@
  */
 import { describe, it, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import http from 'node:http';
 import { listenOnPrivateAddress } from '../_shared/local-server.mjs';
 import { privateHostAddress, privateAddressSkipReason } from './_private-address.mjs';
+import { configureSpaces } from './_configured-spaces.mjs';
 
 process.env['SYNC_ALLOW_PRIVATE_PEERS'] = 'true';
 const skip = privateAddressSkipReason();
@@ -27,9 +29,12 @@ let asks = 0;
 /** What the door answers: a 403 refusal, or a 200 whose layer the reader refuses whole (a validation mode that does not exist). */
 let answer = 'forbidden';
 let fetchNetworkLayer;
+let configDir;
 
 before(async () => {
   if (skip) return;
+  // The fetch reads the stored layer before it asks (a round may write into it meanwhile), so a config is loaded.
+  configDir = (await configureSpaces(['general'], 'layer-refusals')).dir;
   ({ fetchNetworkLayer } = await import('../../server/dist/sync/space-meta-pull.js'));
   door = await listenOnPrivateAddress(http.createServer((req, res) => {
     if (!String(req.url).startsWith('/api/sync/meta')) { res.statusCode = 404; res.end(); return; }
@@ -49,12 +54,13 @@ before(async () => {
 after(async () => {
   mock.timers.reset();
   await door?.close();
+  if (configDir) fs.rmSync(configDir, { recursive: true, force: true });
 });
 
 /** One ask of the admitter `memberId` for `space` of network `net`, as the heal makes it. */
 const ask = (net, memberId, space) => fetchNetworkLayer({
   networkId: net, peerUrl: door.url, from: `member ${memberId}`, spaceId: space, remoteSpaceId: space,
-  init: { headers: { Authorization: 'Bearer t' } }, voted: true, memberId,
+  init: { headers: { Authorization: 'Bearer t' } }, memberId,
 });
 
 describe('a member that refuses the network\'s schema', { skip }, () => {
