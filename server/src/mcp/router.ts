@@ -6,6 +6,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
+import { mcpTimingMeta } from '../http/phase-timer.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
@@ -170,7 +171,10 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
     if (!outcome.result.isError && LIST_CHANGING_TOOLS.has(name)) {
       await server.notification({ method: 'notifications/tools/list_changed' }, { relatedRequestId: extra.requestId });
     }
-    return outcome.result;
+    // The call's phase times (Q-976): a streamed answer's HTTP headers left before the tool ran, so its figures ride in the result's
+    // `_meta` (`http/phase-timer.ts` says where the protocol has no room for them).
+    const timing = mcpTimingMeta();
+    return Object.keys(timing).length > 0 ? { ...outcome.result, _meta: timing } : outcome.result;
   });
 
   return server;

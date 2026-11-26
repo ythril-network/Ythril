@@ -33,6 +33,7 @@ import { reachesSpace } from '../auth/space-reach.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { viewsDeletedTotal } from '../metrics/registry.js';
 import { log } from '../util/log.js';
+import { beginPhase } from '../http/phase-timer.js';
 import { VIEW_OWNER_KINDS, WILDCARD_MEMBER, liveOwnerKeys, viewIdOf, viewOwnerKind, viewOwnerOf } from './view-shape.js';
 
 export {
@@ -93,13 +94,19 @@ export function viewReadMembers(input: {
   peerId?: string | undefined;
   config?: Config;
 }): string[] {
-  const { rights, view, area, needs } = input;
-  if (!rights) return [];
-  const config = input.config ?? getConfig();
-  const live = new Set(allSpaceIds(config));
-  const listed = view.members.includes(WILDCARD_MEMBER) ? allSpaceIds(config) : view.members.filter(id => live.has(id));
-  const read = [...new Set(listed)].filter(id => reachesSpace(rights, id) && holdsRung(rights, id, area, needs));
-  return withoutHeldFor(read, input.peerId);
+  // The request's `scope` phase (Q-976): every door that reads a view resolves its members here.
+  const endScope = beginPhase('scope');
+  try {
+    const { rights, view, area, needs } = input;
+    if (!rights) return [];
+    const config = input.config ?? getConfig();
+    const live = new Set(allSpaceIds(config));
+    const listed = view.members.includes(WILDCARD_MEMBER) ? allSpaceIds(config) : view.members.filter(id => live.has(id));
+    const read = [...new Set(listed)].filter(id => reachesSpace(rights, id) && holdsRung(rights, id, area, needs));
+    return withoutHeldFor(read, input.peerId);
+  } finally {
+    endScope();
+  }
 }
 
 /** The areas a view is read in: every area a door that takes a view names (`takesAView`: a read, outside the schema area). */

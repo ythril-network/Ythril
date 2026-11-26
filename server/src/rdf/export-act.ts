@@ -32,7 +32,7 @@ import type { SpaceMeta } from '@ythril-network/schema';
 import { getConfig } from '../config/loader.js';
 import { idKeysetPage, type IdPage, type IdPageSpec } from '../db/id-keyset-page.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { RDF_KIND_COLLECTIONS, rdfMembers, rdfRowFilter, splitLeftOut } from './rdf-members.js';
+import { RDF_KIND_COLLECTIONS, rdfMembers, rdfRowFilter, splitLeftOut, type RdfMembers } from './rdf-members.js';
 import { budgetCeilingZ, defaultBudgetChars, queryInt, resolveBudget, budgetBoundBy, type ResolvedBudget } from '../brain/result-budget.js';
 import { storeFailureAnswer } from '../brain/store-failure.js';
 import { log, refusalOfParse, peerText, NAME_QUOTED } from '../util/log.js';
@@ -367,7 +367,7 @@ function prepareExport(input: Omit<RdfExportInput, 'whole'>): PreparedExport | R
   if (!resolved.ok) return { status: EXPORT_BAD_REQUEST, error: resolved.error, code: RDF_BAD_BUDGET };
   return {
     exported, withoutRdf, inConflict, format, edgeDetails, cursor, budget: resolved, limit: parsed.data.limit,
-    after: parsed.data.after, files: (m) => readsFiles.has(m), view, construct,
+    after: parsed.data.after, files: (m) => readsFiles.has(m), view, construct, scope,
   };
 }
 
@@ -426,6 +426,8 @@ interface PageInput {
   view: boolean;
   /** The view is a SPARQL view: the document is its CONSTRUCT's graph, written by `renderGraph` (`constructPage`). */
   construct: boolean;
+  /** The members as resolved for this caller (`rdfMembers`): a view's CONSTRUCT reuses them, so the export resolves its members once. */
+  scope: RdfMembers;
 }
 
 /**

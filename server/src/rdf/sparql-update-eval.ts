@@ -134,7 +134,8 @@ export async function evaluateSparqlUpdate(
   scope: { spaceId: string; caller: RdfCaller | undefined; fingerprintOf?: FingerprintOf },
   opts: ChangeSetOptions & { maxRecordsRead?: number; using?: SparqlUpdateDataset },
 ): Promise<{ refusal: SparqlCheckRefusal } | { changes: SparqlUpdateChanges }> {
-  const { members, leftOut } = rdfMembers([scope.spaceId], scope.caller, scope.fingerprintOf);
+  const resolved = rdfMembers([scope.spaceId], scope.caller, scope.fingerprintOf);
+  const { members, leftOut } = resolved;
   const member = members[0];
   if (!member) {
     const out = leftOut[0];
@@ -146,7 +147,8 @@ export async function evaluateSparqlUpdate(
   const checked = await checkSparqlUpdateAlgebra(text, ownGraph, opts.using);
   if ('refusal' in checked) return checked;
   const source = createQuadSource(
-    { members: [scope.spaceId], caller: scope.caller, ...(scope.fingerprintOf ? { fingerprintOf: scope.fingerprintOf } : {}) },
+    // The member resolved above is reused, never resolved again (Q-976).
+    { members: [scope.spaceId], caller: scope.caller, ...(scope.fingerprintOf ? { fingerprintOf: scope.fingerprintOf } : {}), resolved },
     // An Update plans on the records and seqs it read (`readRecords`, `lostRace`), so it is evaluated over the records, never the index.
     { deadline: opts.deadline, index: false, ...(opts.signal ? { signal: opts.signal } : {}), ...(opts.maxRecordsRead !== undefined ? { maxRecordsRead: opts.maxRecordsRead } : {}) },
   );

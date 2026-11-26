@@ -218,6 +218,26 @@ to correct. The information is identical; only the envelope differs.
 
 ---
 
+## Phase times (`Server-Timing`)
+
+Every answer carries a `Server-Timing` header (W3C Server Timing) with the milliseconds the request spent in each phase it met:
+`total;dur=12.34, auth;dur=0.31, rate;dur=0.04, door;dur=11.90, ...`. A phase that ran more than once adds `desc="n=<count>"`.
+`total` runs from the request's arrival at the routes to its headers; `door` is `total` less `auth` and `rate`, and the phases below lie
+inside it and may overlap. The phases a door names:
+
+| Door family | Phases beyond `total`, `auth`, `rate` and `door` |
+|---|---|
+| SPARQL query (REST and MCP `sparql_query`) | `parse`, `members`, `schema` (only when the schema checks were computed, not read from their cache), `verdict`, `plan`, `run`, `render`; `scope` on a view |
+| SPARQL Update | `members`, `schema`, `plan` and `run` as the query names them |
+| RDF export, Linked Data, a SPARQL view's CONSTRUCT | `members`, `schema`, `verdict`; `scope` on a view |
+| Recall, filter, traverse, record reads and writes, files, sync | `scope` on a view |
+
+On MCP the same figures ride in each tool result's `_meta` under `ythril/server-timing`, as `{ "<phase>": { "dur": <ms>, "count": <n> } }`:
+an MCP answer is a stream whose HTTP headers leave before the tool runs, so its header names only `auth` and `rate`. A JSON-RPC error
+(a call the protocol refuses before any tool runs) has no `_meta`. The figures are diagnostics: a client never branches on them.
+
+---
+
 ## Rate Limits
 
 | Scope | Limit | Keyed by | Applies To |

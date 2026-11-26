@@ -35,7 +35,7 @@ import { Router } from 'express';
 import { isDeepStrictEqual } from 'node:util';
 import { boundedJson } from '../util/bounded-read.js';
 import { requireAuth, requireAdminMfa, acceptSchemaLibraryToken } from '../auth/middleware.js';
-import { globalRateLimit } from '../rate-limit/middleware.js';
+import { globalRateLimit, timedRateLimit } from '../rate-limit/middleware.js';
 import { getSchemaLibrary, saveSchemaLibrary, getConfig, getSchemaCatalogs, saveSchemaCatalogs } from '../config/loader.js';
 import { isSsrfSafeUrl, ssrfSafeFetch } from '../util/ssrf.js';
 import { z } from 'zod';
@@ -44,7 +44,6 @@ import {
   type ParsedLibraryEntry,
 } from '../spaces/body-schemas.js';
 import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
-import rateLimit from 'express-rate-limit';
 import type { SchemaCatalog, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { libraryUsages } from '../spaces/library-usages.js';
@@ -89,7 +88,7 @@ function savedUnlessRdfRefuses(next: ParsedLibraryEntry[], rebase: boolean, res:
 // ── Rate limiters ──────────────────────────────────────────────────────────
 
 /** 60 req/min per IP for unauthenticated public read endpoints. */
-const publicRateLimit = rateLimit({
+const publicRateLimit = timedRateLimit({
   windowMs: 60_000,
   max: 60,
   standardHeaders: 'draft-7',
@@ -98,7 +97,7 @@ const publicRateLimit = rateLimit({
 });
 
 /** 20 req/min per IP for catalog proxy (each call makes an outbound fetch). */
-const catalogProxyRateLimit = rateLimit({
+const catalogProxyRateLimit = timedRateLimit({
   windowMs: 60_000,
   max: 20,
   standardHeaders: 'draft-7',

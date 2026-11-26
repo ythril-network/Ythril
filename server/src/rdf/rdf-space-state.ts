@@ -25,7 +25,8 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { rdfBaseConflictOf, otherHoldersOfRdfBase, nestedHoldersOfRdfBase, RDF_BASE_SHARED, RDF_BASE_NESTED } from '../spaces/rdf-settle.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
 import { isWritableIri } from '@ythril-network/schema/internal';
-import { prefixesFor, termClashes } from './term-iri.js';
+import { prefixesFor, termClashes, type TermClash } from './term-iri.js';
+import { cachedSchemaVerdict } from './rdf-schema-verdict.js';
 import { visibleNetworks } from '../auth/network-rights.js';
 import { peerText, NAME_QUOTED } from '../util/log.js';
 import { EXPORT_CONFLICT } from '../export/export-statuses.js';
@@ -121,6 +122,14 @@ function firstUnwritableAddress(meta: SpaceMeta, namespaces: readonly { prefix: 
   return ns === undefined ? null : new RdfUnwritable('A library namespace the space\'s terms are written under', ns);
 }
 
+/** What a space's schema alone says about reading it as RDF: the terms that share an address, and the first address no document can carry. */
+export interface RdfSchemaVerdict { clashes: TermClash[]; unwritable: RdfUnwritable | null }
+
+/** The {@link RdfSchemaVerdict} of a resolved meta, computed: what the cache holds per schema version. */
+function schemaVerdictOf(meta: SpaceMeta, namespaces: readonly { prefix: string; iri: string }[]): RdfSchemaVerdict {
+  return { clashes: termClashes(meta, namespaces), unwritable: firstUnwritableAddress(meta, namespaces) };
+}
+
 /**
  * The fingerprint of a configured space's schema now (`schemaFingerprintOf`, `spaces/schema-stamp.ts`), handed in by the door: that module sits
  * in the server's largest import cycle, and an act that imported it would join the cycle with everything that imports the act.
@@ -178,9 +187,11 @@ export function rdfSpaceState(cfg: Config, spaceId: string, caller: RdfCaller | 
   }
   const meta = inlineResolvableRefs(space.meta as SpaceMeta);
   const namespaces = Object.values(cfg.schemaLibraryNamespaces ?? {});
+  // What the schema alone decides is computed once per schema version and read from the cache after (`rdf-schema-verdict.ts`, Q-976);
+  // everything above, which the caller's rights decide, is asked on every call.
+  const { clashes, unwritable } = cachedSchemaVerdict(spaceId, meta, namespaces, schemaVerdictOf);
   // A schema stored before the clash rule grew (bundle-269 review, finding 6) can hold a pair the save doors now refuse: no migration, the
   // export answers the save's code naming the pair, so the shapes never contradict a record the server accepted.
-  const clashes = termClashes(meta, namespaces);
   if (clashes.length > 0) {
     return {
       ok: false, status: EXPORT_CONFLICT, code: RDF_TERM_CLASH,
@@ -188,7 +199,6 @@ export function rdfSpaceState(cfg: Config, spaceId: string, caller: RdfCaller | 
         + `${clashes.map(c => c.message).join('; ')}. An administrator of its schema gives one of them another address`,
     };
   }
-  const unwritable = firstUnwritableAddress(meta, namespaces);
   if (unwritable) return { ok: false, ...unwritableRefusal(unwritable) };
   return { ok: true, meta, fingerprint: fingerprintOf(space) };
 }

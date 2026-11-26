@@ -35,7 +35,8 @@ import {
 import { renderGraph, unwritable, type RenderedAnswer } from './graph-render.js';
 import { createQuadSource } from './quad-source.js';
 import { readAcrossSwaps } from './read-across-swaps.js';
-import { rdfMembers } from './rdf-members.js';
+import { rdfMembers, type RdfMembers } from './rdf-members.js';
+import { beginPhase, timePhase } from '../http/phase-timer.js';
 import { fromRdfJs, type RdfJsLike } from './rdf-js-terms.js';
 import type { RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentType, RDF_FORMAT_NOT_ACCEPTABLE } from './export-format.js';
@@ -129,6 +130,8 @@ export interface PreparedSparql {
   vars: string[];
   length: number;
   bound: number;
+  /** The members as resolved for this caller (`rdfMembers`): the quad source reuses them, so a query resolves its members once. */
+  scope: RdfMembers;
   /** The members the source reads; and those left out, with the code each answers alone. */
   members: string[];
   leftOut: string[];
@@ -253,9 +256,9 @@ async function judgeSparql(input: SparqlQueryInput): Promise<PreparedSparql | Sp
   const bound = limit ?? maxResults;
   const defaults = parsed.data['default-graph-uri'] ?? [];
   const named = parsed.data['named-graph-uri'] ?? [];
-  const checked = await checkSparqlAlgebra(q, {
+  const checked = await timePhase('parse', () => checkSparqlAlgebra(q, {
     ...(defaults.length > 0 ? { defaultGraphUri: defaults } : {}), ...(named.length > 0 ? { namedGraphUri: named } : {}),
-  });
+  }));
   if ('refusal' in checked) {
     const r = checked.refusal;
     return refusalLogged(refusal(r.status, r.code, r.error, { ...(r.line !== undefined ? { line: r.line } : {}), ...(r.column !== undefined ? { column: r.column } : {}) }), n);
@@ -285,7 +288,7 @@ async function judgeSparql(input: SparqlQueryInput): Promise<PreparedSparql | Sp
   }
   return {
     algebra: checked.algebra, form, vars, length: Buffer.byteLength(q, 'utf8'), bound,
-    members: scope.members.map(m => m.space), leftOut: scope.leftOut.map(l => l.space),
+    scope, members: scope.members.map(m => m.space), leftOut: scope.leftOut.map(l => l.space),
     filesWithheld: scope.members.filter(m => !m.files).map(m => m.space),
     resultType, graphFormat, contentType,
   };
@@ -324,7 +327,8 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
     // R5 (design-r2): a member read from an index that a rebuild swapped while the query ran is read again from its records.
     const open = (recordsFor: readonly string[]): ReturnType<typeof createQuadSource> => {
       startOver();
-      source = createQuadSource({ members: input.spaces, caller: input.caller, fingerprintOf: input.fingerprintOf },
+      // The members the preparation resolved are reused, never resolved again (Q-976: the second resolution cost as much as the first).
+      source = createQuadSource({ members: input.spaces, caller: input.caller, fingerprintOf: input.fingerprintOf, resolved: p.scope },
         { deadline, ...(recordsFor.length > 0 ? { recordsFor } : {}), ...(input.signal ? { signal: input.signal } : {}) });
       return source;
     };
@@ -362,8 +366,18 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
     // A SPARQL view: its CONSTRUCT runs first, over the members as the caller reads them (`made`), and the query reads what it made.
     const over = input.construct === undefined ? made
       : constructSource(await constructStatements(input.construct, made, { deadline, maxBytes: maxResultBytes, ...(input.signal ? { signal: input.signal } : {}) }));
-    result = await runSparql(p.algebra, over, { deadline, ...(input.signal ? { signal: input.signal } : {}) });
-    const running = result;
+    result = await timePhase('plan', () => runSparql(p.algebra, over, { deadline, ...(input.signal ? { signal: input.signal } : {}) }));
+    // The run: from the engine's plan to the answer collected whole (ended by every return and throw of this function).
+    const endRun = beginPhase('run');
+    try {
+      return await collect(made, result, maxResultBytes);
+    } finally {
+      endRun();
+    }
+  }
+
+  /** The rows of one run (`running`, over `made`), collected whole up to the bound. */
+  async function collect(made: ReturnType<typeof createQuadSource>, running: SparqlResult, maxResultBytes: number): Promise<SparqlAnswer | SparqlAnswerRefusal> {
     // The engine's own reader ends on the abort too; the answer is not left waiting on it, and the engine is stopped here at once.
     const gone = new Promise<never>((_, reject) => {
       onAbort = () => { running.destroy(); reject(new CallerGone()); };
@@ -425,15 +439,24 @@ export class CallerGone extends Error {
 
 /** Write a collected answer in the negotiated format (`p.resultType` or `p.graphFormat`). */
 export function renderSparql(p: PreparedSparql, c: SparqlCollected): RenderedAnswer | SparqlAnswerRefusal {
+  return timePhase('render', () => renderCollected(p, c));
+}
+
+function renderCollected(p: PreparedSparql, c: SparqlCollected): RenderedAnswer | SparqlAnswerRefusal {
   if ('quads' in c) return renderGraph(p.graphFormat ?? 'turtle', c.quads);
   const type = p.resultType ?? JSON_TYPE;
   if (type === 'text/csv') return { contentType: 'text/csv; charset=utf-8', body: c.form === 'ask' ? askLines(c.boolean) : csvOf(c.vars, c.rows) };
   if (type === 'text/tab-separated-values') return { contentType: 'text/tab-separated-values; charset=utf-8', body: c.form === 'ask' ? askLines(c.boolean) : tsvOf(c.vars, c.rows) };
-  return { contentType: JSON_TYPE, body: JSON.stringify(resultsJson(c)) };
+  return { contentType: JSON_TYPE, body: JSON.stringify(resultsJsonOf(c)) };
 }
 
-/** The SPARQL results JSON body of a SELECT or ASK: `{head, results}` or `{head, boolean}`, no key of its own. */
+/** The SPARQL results JSON body of a SELECT or ASK: `{head, results}` or `{head, boolean}`, no key of its own; timed as the request's `render`. */
 export function resultsJson(c: Extract<SparqlCollected, { form: 'select' | 'ask' }>): Record<string, unknown> {
+  return timePhase('render', () => resultsJsonOf(c));
+}
+
+/** {@link resultsJson}, untimed: what {@link renderSparql} writes inside its own `render` phase. */
+function resultsJsonOf(c: Extract<SparqlCollected, { form: 'select' | 'ask' }>): Record<string, unknown> {
   return c.form === 'ask' ? { head: {}, boolean: c.boolean } : { head: { vars: c.vars }, results: { bindings: c.rows } };
 }
 
