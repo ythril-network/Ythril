@@ -51,7 +51,7 @@ describe('the deadline is threaded through the pipeline', () => {
   it('the clock starts before the first hop, not after it', () => {
     // Starting it after the embed would hide the slowest single hop from the budget entirely.
     const startAt = recall.indexOf('const startedAt = Date.now()');
-    const embedAt = recall.indexOf("await embed(query, 'query')");
+    const embedAt = recall.indexOf('embedQuery(query)');
     assert.ok(startAt > 0 && embedAt > 0);
     assert.ok(startAt < embedAt, 'the budget must include the embedding call');
   });

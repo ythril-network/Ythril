@@ -17,14 +17,15 @@ import { col, asFilter, asUpdate } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
 
 /** The part of the state row this write reads and sets (`store.ts` `TripleIndexState` is the whole row). */
-interface StaleMarkRow { _id: 'state'; status: string }
+interface StaleMarkRow { _id: 'state'; status: string; writes?: number }
 
 /**
  * Mark `spaceId`'s index `stale` (a rebuild, slice S4, makes it ready again), when it has a state row: for a change no record row can name
  * (a journal row `*`, a record collection dropped or renamed, a writer around the db door). Never creates a state row: a space whose index
- * has none is not ready already, and a row written under a name a rename is about to move into would stop the rename.
+ * has none is not ready already, and a row written under a name a rename is about to move into would stop the rename. Raises the index's
+ * write counter in the same write (`store.ts`: a stale mark is a change of the index).
  */
 export async function markTripleIndexStale(spaceId: string): Promise<void> {
   await col<StaleMarkRow>(spaceCollection(spaceId, 'rdfState')).updateOne(
-    asFilter<StaleMarkRow>({ _id: 'state' }), asUpdate<StaleMarkRow>({ $set: { status: 'stale' } }));
+    asFilter<StaleMarkRow>({ _id: 'state' }), asUpdate<StaleMarkRow>({ $set: { status: 'stale' }, $inc: { writes: 1 } }));
 }

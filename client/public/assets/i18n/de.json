@@ -1693,6 +1693,7 @@
   "networks.refusal.round_expired": "Die Abstimmung über diese Runde ist beendet. Die Stimme wurde nicht gezählt.",
   "networks.refusal.round_not_opened_here": "Diese Runde hat ein Abonnent eröffnet, und ein Herausgeber entscheidet nur Runden, die er selbst eröffnet hat. Sie nimmt hier keine Stimme an und endet an ihrer Frist.",
   "networks.refusal.record_version_at_ceiling": "Die Version von Datensatz {{id}} hat die höchste Nummer erreicht, die die Synchronisierung akzeptiert. Diese Instanz kann ihn deshalb nicht mehr ändern oder löschen; die Instanz, die ihn geschrieben hat, kann es weiterhin.",
+  "networks.refusal.write_race_lost": "Datensatz {{id}} wurde bei jedem Speicherversuch dieser Änderung von anderen Schreibvorgängen geändert; nichts wurde geschrieben. Speichern Sie erneut.",
   "networks.refusal.endpoint_removed": "Die Entität {{id}} an einem Ende dieser Beziehung wurde beim Speichern gelöscht oder zusammengeführt, deshalb wurde die Beziehung zurückgenommen. Laden Sie den Graphen neu und versuchen Sie es erneut.",
   "networks.wizard.continue": "Weiter",
   "networks.wizard.back": "Zurück",

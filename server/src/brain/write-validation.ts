@@ -58,7 +58,7 @@ import { schemaViolation, boundedViolationParams } from '../spaces/schema-violat
 import type { RefKind } from '../config/types-knowledge.js';
 import { WriteConflict } from './write-plan/types.js';
 import { RecordVersionAtCeiling } from './write-precondition.js';
-import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal, EndpointRemoved, LinkTargetRemoved } from '../util/errors.js';
+import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal, EndpointRemoved, LinkTargetRemoved, RecordWriteRaceLost } from '../util/errors.js';
 import { classifyReadFailure } from './store-failure.js';
 import { tallySchemaRefusal, type SchemaRefusalDoor, type SchemaRefusalOutcome } from './schema-refusal-tally.js';
 
@@ -421,6 +421,8 @@ export function connectionRefusalAnswer(
   if (err instanceof ReferenceRefusal) return { status: 400, body: { error: err.message } };
   // A fork row named by an ordinary edit, or a re-key past the fork cap (Q-624): 409, the code beside the one sentence, on every door that asks here.
   if (err instanceof ForkRowReadOnly || err instanceof ForkCapRefusal) return { status: err.status, body: { error: err.message, code: err.code } };
+  // An edit that missed the record's version on every attempt (Q-976): 409, the code and the record beside the one sentence, never the 404 of a missing record.
+  if (err instanceof RecordWriteRaceLost) return { status: err.status, body: { error: err.message, code: err.code, id: err.id } };
   // An edge written while its entity end was deleted or merged, taken back (Q-305): 409, the code and the entity beside the one sentence, on every door that asks here.
   if (err instanceof EndpointRemoved || err instanceof LinkTargetRemoved) return { status: err.status, body: { error: err.message, code: err.code, id: err.id } };
   return null;

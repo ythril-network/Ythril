@@ -17,7 +17,7 @@
  * - **R2 (finding F2): one write's done mark clearing another's row.** Each write has its own rows. Outside a transaction a row is written
  *   `done: false` and marked done only after its write settled; the follower clears only rows it read as done (or abandoned) BEFORE it read
  *   the records, so the record it applies was read after the write landed. A row that is not done keeps the space outstanding
- *   ({@link hasOutstandingJournalRows}, the barrier slice S3 asks) and survives every run until it is done. Inside a transaction the row is
+ *   ({@link hasOutstandingJournalRows}, which the drift verify asks; the query barrier reads the same in its one command, `read.ts`) and survives every run until it is done. Inside a transaction the row is
  *   written done in the transaction's session: it becomes visible only with the commit that makes the write visible, and an abort takes both.
  * - **A filter the journal cannot name record by record** (no `_id`, no `$in` or `$or` of ids) writes the row `*`, which marks the index
  *   stale (a rebuild, slice S4). R6: the writers whose filter was an end of an edge or a file's links read their ids first.

@@ -355,7 +355,9 @@ Notes:
   by that much between two edits. Only compare versions; never add to one, check it for a step or derive a count from it.
 - **A write without `If-Match` is conditional all the same, on the version it read.** If the stored version moved between its
   read and its store (a peer's copy arrived), it reads the record again and writes above what it now finds, up to three
-  times; after the third miss it answers the `412` above. With `If-Match` there is one try: the version you named.
+  times; after the third miss on a record that is still there it answers `409` `write_race_lost` on REST and MCP alike, with nothing
+  written: `{ "error": "…", "code": "write_race_lost", "id": "<the record>" }`. Retry it. With `If-Match` there is one try: the version
+  you named, and a miss is the `412` above.
 - **A version above the ceiling is refused, never wrapped.** A record whose next version would pass
   2^50 minus 2^40 is `409` `record_version_at_ceiling` on REST and MCP alike, with nothing written:
   `{ "error": "…", "code": "record_version_at_ceiling", "id": "<the record>" }`. A merge that would stamp such a record is refused

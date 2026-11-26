@@ -84,7 +84,8 @@ describe('a Linked Data read across a triple index swap reads the records', { sk
         seen.add(`${ev.commandName} ${ev.command?.[ev.commandName]}`);
         if (swap === null && ev.commandName === 'find' && ev.command?.find === `${S}_rdf_quads`) swap = swapTripleIndexBuild(build);
         if (ev.commandName === 'update' && ev.command?.update === `${S}_rdf_state`
-          && ev.command.updates?.some(u => u.u?.buildId === build.buildId)) sawState = true;
+          // The swap's state write is a pipeline since bundle-378 (it carries the write counter on): its build id is inside the stage.
+          && ev.command.updates?.some(u => JSON.stringify(u.u ?? null).includes(`"${build.buildId}"`))) sawState = true;
       };
       const succeeded = (ev) => { if (sawState && committedAt === null && ev.commandName === 'commitTransaction') committedAt = Date.now(); };
       client.on('commandStarted', started);

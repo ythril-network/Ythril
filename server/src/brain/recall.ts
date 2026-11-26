@@ -14,8 +14,9 @@
 import { col, isVectorSearchAvailable, asFilter } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
 import { NotFoundError, NotEmbeddedYetError, notFoundSentence } from '../util/errors.js';
-import { embed } from './embedding.js';
 import type { EmbeddingResult } from './embedding.js';
+import { embedQuery } from './query-embedding-cache.js';
+import { timePhase } from '../http/phase-timer.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { needsReindex } from '../spaces/_shared.js';
 // The pure half — merge, rank and the text projections. Moved out to pay back part of this file's
@@ -256,7 +257,8 @@ export async function recall(
   // recall produced exactly five `POST /v1/embeddings`, all five 429'd, and the query died. They read the five
   // as one per knowledge type; it is one per SPACE, which is why the fix lives at the fan-out and not in the
   // per-type search. A 1-wide request fits where an N-wide burst does not.
-  const embResult = opts?.embedded ?? await embed(query, 'query');
+  // Kept per (text, model) for a while (`query-embedding-cache.ts`): a repeated query costs no model call.
+  const embResult = opts?.embedded ?? await timePhase('embed', () => embedQuery(query));
 
   const activeTypes: RecallKnowledgeType[] = (types && types.length > 0)
     ? types
@@ -286,7 +288,7 @@ export async function recall(
       .map(([t, floor]) =>
         recallByType(spaceId, t as RecallKnowledgeType, embResult.vector, floorFetch(floor!, topK), tags, filter, pathObs, budget),
       );
-    const floorResults = (await settleSearches(floorSearches, noteDegraded)).flat();
+    const floorResults = (await timePhase('search', () => settleSearches(floorSearches, noteDegraded))).flat();
     for (const r of floorResults) {
       if (!guaranteedIds.has(r._id)) {
         guaranteedIds.add(r._id);
@@ -306,7 +308,7 @@ export async function recall(
   // one is how an oversized request becomes an oversized query rather than a slow answer.
   const perTypeK = perTypeFetch(topK, reranking ? candidateMultiplier() : 1.5);
   const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags, filter, pathObs, budget));
-  const perTypeResults = await settleSearches(searches, noteDegraded);
+  const perTypeResults = await timePhase('search', () => settleSearches(searches, noteDegraded));
   const allResults = perTypeResults.flat();
   // P-34: nothing is silently rewritten. A `topK` past the per-type bound, on a type that filled that bound, may have
   // more matches than the recall could consider — so the answer says so rather than reading as complete (Q-103).
@@ -332,8 +334,8 @@ export async function recall(
   // PER TYPE, because the predicate is now per type: one predicate for every active type would have applied the file
   // clause to facts (harmless) or, far worse, left it off the files scan — which reads straight from the collection and
   // is exactly where a flagged row with a vector would come back.
-  await addFreshWrites(spaceId, activeTypes, embResult.vector, allResults,
-    t => KNOWLEDGE_COLLECTION[t], hydrateFreshHits, t => recallPredicate(tags, filter, t));
+  await timePhase('fresh', () => addFreshWrites(spaceId, activeTypes, embResult.vector, allResults,
+    t => KNOWLEDGE_COLLECTION[t], (s, hits) => timePhase('hydrate', () => hydrateFreshHits(s, hits)), t => recallPredicate(tags, filter, t)));
 
   allResults.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || byIdAsc(a, b));
 
@@ -345,8 +347,8 @@ export async function recall(
   // contributes an empty channel and the vector order stands unchanged.
   // `fused` says whether ONE fusion ranked this whole pool, which is what lets the rerank cap trust it.
   const fused = hybridSearchEnabled()
-    && await applyLexicalFusion(spaceId, query, embResult.vector, activeTypes, perTypeK, allResults, guaranteed, tags, filter,
-      opts?.observeLexical);
+    && await timePhase('lexical', () => applyLexicalFusion(spaceId, query, embResult.vector, activeTypes, perTypeK, allResults, guaranteed, tags, filter,
+      opts?.observeLexical));
 
   // Phase 3: rerank the candidate pool, if a cross-encoder is configured. Best-effort by construction —
   // `rerankPool` leaves the fused order untouched when the reranker has no opinion.
@@ -359,7 +361,7 @@ export async function recall(
   // 5 s, or the parameter bounds nothing that matters. `RECALL_BUDGET_MS` remains the ceiling.
   if (reranking && !opts?.deferRerank) {
     const remaining = effectiveBudgetMs - (Date.now() - startedAt);
-    await rerankStage(query, guaranteed, allResults, remaining, effectiveBudgetMs, noteDegraded, fused ? 'fused' : 'vector');
+    await timePhase('rerank', () => rerankStage(query, guaranteed, allResults, remaining, effectiveBudgetMs, noteDegraded, fused ? 'fused' : 'vector'));
   }
 
   // A deferred call hands back the whole pool for the caller's single pass; `minScore` still applies here,
@@ -373,7 +375,7 @@ export async function recall(
   // silently changed the SHAPE of the response: file chunks came back without their parent's path,
   // description and tags. Scoring and enrichment are unrelated concerns, and nothing ever meant them
   // to interact — the two landed in the same refactor and the ordering was never deliberate.
-  await enrichFileChunksWithParent(spaceId, final);
+  await timePhase('hydrate', () => enrichFileChunksWithParent(spaceId, final));
 
   return final;
 }
@@ -977,8 +979,9 @@ async function hydrateFreshHits(
     byType.set(h.type, list);
   }
 
-  const out: RecallResult[] = [];
-  for (const [type, entries] of byType) {
+  // The types' reads go out together (bundle-378, Q-976 S2): one round trip of waiting, not one per type in turn. The order of the
+  // answer is the types' order, as it was.
+  const perType = await Promise.all([...byType].map(async ([type, entries]): Promise<RecallResult[]> => {
     const { commonProject, typeProject } = recallProjection(type);
     const collName = `${spaceId}_${KNOWLEDGE_COLLECTION[type]}`;
     try {
@@ -987,15 +990,14 @@ async function hydrateFreshHits(
       const docs = await readRowsById<Record<string, unknown>>(
         collName, entries.map(e => e.id), { ...commonProject, ...typeProject }, { filter: notFlaggedIfFile(type) });
       const scoreOf = new Map(entries.map(e => [e.id, e.score]));
-      for (const d of docs) {
-        out.push(mapToRecallResult({ ...d, score: scoreOf.get(d['_id'] as string) }, type));
-      }
+      return docs.map(d => mapToRecallResult({ ...d, score: scoreOf.get(d['_id'] as string) }, type));
     } catch {
       // Best-effort by design: a hydration failure drops the fresh half and keeps the index half, which is
       // strictly better than failing a search that had already found something.
+      return [];
     }
-  }
-  return out;
+  }));
+  return perType.flat();
 }
 
 /**
@@ -1049,7 +1051,7 @@ export async function recallGlobal(
   // embedded once per space: identical input, identical vector, N times the cost and N times the chance that
   // a busy embedder refuses one of them and takes the whole recall with it.
   const startedAt = Date.now();
-  const embedded = await embed(query, 'query');
+  const embedded = await timePhase('embed', () => embedQuery(query));
 
   // Rerank ONCE, over the merged pool, for the same reason the query is embedded once: every space would
   // otherwise send its own pass to the same model — 13 concurrent requests for one recall on the platform
@@ -1077,8 +1079,8 @@ export async function recallGlobal(
     : { merged: results.flat(), fused: false };
   if (deferRerank) {
     const budgetMs = effectiveBudgetFor(opts?.maxTimeMS);
-    await rerankStage(query, [], flat, budgetMs - (Date.now() - startedAt), budgetMs, degradedNoter(opts?.degraded),
-      fused ? 'fused' : 'vector');
+    await timePhase('rerank', () => rerankStage(query, [], flat, budgetMs - (Date.now() - startedAt), budgetMs, degradedNoter(opts?.degraded),
+      fused ? 'fused' : 'vector'));
   }
   // Sort by score descending, deduplicate by _id
   const seen = new Set<string>();

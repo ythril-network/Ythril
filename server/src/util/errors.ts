@@ -251,6 +251,24 @@ export class ForkCapRefusal extends Error {
 /** The code of the refusal below. A constant, never a literal at a site: the clients' words are keyed by it (`networks.refusal.endpoint_removed`). */
 export const ENDPOINT_REMOVED = 'endpoint_removed';
 
+/** The code of the refusal below. A constant, never a literal at a site. */
+export const WRITE_RACE_LOST = 'write_race_lost';
+
+/**
+ * A local edit without `If-Match` missed the record's version on every attempt (`brain/write-at-read-version.ts`): another write kept
+ * changing the record while this one read it again and wrote again (bundle-378, Q-976 S2). Nothing was written; the record is there, so it
+ * is no 404. `409`, `{ error, code, id }` on every door that edits a record (`connectionRefusalAnswer`; MCP carries the same body and
+ * sentence). What it prevents: a record that exists answered `not found` because a writer lost a race.
+ */
+export class RecordWriteRaceLost extends Error {
+  override readonly name = 'RecordWriteRaceLost';
+  readonly code = WRITE_RACE_LOST;
+  readonly status = 409 as const;
+  constructor(readonly id: string, readonly attempts: number) {
+    super(`'${id}' was changed by other writes on each of this write's ${attempts} attempts; nothing was written. Retry it (write_race_lost).`);
+  }
+}
+
 /**
  * An edge was written while the entity at one of its ends was deleted or merged away, in a `strictLinkage` space (Q-305). The write read that the end existed and
  * landed after the delete, which touches another document, so the store reports no conflict; the writer's own check after its write found the entity gone and
