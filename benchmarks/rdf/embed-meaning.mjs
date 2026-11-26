@@ -176,7 +176,7 @@ export function armBText(armAText, meaning) {
 
 /** The description arm B gives an edge: its label's meaning. An edge with a description of its own is refused. */
 export function descriptionFor(edge, meaning) {
-  if (typeof edge.description === 'string' && edge.description.trim()) {
+  if (typeof edge.description === 'string' && edge.description.trim() && edge.description !== meaning) {
     throw new Error(`edge ${edge.id} already has a description: arm B would not be arm A plus the meaning`);
   }
   return meaning;
@@ -199,7 +199,8 @@ const sha256 = text => createHash('sha256').update(text).digest('hex');
 
 /** Runs a script in the scratch database's container and answers the JSON it prints (no container is started). */
 function mongo(state, script) {
-  const r = spawnSync('docker', ['exec', '-i', state.mongo, 'mongosh', '--quiet', DB], { input: script, encoding: 'utf8', maxBuffer: 1 << 30 });
+  // `--eval`, not stdin: fed a script on stdin, mongosh prints its prompt after the answer.
+  const r = spawnSync('docker', ['exec', state.mongo, 'mongosh', '--quiet', DB, '--eval', script], { encoding: 'utf8', maxBuffer: 1 << 30 });
   if (r.status !== 0) throw new Error(`mongosh in ${state.mongo} failed (${r.status}): ${r.stderr || r.stdout}`);
   const line = r.stdout.trim().split('\n').pop();
   return JSON.parse(line);
@@ -344,19 +345,26 @@ async function applyMeaning(state, out, work, size) {
     if (e.extra !== 0) throw new Error(`edge ${e.id} has tags, a type or properties: arm A's text would not end at its description`);
     descriptionFor(e, meanings[e.label]);
   }
-  // The text each edge holds under arm A, for the check after the reembed.
-  const sample = edges.filter((_, i) => i % 997 === 0).map(e => e.id);
-  const before = new Map(mongo(state, `print(JSON.stringify(db.getCollection(${JSON.stringify(`${state.spaceId}_edges`)}).find({_id:{$in:${JSON.stringify(sample)}}},{matchedText:1,label:1}).toArray().map(e=>[e._id,[e.label,e.matchedText]])))`));
+  // Arm A's text of an edge with no tags, type, description or properties is `from label to` (edgeEmbedText), rebuilt here
+  // from the names, so the check after the reembed does not lean on a text read before it (a rerun finds arm B's there).
+  const sample = edges.filter((_, i) => i % 997 === 0);
   for (const label of labels) {
     if (!meanings[label]) continue;
     mongo(state, `print(JSON.stringify(db.getCollection(${JSON.stringify(`${state.spaceId}_edges`)}).updateMany({label:${JSON.stringify(label)}},{$set:{description:${JSON.stringify(meanings[label])}}}).modifiedCount))`);
   }
-  await api(state, 'POST', `/api/spaces/${state.spaceId}/reembed`, { kinds: ['edge'] });
-  await drain(state, 'meaning');
-  const after = new Map(mongo(state, `print(JSON.stringify(db.getCollection(${JSON.stringify(`${state.spaceId}_edges`)}).find({_id:{$in:${JSON.stringify(sample)}}},{matchedText:1}).toArray().map(e=>[e._id,e.matchedText])))`));
+  // A reembed call queues at most 50 000 records and walks from the start, so it is called again after each drain until
+  // nothing is owed.
+  for (;;) {
+    const r = await api(state, 'POST', `/api/spaces/${state.spaceId}/reembed`, { kinds: ['edge'], limit: 50_000 });
+    console.log(`reembed: ${r.enqueued} queued, ${r.remaining} remaining`);
+    if (r.enqueued === 0 && r.remaining === 0) break;
+    await drain(state, 'meaning');
+  }
+  const after = new Map(mongo(state, `print(JSON.stringify(db.getCollection(${JSON.stringify(`${state.spaceId}_edges`)}).find({_id:{$in:${JSON.stringify(sample.map(e => e.id))}}},{matchedText:1}).toArray().map(e=>[e._id,e.matchedText])))`));
   let checked = 0;
-  for (const [id, [label, textA]] of before) {
-    const expected = armBText(textA, meanings[label]);
+  for (const e of sample) {
+    const id = e.id;
+    const expected = armBText(`${names.get(e.from)} ${e.label} ${names.get(e.to)}`, meanings[e.label]);
     if (after.get(id) !== expected) throw new Error(`edge ${id}: stored text "${after.get(id)}" is not arm B's "${expected}"`);
     checked++;
   }
