@@ -69,6 +69,7 @@ and the two are identical by construction. The REST routes with no tool are in
 | **Brain — ops** | | | |
 | | `space_stats` | `POST /api/space_stats` · legacy: `GET /api/brain/spaces/:spaceId/stats` | read `knowledge` |
 | | `space_reindex` | `POST /api/space_reindex` · legacy: `POST /api/brain/spaces/:spaceId/reindex` | admin `knowledge` |
+| | `space_rdf_rebuild` | `POST /api/space_rdf_rebuild` · legacy: `POST /api/brain/spaces/:spaceId/rdf-index/rebuild` | admin `knowledge` |
 | | `list_embed_jobs` | `POST /api/list_embed_jobs` · legacy: `GET /api/brain/spaces/:spaceId/embedding-queue/records` | read `knowledge` |
 | | `retry_embed_record` | `POST /api/retry_embed_record` · legacy: `POST /api/brain/spaces/:spaceId/embedding-queue/records/retry` | write `knowledge` |
 | | `list_forks` | `POST /api/list_forks` · legacy: `GET /api/brain/spaces/:spaceId/forks` | read `knowledge` |
@@ -147,7 +148,6 @@ and the two are identical by construction. The REST routes with no tool are in
 | | `filter` | `POST /api/filter` | read · both doors |
 | | `list_dir` | `POST /api/list_dir` | read · both doors |
 | | `space_rdf_index` | `POST /api/space_rdf_index` | read · both doors |
-| | `space_rdf_rebuild` | `POST /api/space_rdf_rebuild` | admin · both doors |
 | | `view_claim` | `POST /api/view_claim` | instance-admin · both doors — REST: `/api/admin/views/claim` |
 | | `view_migration` | `POST /api/view_migration` | instance-admin · both doors — REST: `/api/admin/views/migration` |
 | | `view_orphans` | `POST /api/view_orphans` | instance-admin · both doors — REST: `/api/admin/views/orphans` |
