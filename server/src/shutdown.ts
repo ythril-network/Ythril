@@ -175,6 +175,8 @@ export async function runShutdown(opts: ShutdownOptions): Promise<void> {
   stopViewSweep();
   const { stopTombstonePrune } = await import('./brain/tombstone-prune.js');
   stopTombstonePrune();
+  const { stopTripleIndexUpkeep } = await import('./rdf/triple-index/verify.js');
+  stopTripleIndexUpkeep();
   const { stopPositionsOwedJob } = await import('./sync/positions-owed.js');
   stopPositionsOwedJob();
   const { stopEdgeIdentityOwedJob } = await import('./spaces/edge-identity-owed.js');

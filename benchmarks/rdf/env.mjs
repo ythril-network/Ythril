@@ -16,7 +16,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
+import { basename, dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const HERE = dirname(fileURLToPath(import.meta.url));
@@ -25,6 +25,24 @@ export const PIN_PATH = join(HERE, 'pin.json');
 export const PIN = JSON.parse(readFileSync(PIN_PATH, 'utf8'));
 export const TOOLS_SUBDIR = 'tools/bsbmtools-0.2';
 export const DEFAULT_WORK = 'E:/TMP/Ythril/data/b271-bench';
+/** The prefix of the container, volume and network names of a run in the default work folder. */
+export const DEFAULT_NAME_PREFIX = 'b271';
+/** A name prefix Docker takes for a container, a volume and a network alike. */
+const NAME_PREFIX = /^[a-z0-9][a-z0-9-]{0,30}$/;
+
+/**
+ * The prefix of a run's container names: `--name-prefix`, else the work folder's name without a trailing `-bench` (`b273-bench` is `b273`),
+ * lower-cased with every other character a `-`. Two runs in two work folders, or with two prefixes, never share a container, so one
+ * run's start (which removes its own names first) never removes another's. A prefix Docker would refuse throws.
+ */
+export function namePrefixOf(flags, work) {
+  const given = flags['name-prefix'];
+  const prefix = given !== undefined
+    ? String(given)
+    : basename(String(work).replace(/[\\/]+$/, '')).toLowerCase().replace(/-bench$/, '').replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!NAME_PREFIX.test(prefix)) throw new Error(`the name prefix '${prefix}' is not one Docker takes: lower-case letters, digits and '-', at most 31`);
+  return prefix;
+}
 
 export function parseArgs(argv) {
   const flags = {};

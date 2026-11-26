@@ -72,6 +72,9 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   schema_update: 'space.update',
   save_space: 'space.create',
   space_reindex: 'space.reindex',
+  // The triple index's rebuild (Q-764): a mutation of its own; its status read is a read of the space, `space.list` as the other status reads.
+  space_rdf_rebuild: 'space.rdf.rebuild',
+  space_rdf_index: 'space.list',
   // Under the operation its REST twin already records, not a new one: a compliance reader asks who
   // backfilled a space's embeddings, and two names for one act makes every query have to know both.
   space_reembed: 'space.embeddings.reembed',

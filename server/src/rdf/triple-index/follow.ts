@@ -64,7 +64,7 @@ const OWNER = randomUUID();
  * The resolved meta of `spaceId` when its records have an RDF form now (`rdfSpaceState`, the one rule the exports ask); `null` when RDF is
  * off (the space has no index) or its names are not settled (it is not followed until they are). The fingerprint is not asked for.
  */
-function formMetaOf(spaceId: string): SpaceMeta | null {
+export function formMetaOf(spaceId: string): SpaceMeta | null {
   const state = rdfSpaceState(getConfig(), spaceId, undefined, () => '');
   return state.ok ? state.meta : null;
 }
@@ -210,7 +210,8 @@ function withoutTrailingTie(rows: readonly PositionedRow[]): PositionedRow[] {
 /** One positioned row: a record row (its kind and id) or a tombstone of one. */
 interface PositionedRow { pos: number; kind: RdfRecordKind; id: string; tombstone: boolean; doc: Record<string, unknown> | null }
 
-const projectionOf = (kind: RdfRecordKind): Record<string, 1> => Object.fromEntries([...RDF_READ_FIELDS[kind], 'pos'].map(f => [f, 1 as const]));
+/** The fields a record's statements read, and its position: what the follower, a rebuild and the verify read of a record. */
+export const projectionOf = (kind: RdfRecordKind): Record<string, 1> => Object.fromEntries([...RDF_READ_FIELDS[kind], 'pos'].map(f => [f, 1 as const]));
 /** The tombstone types are the record kinds a tombstone buries (never `file`: a deleted file is a feed marker row, read with the files). */
 const TOMBSTONE_KINDS: ReadonlySet<string> = new Set<RdfRecordKind>(['entity', 'fact', 'chrono', 'edge', 'link']);
 
@@ -261,7 +262,7 @@ async function currentForms(spaceId: string, meta: SpaceMeta, rows: readonly Pos
 }
 
 /** The statements of one stored record, as the export's mapper gives them (RDF 1.2 edge details, no agent memory). */
-function statementsOf(meta: SpaceMeta, kind: RdfRecordKind, doc: Record<string, unknown>): StatementKeys[] {
+export function statementsOf(meta: SpaceMeta, kind: RdfRecordKind, doc: Record<string, unknown>): StatementKeys[] {
   const form = recordTriples(meta, kind, doc, { edgeDetails: 'rdf12' });
   if (form.leftOut !== undefined) return [];
   return form.quads.map(q => [termKey(q.subject), termKey(q.predicate), termKey(q.object)] as const);

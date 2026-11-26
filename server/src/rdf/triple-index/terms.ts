@@ -57,13 +57,15 @@ export function storedKeyOf(key: string): string {
 }
 
 /**
- * The id of every key in `keys` in `spaceId`'s dictionary, giving the missing ones the next ids, all inside `session`. Every key comes back
- * with an id, or the call throws (the dictionary is full past {@link MAX_TERM_ID}).
+ * The id of every key in `keys` in `spaceId`'s dictionary (`collection`: the live one, or a rebuild's own before its swap), giving the
+ * missing ones the next ids, all inside `session`. Every key comes back with an id, or the call throws (the dictionary is full past
+ * {@link MAX_TERM_ID}).
  */
-export async function termIds(spaceId: string, keys: Iterable<string>, session: ClientSession): Promise<Map<string, number>> {
+export async function termIds(spaceId: string, keys: Iterable<string>, session: ClientSession,
+  collection: string = spaceCollection(spaceId, 'rdfTerms')): Promise<Map<string, number>> {
   const byStored = new Map<string, string>();
   for (const key of keys) byStored.set(storedKeyOf(key), key);
-  const coll = col<TermRow>(spaceCollection(spaceId, 'rdfTerms'));
+  const coll = col<TermRow>(collection);
   const ids = new Map<string, number>();
   for (const chunk of inChunks([...byStored.keys()], KEYS_PER_COMMAND)) {
     const rows = await coll.find(asFilter<TermRow>({ k: { $in: chunk } }), { session, projection: { _id: 1, k: 1 } }).toArray();
@@ -71,7 +73,7 @@ export async function termIds(spaceId: string, keys: Iterable<string>, session: 
   }
   const missing = [...byStored.values()].filter(key => !ids.has(key));
   if (missing.length === 0) return ids;
-  const counter = await col<CounterRow>(spaceCollection(spaceId, 'rdfTerms')).findOneAndUpdate(
+  const counter = await col<CounterRow>(collection).findOneAndUpdate(
     asFilter<CounterRow>({ _id: COUNTER_ID }), asUpdate<CounterRow>({ $inc: { top: missing.length } }),
     { upsert: true, returnDocument: 'after', session },
   );

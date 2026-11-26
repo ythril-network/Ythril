@@ -93,6 +93,18 @@ quarter of the time it has left. Otherwise that space is read from its records, 
 index catches up in the background. A space whose index is stale (its schema changed, or a write the index cannot name) is read from its
 records until the index is rebuilt.
 
+**Rebuilds.** A background job checks each space's index every minute and rebuilds it when it is missing (a new space, a restore, or
+an index never built whole), stale, built for another schema, named by a write no record row could name, or found to have drifted. Every
+ten minutes at most it also verifies a rolling sample of 200 records of each space against the index, and 200 terms of its dictionary; a
+record that differs is logged and starts a rebuild, and so does a dictionary more than half of whose terms no statement uses. A rebuild
+reads every record (also those stored before positions) into collections of its own and swaps them in when it is done; meanwhile the space
+is read from its index as before, or from its records. Only one rebuild of a space runs at a time, across instances sharing a database. A
+query that read an index which a rebuild swapped in while the query ran is answered again from that space's records, so no answer mixes
+two builds. An admin rebuilds one space at once with `space_rdf_rebuild` (MCP, or `POST /api/space_rdf_rebuild` with `{"space": "<id>"}`;
+the knowledge `admin` right on the space; `409 rdf_off` for a space with RDF off) and reads its state with `space_rdf_index`
+(`POST /api/space_rdf_index`; knowledge `read`): `status` (`ready`, `catching-up`, `stale` or `absent`), `buildId`, `appliedPos` and
+`rebuilding`.
+
 Either way the answer is the same: the same statements, the same rights (without `files: read` no file statement is read from either),
 and the same refusals. A read from the index counts statements against `sparql.maxIndexRowsRead`; a read from the records counts records
 against `sparql.maxRecordsRead`; either bound passed is `413 sparql_too_much_read`. A join over an index looks its bindings up a hundred at

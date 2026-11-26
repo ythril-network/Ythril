@@ -62,7 +62,7 @@ import {
   SPARQL_RETRY_AFTER_SECONDS, SPARQL_STORE_UNAVAILABLE, SPARQL_TOO_LARGE, SPARQL_TOO_MUCH_READ, SPARQL_UNAVAILABLE, SparqlRefusal, sparqlRefusalOf,
   timeoutRefusal, tooMuchReadRefusal,
 } from './sparql-refusal.js';
-import { IndexRead, indexVerdict } from './triple-index/read.js';
+import { IndexRead, indexVerdict, indexBuildOf } from './triple-index/read.js';
 import type { RdfCaller, FingerprintOf } from './rdf-space-state.js';
 
 /** The longest server deadline one find carries, in milliseconds, whatever time the query has left (as `brain/query.ts`). */
@@ -95,6 +95,11 @@ export interface QuadSourceOptions {
    * it read; the equal-answers spec's other path). Default true: a member whose index may be read now (`triple-index/read.ts`) is.
    */
   index?: boolean;
+  /**
+   * Members read from their records whatever their index says: the members a first run of the same query read from an index that was
+   * swapped while it ran ({@link QuadSource.indexesSwapped}, design-r2 R5).
+   */
+  recordsFor?: readonly string[];
   /** Ends every read when the caller goes away. */
   signal?: AbortSignal;
 }
@@ -125,6 +130,11 @@ export interface QuadSource {
   readPaths(): Array<{ space: string; path: 'index' | 'records' }>;
   /** Statement rows read from the triple indexes so far, every match together (bounded by `sparql.maxIndexRowsRead`). */
   indexRowsRead(): number;
+  /**
+   * The members read from an index whose build is no longer the one the query pinned when it decided to read it (a rebuild swapped it in
+   * meanwhile, design-r2 R5): what such a member answered may mix two builds, so the query is asked again with them in `recordsFor`.
+   */
+  indexesSwapped(): Promise<string[]>;
 }
 
 /** A pattern of a join's right side with one binding of its left side put in: subject, predicate, object, graph. */
@@ -393,11 +403,17 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
   /** Where each member is read from, decided once per query (`triple-index/read.ts` gives the rule). */
   const verdicts = new Map<string, Promise<'index' | 'records'>>();
   const paths = new Map<string, 'index' | 'records'>();
+  /** The build each member read from its index was pinned at (R5): checked again by `indexesSwapped`. */
+  const pinned = new Map<string, string | null>();
+  const toRecords = new Set(opts.recordsFor ?? []);
   const pathOf = (member: RdfMember): Promise<'index' | 'records'> => {
     let p = verdicts.get(member.space);
     if (p === undefined) {
-      const verdict = mayReadIndex
-        ? indexVerdict(member.space, member.meta, opts.deadline).then(v => v.read)
+      const verdict = mayReadIndex && !toRecords.has(member.space)
+        ? indexVerdict(member.space, member.meta, opts.deadline).then((v) => {
+          if (v.read === 'index') pinned.set(member.space, v.buildId);
+          return v.read;
+        })
         : Promise.resolve('records' as const);
       p = verdict.then((path) => { paths.set(member.space, path); return path; });
       verdicts.set(member.space, p);
@@ -584,6 +600,11 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     lostRace: () => (lost ? { ...lost, seqs: [lost.seqs[0], lost.seqs[1]] } : null),
     readPaths: () => [...paths].map(([space, path]) => ({ space, path })),
     indexRowsRead: () => indexRead.rowsRead(),
+    async indexesSwapped() {
+      const swapped: string[] = [];
+      for (const [space, buildId] of pinned) if (await indexBuildOf(space) !== buildId) swapped.push(space);
+      return swapped;
+    },
   };
   batchers.set(source, { matchBatch });
   return source;

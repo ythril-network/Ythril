@@ -146,6 +146,8 @@ and the two are identical by construction. The REST routes with no tool are in
 | | `delete_space_data` | `POST /api/delete_space_data` | space-admin · both doors — space-admin of the named space |
 | | `filter` | `POST /api/filter` | read · both doors |
 | | `list_dir` | `POST /api/list_dir` | read · both doors |
+| | `space_rdf_index` | `POST /api/space_rdf_index` | read · both doors |
+| | `space_rdf_rebuild` | `POST /api/space_rdf_rebuild` | admin · both doors |
 | | `view_claim` | `POST /api/view_claim` | instance-admin · both doors — REST: `/api/admin/views/claim` |
 | | `view_migration` | `POST /api/view_migration` | instance-admin · both doors — REST: `/api/admin/views/migration` |
 | | `view_orphans` | `POST /api/view_orphans` | instance-admin · both doors — REST: `/api/admin/views/orphans` |

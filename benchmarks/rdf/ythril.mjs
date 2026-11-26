@@ -14,12 +14,19 @@
 import { spawnSync } from 'node:child_process';
 import { createReadStream, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { dockerOk, dockerPlain, pinnedImage, sleep } from './env.mjs';
+import { DEFAULT_NAME_PREFIX, dockerOk, dockerPlain, pinnedImage, sleep } from './env.mjs';
 import { ensureImage, statePath } from './oxigraph.mjs';
 import { limitsOf, withLimits } from './sparql-limits.mjs';
 
-const NET = 'b271-bench-net';
-export const ythrilNames = () => ({ mongo: 'b271-ythril-mongo', app: 'b271-ythril', config: 'b271-ythril-config', data: 'b271-ythril-data', mongoData: 'b271-ythril-mongo-data' });
+/**
+ * The names a run with `prefix` gives its containers and volumes (`env.mjs` `namePrefixOf`: `--name-prefix`, else the work folder). Two runs
+ * with different prefixes share none, so one run's `ythrilUp`, which removes its own names first, never removes another's.
+ */
+export const ythrilNames = (prefix = DEFAULT_NAME_PREFIX) => ({
+  mongo: `${prefix}-ythril-mongo`, app: `${prefix}-ythril`, config: `${prefix}-ythril-config`, data: `${prefix}-ythril-data`, mongoData: `${prefix}-ythril-mongo-data`,
+});
+/** The Docker network a run with `prefix` starts its containers on. */
+export const ythrilNetwork = (prefix = DEFAULT_NAME_PREFIX) => `${prefix}-bench-net`;
 
 /** The commit an image was built from, when its tag says so (`b271-ythril:<sha>`); the caller can name it instead. */
 function commitFromTag(image) {
@@ -27,11 +34,12 @@ function commitFromTag(image) {
   return /^[0-9a-f]{7,40}$/.test(tag) ? tag : null;
 }
 
-export async function ythrilUp(work, { image = 'ghcr.io/ythril-network/ythril:6.5.6', commit = commitFromTag(image) } = {}) {
-  const n = ythrilNames();
+export async function ythrilUp(work, { image = 'ghcr.io/ythril-network/ythril:6.5.6', commit = commitFromTag(image), prefix = DEFAULT_NAME_PREFIX } = {}) {
+  const n = ythrilNames(prefix);
+  const NET = ythrilNetwork(prefix);
   const mongoRef = pinnedImage('mongo');
   ensureImage(mongoRef);
-  ythrilDown();
+  ythrilDown(prefix);
   dockerPlain(['network', 'create', NET]);
   for (const v of [n.config, n.data, n.mongoData]) dockerOk(['volume', 'create', v]);
 
@@ -64,12 +72,12 @@ export async function ythrilUp(work, { image = 'ghcr.io/ythril-network/ythril:6.
   return state;
 }
 
-export function ythrilDown() {
-  const n = ythrilNames();
+export function ythrilDown(prefix = DEFAULT_NAME_PREFIX) {
+  const n = ythrilNames(prefix);
   dockerPlain(['rm', '-f', n.app]);
   dockerPlain(['rm', '-f', n.mongo]);
   for (const v of [n.config, n.data, n.mongoData]) dockerPlain(['volume', 'rm', '-f', v]);
-  dockerPlain(['network', 'rm', NET]);
+  dockerPlain(['network', 'rm', ythrilNetwork(prefix)]);
 }
 
 /** Runs `docker exec` in the scratch instance's container (no container is started, so nothing is booked). */

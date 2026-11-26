@@ -17,9 +17,9 @@
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chunkFile } from './chunk.mjs';
-import { parseArgs, variantOf, workDir } from './env.mjs';
+import { namePrefixOf, parseArgs, variantOf, workDir } from './env.mjs';
 import { oxigraphDown, oxigraphUp, statePath } from './oxigraph.mjs';
-import { createRdfSpace, deleteSpace, loadChunks, loadInto, setSparqlLimits, spaceCounts, ythrilDown, ythrilUp } from './ythril.mjs';
+import { createRdfSpace, deleteSpace, loadChunks, loadInto, setSparqlLimits, spaceCounts, ythrilDown, ythrilNames, ythrilUp } from './ythril.mjs';
 
 /** The import door's body bound (`rdf_bound_exceeded`), and the size a chunk is cut to: well under it. */
 const IMPORT_BODY_BOUND = 1024 ** 3;
@@ -28,6 +28,8 @@ const CHUNK_BYTES = 768 * 1024 ** 2;
 async function main() {
   const { flags, positional } = parseArgs(process.argv.slice(2));
   const work = workDir(flags);
+  // The prefix of this run's container names (--name-prefix, else the work folder): two runs never remove each other's containers.
+  const prefix = namePrefixOf(flags, work);
   const cmd = positional[0];
   const size = Number(flags.size);
   const needSize = () => {
@@ -44,6 +46,7 @@ async function main() {
     console.log('oxigraph removed');
   } else if (cmd === 'ythril-up') {
     const s = await ythrilUp(work, {
+      prefix,
       ...(flags['ythril-image'] ? { image: String(flags['ythril-image']) } : {}),
       ...(flags['ythril-commit'] ? { commit: String(flags['ythril-commit']) } : {}),
     });
@@ -51,9 +54,9 @@ async function main() {
   } else if (cmd === 'ythril-limits') {
     // Raises the SPARQL limits of the scratch instance (read live); the values are refused when the server would refuse them.
     const asked = { timeoutMs: Number(flags['timeout-ms']), maxRecordsRead: Number(flags['max-records-read']), maxResults: Number(flags['max-results']) };
-    console.log(`sparql limits now: ${JSON.stringify(setSparqlLimits(asked))}`);
+    console.log(`sparql limits now: ${JSON.stringify(setSparqlLimits(asked, ythrilNames(prefix).app))}`);
   } else if (cmd === 'ythril-down') {
-    ythrilDown();
+    ythrilDown(prefix);
     console.log('scratch ythril removed');
   } else if (cmd === 'ythril') {
     const variant = needSize();

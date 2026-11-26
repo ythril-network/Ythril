@@ -82,11 +82,9 @@ describe('a SPARQL query across a triple index swap reads the records', { skip }
       swapping = false;
       return n;
     })();
+    // One at a time: the instance runs one query per caller (`503 sparql_busy` for a second).
     const answers = [];
-    while (swapping) {
-      const batch = await Promise.all(Array.from({ length: 4 }, () => d.sparqlPost(admin.key, S, NAMES)));
-      answers.push(...batch);
-    }
+    while (swapping) answers.push(await d.sparqlPost(admin.key, S, NAMES));
     assert.equal(await swaps, 4);
     assert.ok(answers.length >= 4, `queries were asked while the index was swapped: ${answers.length}`);
     for (const r of answers) {

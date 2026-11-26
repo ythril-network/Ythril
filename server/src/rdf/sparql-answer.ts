@@ -335,10 +335,60 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
   try {
     const { timeoutMs, maxResultBytes } = sparqlLimits(getConfig());
     const deadline = Date.now() + timeoutMs;
-    const made = createQuadSource({ members: input.spaces, caller: input.caller, fingerprintOf: input.fingerprintOf }, { deadline, ...(input.signal ? { signal: input.signal } : {}) });
-    source = made;
+    // R5 (design-r2): a member read from an index that a rebuild swapped while the query ran may have answered from two builds, so the
+    // query is asked once more with those members read from their records. Once: the second run reads no swapped index.
+    let recordsFor: string[] = [];
+    for (;;) {
+      let answered: SparqlAnswer | SparqlAnswerRefusal;
+      let made: ReturnType<typeof createQuadSource> | null = null;
+      try {
+        made = createQuadSource({ members: input.spaces, caller: input.caller, fingerprintOf: input.fingerprintOf },
+          { deadline, ...(recordsFor.length > 0 ? { recordsFor } : {}), ...(input.signal ? { signal: input.signal } : {}) });
+        source = made;
+        answered = await answerOnce(made, deadline, maxResultBytes);
+      } catch (err) {
+        if (err instanceof CallerGone || made === null || recordsFor.length > 0) throw err;
+        const swapped = await made.indexesSwapped();
+        if (swapped.length === 0) throw err;
+        recordsFor = swapped;
+        startOver();
+        continue;
+      }
+      if (recordsFor.length === 0 && made !== null) {
+        const swapped = await made.indexesSwapped();
+        if (swapped.length > 0) { recordsFor = swapped; startOver(); continue; }
+      }
+      return answered;
+    }
+  } catch (err) {
+    if (err instanceof CallerGone) throw err;
+    const named = sparqlRefusalOf(err);
+    if (named) {
+      return refuseRun(refusal(named.status, named.code, named.message, named.retryAfterSeconds !== undefined ? { retryAfterSeconds: named.retryAfterSeconds } : {}));
+    }
     if (input.signal?.aborted) throw new CallerGone();
-    result = await runSparql(p.algebra, source, { deadline, ...(input.signal ? { signal: input.signal } : {}) });
+    // An error nothing here maps: only its class goes on. Its message may hold the query's text (an engine names the function or the IRI it
+    // met), and a thrown error is logged by whoever catches it, so what is thrown is a fixed sentence and the class.
+    throw new SparqlEngineFailure(err, auditChangesOf(countsOf(p), source?.recordsRead() ?? 0, 0, SPARQL_OUTCOME_ENGINE_FAILED));
+  } finally {
+    if (onAbort) input.signal?.removeEventListener('abort', onAbort);
+    // Set inside `answerOnce`, which the compiler's narrowing of this scope does not see.
+    (result as SparqlResult | null)?.destroy();
+    slot.release();
+  }
+
+  /** A run given up for another: its engine stopped and its abort listener taken off. */
+  function startOver(): void {
+    if (onAbort) input.signal?.removeEventListener('abort', onAbort);
+    onAbort = null;
+    result?.destroy();
+    result = null;
+  }
+
+  /** One run of the query over `made`, collected whole up to the bound. */
+  async function answerOnce(made: ReturnType<typeof createQuadSource>, deadline: number, maxResultBytes: number): Promise<SparqlAnswer | SparqlAnswerRefusal> {
+    if (input.signal?.aborted) throw new CallerGone();
+    result = await runSparql(p.algebra, made, { deadline, ...(input.signal ? { signal: input.signal } : {}) });
     const running = result;
     // The engine's own reader ends on the abort too; the answer is not left waiting on it, and the engine is stopped here at once.
     const gone = new Promise<never>((_, reject) => {
@@ -373,20 +423,6 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
     }
     const recordsRead = made.recordsRead();
     return { prepared: p, collected, rows, recordsRead, auditChanges: auditChangesOf(countsOf(p), recordsRead, rows, SPARQL_OUTCOME_ANSWERED) };
-  } catch (err) {
-    if (err instanceof CallerGone) throw err;
-    const named = sparqlRefusalOf(err);
-    if (named) {
-      return refuseRun(refusal(named.status, named.code, named.message, named.retryAfterSeconds !== undefined ? { retryAfterSeconds: named.retryAfterSeconds } : {}));
-    }
-    if (input.signal?.aborted) throw new CallerGone();
-    // An error nothing here maps: only its class goes on. Its message may hold the query's text (an engine names the function or the IRI it
-    // met), and a thrown error is logged by whoever catches it, so what is thrown is a fixed sentence and the class.
-    throw new SparqlEngineFailure(err, auditChangesOf(countsOf(p), source?.recordsRead() ?? 0, 0, SPARQL_OUTCOME_ENGINE_FAILED));
-  } finally {
-    if (onAbort) input.signal?.removeEventListener('abort', onAbort);
-    result?.destroy();
-    slot.release();
   }
 }
 
