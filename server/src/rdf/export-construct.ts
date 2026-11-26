@@ -21,7 +21,7 @@ import { readAcrossSwaps } from './read-across-swaps.js';
 import { renderGraph } from './graph-render.js';
 import { fromRdfJs } from './rdf-js-terms.js';
 import { sparqlRefusalOf } from './sparql-refusal.js';
-import { RDF_KIND_COLLECTIONS } from './rdf-members.js';
+import { RDF_KIND_COLLECTIONS, type RdfMembers } from './rdf-members.js';
 import { rdfContentDisposition, RDF_MEDIA_TYPES } from './export-format.js';
 import { constructStatements, VIEW_CONSTRUCT_TOO_LARGE_STATUS } from './view-construct.js';
 import type { Quad, EdgeDetails } from './literals.js';
@@ -50,6 +50,8 @@ export interface ConstructPageInput {
   budget: ResolvedBudget;
   files: (space: string) => boolean;
   slot: ExportSlot;
+  /** The members as resolved for this caller: the CONSTRUCT's source reuses them, never resolves them again (Q-976). */
+  scope?: RdfMembers;
 }
 
 /** The page of a SPARQL view's export, or its refusal. @throws what is no refusal of the run (a fault of the server) */
@@ -62,7 +64,7 @@ export async function constructPage(p: ConstructPageInput, construct: string): P
   const { signal } = p.input;
   try {
     made = await readAcrossSwaps(
-      recordsFor => createQuadSource({ members, caller: p.input.caller, fingerprintOf: p.input.fingerprintOf },
+      recordsFor => createQuadSource({ members, caller: p.input.caller, fingerprintOf: p.input.fingerprintOf, resolved: p.scope },
         { deadline, ...(signal ? { signal } : {}), ...(recordsFor.length > 0 ? { recordsFor } : {}) }),
       async source => {
         const statements = (await constructStatements(construct, source, { deadline, maxBytes: maxResultBytes, ...(signal ? { signal } : {}) })).map(fromRdfJs);

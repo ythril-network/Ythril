@@ -33,6 +33,7 @@ import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { admitPeerOnResponse } from '../sync/peer-space-admission.js';
 import { peerBoundTo } from './peer-bound.js';
 import { decorateJsonAnswer } from '../api/decorate-json-answer.js';
+import { timePhase } from '../http/phase-timer.js';
 
 // The Express `Request` and `Locals` fields the guards set are declared in a leaf of their own (`request-augmentation.ts`), so a reader of
 // them need not import this module. Type-only: nothing is imported at run time.
@@ -207,6 +208,15 @@ async function resolveAuthOrFail(
   req: Request,
   res: Response,
   opts: { onChallenge?: (res: Response) => void; recordInvalidMetric?: boolean } = {},
+): Promise<{ record: Omit<TokenRecord, 'hash'> | OidcTokenRecord; bearer: string } | null> {
+  // The request's `auth` phase (Q-976): every guard resolves its bearer here, so every door's answer names it.
+  return timePhase('auth', () => resolveAuthTimed(req, res, opts));
+}
+
+async function resolveAuthTimed(
+  req: Request,
+  res: Response,
+  opts: { onChallenge?: (res: Response) => void; recordInvalidMetric?: boolean },
 ): Promise<{ record: Omit<TokenRecord, 'hash'> | OidcTokenRecord; bearer: string } | null> {
   const bearer = extractBearer(req);
   if (!bearer) {

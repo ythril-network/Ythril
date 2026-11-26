@@ -158,9 +158,11 @@ export async function readStatements(input: StatementsInput): Promise<LdOutcome<
  * The quad sources of one Linked Data read of `space`: the first reads its index when it may, the second (a rerun across a swap,
  * `read-across-swaps.ts`) reads the swapped members from their records. One deadline for both.
  */
-function sourcesOf(space: string, input: { caller: RdfCaller | undefined; signal: AbortSignal }): (recordsFor: readonly string[]) => QuadSource {
+function sourcesOf(space: string, input: { caller: RdfCaller | undefined; signal: AbortSignal; member?: RdfMember }): (recordsFor: readonly string[]) => QuadSource {
   const deadline = Date.now() + sparqlLimits(getConfig()).timeoutMs;
-  return recordsFor => createQuadSource({ members: [space], caller: input.caller, fingerprintOf: schemaFingerprintOf },
+  // The member the door resolved for this caller is reused, never resolved again (Q-976).
+  const resolved = input.member ? { members: [input.member] } : undefined;
+  return recordsFor => createQuadSource({ members: [space], caller: input.caller, fingerprintOf: schemaFingerprintOf, resolved },
     { deadline, signal: input.signal, ...(recordsFor.length > 0 ? { recordsFor } : {}) });
 }
 

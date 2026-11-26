@@ -67,10 +67,13 @@ export function guardFacts(middlewareText) {
   return facts;
 }
 
-/** Names of every rate limiter the server's code declares (`const X = rateLimit(`), from sources `{ file, text }`. */
+/**
+ * Names of every rate limiter the server's code declares (`const X = timedRateLimit(`, the one way it makes one since Q-976, or a bare
+ * `const X = rateLimit(`), from sources `{ file, text }`.
+ */
 export function limiterNames(sources) {
   const out = new Set();
-  for (const { text } of sources) for (const m of stripComments(text).matchAll(/\bconst\s+(\w+)\s*(?::[^=\n]+)?=\s*rateLimit\s*\(/g)) out.add(m[1]);
+  for (const { text } of sources) for (const m of stripComments(text).matchAll(/\bconst\s+(\w+)\s*(?::[^=\n]+)?=\s*(?:timedRateLimit|rateLimit)\s*\(/g)) out.add(m[1]);
   return out;
 }
 

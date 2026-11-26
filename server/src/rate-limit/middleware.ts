@@ -1,8 +1,17 @@
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createHash } from 'node:crypto';
-import type { Request, Response } from 'express';
+import type { Request, Response, RequestHandler } from 'express';
 import { log, peerText } from '../util/log.js';
 import { resolveLimitFor, WINDOW_MS } from './per-token.js';
+import { timedMiddleware } from '../http/phase-timer.js';
+
+/**
+ * A rate limiter timed as the request's `rate` phase (Q-976): the one way this server makes a limiter, so every limiter a request meets
+ * is in its `Server-Timing` header. `a-rate-limiter-is-made-only-timed.test.js` refuses a bare `rateLimit(` call anywhere else.
+ */
+export function timedRateLimit(options: Parameters<typeof rateLimit>[0]): RequestHandler {
+  return timedMiddleware('rate', rateLimit(options));
+}
 
 /**
  * Bucket requests by CLIENT, not by source IP.
@@ -105,7 +114,7 @@ export function warnRateLimitBypass(): void {
 }
 
 /** 10 requests/minute per IP — used for auth-sensitive endpoints (setup, login) */
-export const authRateLimit = rateLimit({
+export const authRateLimit = timedRateLimit({
   windowMs: 60_000,
   max: 10,
   standardHeaders: 'draft-7',
@@ -122,7 +131,7 @@ export const authRateLimit = rateLimit({
 });
 
 /** 60 requests/minute per CLIENT — notification and setup endpoints */
-export const notifyRateLimit = rateLimit({
+export const notifyRateLimit = timedRateLimit({
   windowMs: 60_000,
   max: 60,
   standardHeaders: 'draft-7',
@@ -176,7 +185,7 @@ const ofResponse = (read: (res: Response) => boolean) => (_req: Request, res: Re
  *
  * It deliberately does NOT replace the per-route limiters; it sits behind them as the outer bound.
  */
-export const ipFloodBackstop = rateLimit({
+export const ipFloodBackstop = timedRateLimit({
   windowMs: 60_000,
   max: 3000,
   standardHeaders: false,
@@ -214,7 +223,7 @@ export const ipFloodBackstop = rateLimit({
  * closes that, keyed purely on the IP, and it never steps aside for a presented credential: it gives back only a request a valid
  * token's own limiter metered (see its own note).
  */
-export const globalRateLimit = rateLimit({
+export const globalRateLimit = timedRateLimit({
   windowMs: 60_000,
   max: 300,
   standardHeaders: 'draft-7',
@@ -236,7 +245,7 @@ export const globalRateLimit = rateLimit({
 /** 2000 requests/minute per CLIENT (peer) — machine-to-machine sync endpoints.
  *  Sync pushes one request per item; with large data sets and multiple
  *  networks the per-minute volume can easily exceed the global limit. */
-export const syncRateLimit = rateLimit({
+export const syncRateLimit = timedRateLimit({
   windowMs: 60_000,
   max: 2000,
   standardHeaders: 'draft-7',
@@ -286,7 +295,7 @@ export const syncRateLimit = rateLimit({
  * Because the answer is per request: `express-rate-limit` calls it with the request, and
  * `resolveLimitFor` reads the resolved record. A constant here is what this change exists to remove.
  */
-export const tokenRateLimit = rateLimit({
+export const tokenRateLimit = timedRateLimit({
   windowMs: WINDOW_MS,
   max: (req: Request) => resolveLimitFor(req.authToken as { rateLimitPerMinute?: number } | undefined),
   standardHeaders: 'draft-7',

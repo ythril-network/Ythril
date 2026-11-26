@@ -71,6 +71,7 @@ import { clearOidcCache } from './auth/oidc.js';
 import { initAddedSpaces, markSpacesOwedInit, ensureGeneralSpace, reconcilePendingSpaceOp, removeSpaceFromConfig, WIPE_COLLECTION_TYPES, wipeTypesOf } from './spaces/lifecycle.js';
 import { log, peerText, runWithRequestId } from './util/log.js';
 import { indexRoutes, routeLabel } from './http/route-map.js';
+import { phaseTimingMiddleware } from './http/phase-timer.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
 import { isShuttingDown } from './lifecycle.js';
@@ -189,6 +190,11 @@ export function createApp() {
      */
     runWithRequestId(id, next);
   });
+
+  // ── Phase times ──────────────────────────────────────────────────────────
+  // Every answer, REST and `/mcp` alike, carries a `Server-Timing` header with the time of each phase the request met (Q-976): set up here,
+  // above every route and inside the request id's context, so no door can answer without it (`http/phase-timer.ts`).
+  app.use(phaseTimingMiddleware);
 
   // ── Health ───────────────────────────────────────────────────────────────
   app.get('/health', (_req, res) => {

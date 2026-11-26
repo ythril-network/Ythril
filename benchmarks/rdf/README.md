@@ -222,6 +222,21 @@ Measured on 2026-11-26 (main aae46da89, `nomic-ai/nomic-embed-text-v1.5`, 204 qu
 The meaning moved the target up when it was found (MRR +0.036) but found it less often (recall@10 -1.96 points), so
 the flag was not shipped and `edgeEmbedText` is unchanged.
 
+## The door floor (Q-976)
+
+`door-floor.mjs` measures the fixed cost of each door family on the loaded instance, from the server's own `Server-Timing` header
+(MCP: the tool result's `_meta`, `ythril/server-timing`): SPARQL Q11 over REST and MCP, recall, filter, traverse, a record read and a
+record save, a file listing, the RDF export, a Linked Data address and a sync pull. Per family: 3 warm-up then 50 measured requests, one
+at a time; the client's wall time and each phase's median and p95 in milliseconds. A family the instance refuses (no embedder for recall,
+no network for a sync pull) is listed with its status and no figures.
+
+```sh
+node benchmarks/rdf/door-floor.mjs --work <dir> --size 1000 --label base [--url <origin>] [--runs 50] [--warm 3] [--out <file.json>]
+```
+
+Run it once on an image built from the base and once on one built from the change, over the same loaded database (`--url` names the
+recreated container's port), and compare the two tables: the before and after of every door.
+
 ## Tests
 
 `stats`, `params`, `queries`, `result-record`, `prepare`, `compare`, `ythril` (the refusal wording), `ythril-params`,
@@ -247,5 +262,6 @@ docker run --rm -v <checkout>:/w:ro -w /w node:24 node --test testing/standalone
 | `embed-meaning.mjs` | Q-763: edge recall with and without the label's meaning in the embedding text (see [A label's meaning in the edge text](#a-labels-meaning-in-the-edge-text-q-763)) |
 | `env.mjs`, `oxigraph.mjs`, `ythril.mjs`, `unzip.mjs` | plumbing: booked docker, the two engines, a zip reader |
 | `comparability.mjs`, `query-shape.mjs`, `not-taken.mjs` | the per-query judge, what a query's text needs, and the predicates the import does not keep (counted) |
+| `door-floor.mjs` | Q-976: each door family's total and per-phase time, read from `Server-Timing` (see [The door floor](#the-door-floor-q-976)) |
 | `sparql-limits.mjs`, `embed-wait.mjs` | the instance's SPARQL limits (read, raised within the server's ceilings) and the bounded wait for the embed queue |
 | `stats.mjs`, `params.mjs`, `queries.mjs`, `result-record.mjs`, `prepare.mjs`, `ythril-params.mjs`, `chunk.mjs`, `answer-rows.mjs`, `validity.mjs`, `typecap.mjs` | the pure parts, each with a test |

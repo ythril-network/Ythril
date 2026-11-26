@@ -55,7 +55,8 @@ import { log, peerText } from '../util/log.js';
 import { RDF_READ_FIELDS, recordTriples, type RdfRecordKind } from './record-triples.js';
 import { recordIri, graphIri } from './term-iri.js';
 import { xsd } from './literals.js';
-import { rdfKindCollection, rdfMembers, rdfRowFilter, type RdfMember } from './rdf-members.js';
+import { rdfKindCollection, rdfMembersReusing, rdfRowFilter, type RdfMember, type RdfMemberLeftOut } from './rdf-members.js';
+import { timePhase } from '../http/phase-timer.js';
 import { isBound, quadCandidates, type CandidateFind, type PatternSlot, type PatternTerm, type QuadPattern } from './quad-candidates.js';
 import { toRdfJs } from './rdf-js-terms.js';
 import {
@@ -82,6 +83,11 @@ export interface QuadScope {
   caller: RdfCaller | undefined;
   /** The door's schema fingerprint (`rdf-space-state.ts` says why it is handed in); the stamp's own when absent. */
   fingerprintOf?: FingerprintOf;
+  /**
+   * The members the door already resolved for this request (`rdfMembers`, Q-976): reused for each space it resolved for this same caller,
+   * so a query pays the resolution once. A space it does not hold is resolved here.
+   */
+  resolved?: { members: readonly RdfMember[]; leftOut?: readonly RdfMemberLeftOut[] } | undefined;
 }
 
 export interface QuadSourceOptions {
@@ -334,7 +340,7 @@ class MatchStream extends Readable {
 
 /** The quad source of `scope` for one query. */
 export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): QuadSource {
-  const { members, leftOut } = rdfMembers(scope.members, scope.caller, scope.fingerprintOf);
+  const { members, leftOut } = rdfMembersReusing(scope.resolved, scope.members, scope.caller, scope.fingerprintOf);
   const limits = sparqlLimits(getConfig());
   const cap = opts.maxRecordsRead ?? limits.maxRecordsRead;
   const narrow = opts.narrow !== false;
@@ -411,7 +417,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     let p = verdicts.get(member.space);
     if (p === undefined) {
       const verdict = mayReadIndex && !toRecords.has(member.space)
-        ? indexVerdict(member.space, member.meta, opts.deadline).then((v) => {
+        ? timePhase('verdict', () => indexVerdict(member.space, member.meta, opts.deadline)).then((v) => {
           if (v.read === 'index') pinned.set(member.space, v.buildId);
           return v.read;
         })

@@ -20,6 +20,7 @@ import { getConfig } from '../config/loader.js';
 import { mayReadArea } from '../auth/reachable-spaces.js';
 import { LIVE_FILE_ROW, NOT_A_FEED_MARKER } from '../files/live-file-row.js';
 import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
+import { timePhase } from '../http/phase-timer.js';
 import { RDF_RECORD_KINDS, type RdfRecordKind } from './record-triples.js';
 import { rdfSpaceState, RDF_NOT_ENABLED, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
 import type { EXPORT_CONFLICT } from '../export/export-statuses.js';
@@ -52,6 +53,61 @@ export interface RdfMembers { members: RdfMember[]; leftOut: RdfMemberLeftOut[] 
  * `fingerprintOf` is the door's schema fingerprint (`rdf-space-state.ts` says why it is handed in); the stamp's own by default.
  */
 export function rdfMembers(spaces: readonly string[], caller: RdfCaller | undefined, fingerprintOf: FingerprintOf = schemaFingerprintOf): RdfMembers {
+  const resolved = timePhase('members', () => resolveMembers(spaces, caller, fingerprintOf));
+  const made = { caller, fingerprintOf };
+  for (const entry of [...resolved.members, ...resolved.leftOut]) MADE_FOR.set(entry, made);
+  ASKED.set(resolved, { ...made, spaces: new Set(spaces) });
+  return resolved;
+}
+
+/** The spaces each {@link rdfMembers} answer was asked about: a space in neither list was dropped for its caller, and is not asked again. */
+const ASKED = new WeakMap<RdfMembers, { caller: RdfCaller | undefined; fingerprintOf: FingerprintOf; spaces: ReadonlySet<string> }>();
+
+/**
+ * Who each member entry {@link rdfMembers} answered was resolved for: the caller object and the door's fingerprint. An entry is reused
+ * ({@link rdfMembersReusing}) only for the very same pair, so a member resolved for one caller is never handed to another.
+ */
+const MADE_FOR = new WeakMap<RdfMember | RdfMemberLeftOut, { caller: RdfCaller | undefined; fingerprintOf: FingerprintOf }>();
+
+/**
+ * The members of `spaces` for `caller`, reusing what an earlier {@link rdfMembers} of the same request resolved (Q-976: a query resolved
+ * its members preparing the query and again making its quad source). A space is reused only when `earlier` holds an entry for it that
+ * {@link rdfMembers} made for this same caller and fingerprint; every other space is resolved now. With no `earlier`, this is
+ * {@link rdfMembers}.
+ */
+export function rdfMembersReusing(
+  earlier: { members: readonly RdfMember[]; leftOut?: readonly RdfMemberLeftOut[] } | undefined,
+  spaces: readonly string[], caller: RdfCaller | undefined, fingerprintOf: FingerprintOf = schemaFingerprintOf,
+): RdfMembers {
+  const mine = (e: RdfMember | RdfMemberLeftOut): boolean => {
+    const made = MADE_FOR.get(e);
+    return made !== undefined && made.caller === caller && made.fingerprintOf === fingerprintOf;
+  };
+  const known = new Map<string, { member?: RdfMember; left?: RdfMemberLeftOut }>();
+  for (const m of earlier?.members ?? []) if (mine(m)) known.set(m.space, { member: m });
+  for (const l of earlier?.leftOut ?? []) if (mine(l)) known.set(l.space, { left: l });
+  const asked = earlier ? ASKED.get(earlier as RdfMembers) : undefined;
+  if (asked && asked.caller === caller && asked.fingerprintOf === fingerprintOf) {
+    for (const s of asked.spaces) if (!known.has(s)) known.set(s, {});
+  }
+  const fresh = spaces.filter(s => !known.has(s));
+  if (fresh.length > 0) {
+    const now = rdfMembers(fresh, caller, fingerprintOf);
+    for (const m of now.members) known.set(m.space, { member: m });
+    for (const l of now.leftOut) known.set(l.space, { left: l });
+  }
+  const members: RdfMember[] = [];
+  const leftOut: RdfMemberLeftOut[] = [];
+  for (const space of spaces) {
+    const k = known.get(space);
+    if (k?.member) members.push(k.member);
+    else if (k?.left) leftOut.push(k.left);
+  }
+  return { members, leftOut };
+}
+
+/** {@link rdfMembers}, computed. */
+function resolveMembers(spaces: readonly string[], caller: RdfCaller | undefined, fingerprintOf: FingerprintOf): RdfMembers {
   const cfg = getConfig();
   const rights = caller?.rights ?? undefined;
   const members: RdfMember[] = [];
