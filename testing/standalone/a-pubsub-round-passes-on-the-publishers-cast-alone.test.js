@@ -95,6 +95,14 @@ function roundOf(kind, over = {}) {
 
 /** The network and round of one cell: who cast the one yes, on which side of a pub/sub network this instance stands. */
 function cellOf(type, caster, kind) {
+  if (caster === 'quorum') {
+    // The casts the type's own rule needs, served by a peer (not proposed here): the publisher's yes on pub/sub (this instance subscribes), any
+    // member's on a club, every member's on a closed and a braintree network, a majority of the four (this instance and three peers) on a democratic one.
+    if (type === 'pubsub') return { net: subscribing(), round: roundOf(kind, { votes: [cast(PEER_A), cast(PEER_C), cast(SELF)] }) };
+    const net = network(type, [member(PEER_A), member(PEER_B), member(PEER_C)]);
+    const voters = type === 'democratic' ? [SELF, PEER_A, PEER_B] : type === 'club' ? [PEER_A] : [SELF, PEER_A, PEER_B, PEER_C];
+    return { net, round: roundOf(kind, { votes: voters.map(v => cast(v)) }) };
+  }
   if (type === 'pubsub') {
     if (caster === 'publisher') return { net: subscribing(), round: roundOf(kind, { votes: [cast(PEER_A)] }) };
     if (caster === 'subscriber') return { net: publishing(), round: roundOf(kind, { subjectInstanceId: PEER_B, votes: [cast(PEER_B)] }) };
@@ -110,37 +118,45 @@ const P = 'passed';
 const O = null;   // open: undecided, and so never applied
 /** Every cell's verdict, by hand. Kind order: join, remove, space_deletion, space_wipe, meta_change, space_addition, space_rebase. */
 const EXPECTED = {
-  // On pub/sub the publisher's cast alone decides; join and remove are kinds pub/sub never opens; a subscriber's own deletion, wipe or rebase
-  // is its local act (D-40), decided by its own yes.
+  // On pub/sub the publisher's cast alone decides; join, remove and space_addition are kinds pub/sub never opens (it admits, removes and adds
+  // spaces directly); a subscriber's own deletion, wipe or rebase is its local act (D-40), decided by its own yes.
   pubsub: {
-    publisher: { join: O, remove: O, space_deletion: P, space_wipe: P, meta_change: P, space_addition: P, space_rebase: P },
+    publisher: { join: O, remove: O, space_deletion: P, space_wipe: P, meta_change: P, space_addition: O, space_rebase: P },
     subscriber: { join: O, remove: O, space_deletion: O, space_wipe: O, meta_change: O, space_addition: O, space_rebase: O },
     proposer: { join: O, remove: O, space_deletion: P, space_wipe: P, meta_change: O, space_addition: O, space_rebase: P },
+    quorum: { join: O, remove: O, space_deletion: P, space_wipe: P, meta_change: P, space_addition: O, space_rebase: P },
   },
   // The proposer decides a club round, as documented; join and remove are kinds a club never opens.
   club: {
     publisher: { join: O, remove: O, space_deletion: P, space_wipe: P, meta_change: P, space_addition: P, space_rebase: P },
     subscriber: { join: O, remove: O, space_deletion: P, space_wipe: P, meta_change: P, space_addition: P, space_rebase: P },
     proposer: { join: O, remove: O, space_deletion: P, space_wipe: P, meta_change: P, space_addition: P, space_rebase: P },
+    quorum: { join: O, remove: O, space_deletion: P, space_wipe: P, meta_change: P, space_addition: P, space_rebase: P },
   },
-  // Unchanged: one yes of four is no quorum on a voted network.
+  // Unchanged: one yes of four is no quorum on a voted network, and the casts the rule needs (`quorum`: every member's yes) pass every kind.
+  // These cells must PASS, so a change that loses a voted network's pass fails here and not only the cells that must stay open.
   closed: {
     publisher: { join: O, remove: O, space_deletion: O, space_wipe: O, meta_change: O, space_addition: O, space_rebase: O },
     subscriber: { join: O, remove: O, space_deletion: O, space_wipe: O, meta_change: O, space_addition: O, space_rebase: O },
     proposer: { join: O, remove: O, space_deletion: O, space_wipe: O, meta_change: O, space_addition: O, space_rebase: O },
+    quorum: { join: P, remove: P, space_deletion: P, space_wipe: P, meta_change: P, space_addition: P, space_rebase: P },
   },
+  // A majority of the four electors (this instance and three peers), no veto.
   democratic: {
     publisher: { join: O, remove: O, space_deletion: O, space_wipe: O, meta_change: O, space_addition: O, space_rebase: O },
     subscriber: { join: O, remove: O, space_deletion: O, space_wipe: O, meta_change: O, space_addition: O, space_rebase: O },
     proposer: { join: O, remove: O, space_deletion: O, space_wipe: O, meta_change: O, space_addition: O, space_rebase: O },
+    quorum: { join: P, remove: P, space_deletion: P, space_wipe: P, meta_change: P, space_addition: P, space_rebase: P },
   },
+  // A flat tree (no ancestor set): every member's yes, as on a closed network.
   braintree: {
     publisher: { join: O, remove: O, space_deletion: O, space_wipe: O, meta_change: O, space_addition: O, space_rebase: O },
     subscriber: { join: O, remove: O, space_deletion: O, space_wipe: O, meta_change: O, space_addition: O, space_rebase: O },
     proposer: { join: O, remove: O, space_deletion: O, space_wipe: O, meta_change: O, space_addition: O, space_rebase: O },
+    quorum: { join: P, remove: P, space_deletion: P, space_wipe: P, meta_change: P, space_addition: P, space_rebase: P },
   },
 };
-const CASTERS = ['publisher', 'subscriber', 'proposer'];
+const CASTERS = ['publisher', 'subscriber', 'proposer', 'quorum'];
 
 describe('network type x round kind x whose cast', () => {
   it('every VoteRoundType has a row for every NetworkType and caster (the axes are the source\'s)', () => {
@@ -172,11 +188,11 @@ describe('network type x round kind x whose cast', () => {
 });
 
 describe('pub/sub: the publisher\'s cast alone', () => {
-  it('the publisher\'s own round passes on its own yes, but a join or removal never does', () => {
-    for (const kind of ['meta_change', 'space_addition', 'space_deletion', 'space_wipe', 'space_rebase']) {
+  it('the publisher\'s own round passes on its own yes, but a join, removal or space addition never does', () => {
+    for (const kind of ['meta_change', 'space_deletion', 'space_wipe', 'space_rebase']) {
       assert.equal(roundVerdict(publishing(), roundOf(kind, { subjectInstanceId: SELF, votes: [cast(SELF)], proposedHere: true })), 'passed', kind);
     }
-    for (const kind of ['join', 'remove']) {
+    for (const kind of ['join', 'remove', 'space_addition']) {
       assert.equal(roundVerdict(publishing(), roundOf(kind, { votes: [cast(SELF)], proposedHere: true })), null, kind);
     }
   });
@@ -207,12 +223,13 @@ describe('pub/sub: the publisher\'s cast alone', () => {
 });
 
 describe('pubsubDecider', () => {
+  // A missing module or export fails the file at its import, for that reason: a swallowed import turned every case below into one failure that named no cause.
   let pubsubDecider;
   before(async () => {
-    const mod = await import('../../server/dist/networks/round-decider.js').catch(() => null);
-    pubsubDecider = mod?.pubsubDecider;
+    ({ pubsubDecider } = await import('../../server/dist/networks/round-decider.js'));
+    assert.equal(typeof pubsubDecider, 'function', 'server/src/networks/round-decider.ts exports no pubsubDecider (Q-968, Q2)');
   });
-  const decider = () => pubsubDecider ?? assert.fail('server/src/networks/round-decider.ts exports no pubsubDecider (Q-968, Q2)');
+  const decider = () => pubsubDecider;
 
   it('one pull member: that member decides', () => {
     assert.equal(decider()(subscribing()), PEER_A);
@@ -228,24 +245,48 @@ describe('pubsubDecider', () => {
   });
 });
 
-describe('adoption: no round the publisher did not open, no kind a type never opens', () => {
+describe('adoption: network type x round kind x who served it', () => {
   const now = () => Date.now();
-  it('the publisher refuses a subscriber\'s meta_change, space_addition, join and remove rounds', () => {
-    const adopted = [];
-    for (const kind of ['meta_change', 'space_addition', 'join', 'remove']) {
-      const why = adoptionRefusal(publishing(), roundOf(kind, { subjectInstanceId: PEER_B, votes: [cast(PEER_B)] }), now());
-      if (why === null) adopted.push(kind);
+  const ADOPT = null;
+  const NEVER = 'a kind this network type never opens';
+  const SUBSCRIBERS = 'proposed by a subscriber';
+  /**
+   * Every cell's answer, by hand: `null` adopts the served round, a string is why it is refused. On pub/sub the SERVER is the publisher (this
+   * instance subscribes) or a subscriber (this instance publishes); elsewhere any member serves it. Kind order as `EXPECTED`.
+   */
+  const ADOPTION = {
+    'pubsub, served by the publisher': { join: NEVER, remove: NEVER, space_deletion: ADOPT, space_wipe: ADOPT, meta_change: ADOPT, space_addition: NEVER, space_rebase: ADOPT },
+    'pubsub, served by a subscriber': { join: NEVER, remove: NEVER, space_deletion: SUBSCRIBERS, space_wipe: SUBSCRIBERS, meta_change: SUBSCRIBERS, space_addition: NEVER, space_rebase: SUBSCRIBERS },
+    club: { join: NEVER, remove: NEVER, space_deletion: ADOPT, space_wipe: ADOPT, meta_change: ADOPT, space_addition: ADOPT, space_rebase: ADOPT },
+    closed: { join: ADOPT, remove: ADOPT, space_deletion: ADOPT, space_wipe: ADOPT, meta_change: ADOPT, space_addition: ADOPT, space_rebase: ADOPT },
+    democratic: { join: ADOPT, remove: ADOPT, space_deletion: ADOPT, space_wipe: ADOPT, meta_change: ADOPT, space_addition: ADOPT, space_rebase: ADOPT },
+    braintree: { join: ADOPT, remove: ADOPT, space_deletion: ADOPT, space_wipe: ADOPT, meta_change: ADOPT, space_addition: ADOPT, space_rebase: ADOPT },
+  };
+  const netOf = (row) => row === 'pubsub, served by the publisher' ? subscribing()
+    : row === 'pubsub, served by a subscriber' ? publishing()
+      : network(row, [member(PEER_A), member(PEER_B), member(PEER_C)]);
+  const servedBy = (row, kind) => roundOf(kind, row === 'pubsub, served by a subscriber'
+    ? { subjectInstanceId: PEER_B, votes: [cast(PEER_B)] } : { votes: [cast(PEER_A)] });
+
+  it('the table has a row for every network type and every kind (the axes are the source\'s)', () => {
+    const types = declaredUnion('NetworkType');
+    const kinds = declaredUnion('VoteRoundType');
+    const rowTypes = Object.keys(ADOPTION).map(r => r.split(',')[0]);
+    assert.deepEqual([...new Set(rowTypes)].sort(), [...types].sort());
+    for (const [row, cells] of Object.entries(ADOPTION)) assert.deepEqual(Object.keys(cells).sort(), [...kinds].sort(), row);
+  });
+
+  it('each cell adopts, or refuses for its reason', () => {
+    const wrong = [];
+    for (const [row, cells] of Object.entries(ADOPTION)) {
+      for (const [kind, want] of Object.entries(cells)) {
+        const got = adoptionRefusal(netOf(row), servedBy(row, kind), now());
+        if (got !== want) wrong.push(`${row} x ${kind}: ${got} (want ${want})`);
+      }
     }
-    assert.deepEqual(adopted, [], `the publisher adopted a subscriber's round of kind: ${adopted.join(', ')}`);
+    assert.deepEqual(wrong, [], `cells whose adoption is not the rule's:\n${wrong.join('\n')}`);
   });
-  it('a subscriber adopts the publisher\'s schema round', () => {
-    assert.equal(adoptionRefusal(subscribing(), roundOf('meta_change', { votes: [cast(PEER_A)] }), now()), null);
-  });
-  it('a subscriber refuses a served join or remove round: pub/sub never opens one', () => {
-    for (const kind of ['join', 'remove']) {
-      assert.notEqual(adoptionRefusal(subscribing(), roundOf(kind, { votes: [cast(PEER_A)] }), now()), null, kind);
-    }
-  });
+
   it('on a club, a served remove or join round is refused and, held, never passes', () => {
     const club = network('club', [member(PEER_A), member(PEER_B), member(PEER_C)]);
     for (const kind of ['join', 'remove']) {

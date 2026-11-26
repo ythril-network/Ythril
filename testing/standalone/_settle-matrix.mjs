@@ -49,7 +49,7 @@ export const CANNOT_PASS_A_ROUND = {
  */
 export const NEVER_PASSES = {
   club: { kinds: ['join', 'remove'], why: 'a club admits and removes members directly and never opens a join or removal round (Q-968)' },
-  pubsub: { kinds: ['join', 'remove'], why: 'a pub/sub network admits and removes members directly and never opens a join or removal round (Q-968)' },
+  pubsub: { kinds: ['join', 'remove', 'space_addition'], why: 'a pub/sub network admits, removes and adds spaces directly and never opens a join, removal or space-addition round (Q-968)' },
 };
 
 /** Is the cell of `roundType` on `netType` one no via can pass ({@link NEVER_PASSES})? */
