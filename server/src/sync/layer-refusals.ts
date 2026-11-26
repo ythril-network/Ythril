@@ -15,8 +15,11 @@
 import { nominalBackoffMs } from '../util/backoff.js';
 import { LruMap } from '../util/lru-map.js';
 
-export const LAYER_REFUSAL_FIRST_MS = 10 * 60_000;
-export const LAYER_REFUSAL_CAP_MS = 24 * 60 * 60_000;
+const MINUTE_MS = 60_000;
+export const LAYER_REFUSAL_FIRST_MS = 10 * MINUTE_MS;
+export const LAYER_REFUSAL_CAP_MS = 24 * 60 * MINUTE_MS;
+/** A wait in whole minutes, as the log lines say it. */
+export const minutesOf = (ms: number): number => Math.round(ms / MINUTE_MS);
 const MAX_ENTRIES = 5_000;
 
 interface Entry { until: number; step: number }

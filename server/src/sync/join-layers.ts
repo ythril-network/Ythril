@@ -12,11 +12,11 @@
  * time and share ONE deadline. What the deadline cuts off is not lost: a space whose layer was not taken holds no seeded mark, and the heal
  * takes it at the first cycle (`pullNetworkSchema`). The count of what was cut off is answered, and said once in the log, not per space; so are the refusals, one line with their count and reasons.
  */
-import { log, peerText } from '../util/log.js';
+import { log, peerList, peerText } from '../util/log.js';
 import { fetchNetworkLayer } from './space-meta-pull.js';
 import { shutdownBoundSignal } from './held-answer.js';
 import { FETCH_TIMEOUT_MS } from './peer-timeouts.js';
-import { LAYER_REFUSAL_FIRST_MS } from './layer-refusals.js';
+import { LAYER_REFUSAL_FIRST_MS, minutesOf } from './layer-refusals.js';
 
 /** How many distinct reasons the one refusal line names. */
 const MAX_REASONS_SAID = 3;
@@ -50,8 +50,7 @@ export async function takeLayersAtJoin(args: {
   await Promise.all(Array.from({ length: Math.min(concurrency, entries.length) }, worker));
   const refused = [...refusals.values()].reduce((a, b) => a + b, 0);
   if (refused > 0) {
-    const reasons = [...refusals.keys()].slice(0, MAX_REASONS_SAID).map(r => peerText(r)).join('; ');
-    log.warn(`join-remote: ${peerText(from)} refused the schema of ${refused} of ${entries.length} space(s) (${reasons}); each is not asked again for ${LAYER_REFUSAL_FIRST_MS / 60_000} min`);
+    log.warn(`join-remote: ${peerText(from)} refused the schema of ${refused} of ${entries.length} space(s) (${peerList([...refusals.keys()].slice(0, MAX_REASONS_SAID), '; ')}); each is not asked again for ${minutesOf(LAYER_REFUSAL_FIRST_MS)} min`);
   }
   const cutOff = entries.length - finished;
   if (cutOff > 0) {

@@ -36,7 +36,7 @@ import { isDirectionalNetwork, isUpstreamPeer } from '../networks/network-spaces
 import { admitterOf, createdHere, layerSeeded, markLayerSeeded } from '../networks/schema-standing.js';
 import { peerSafeFetch } from './peer-fetch.js';
 import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
-import { layerRefusals } from './layer-refusals.js';
+import { layerRefusals, minutesOf } from './layer-refusals.js';
 
 /**
  * May this instance take network `net`'s schema for local space `spaceId` from `memberId` now? Its upstream on a pub/sub or tree network; on a
@@ -101,7 +101,7 @@ export async function fetchNetworkLayer(args: {
     // One warning per backoff step: a refusal is only recorded when the member was asked, which is once per step.
     const waitMs = voted ? layerRefusals.refused(networkId, memberId, spaceId) : undefined;
     if (onRefusal) onRefusal(what);
-    else log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}': ${peerText(what)}${waitMs === undefined ? '' : `; not asked again for ${Math.round(waitMs / 60_000)} min`}`);
+    else log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}': ${peerText(what)}${waitMs === undefined ? '' : `; not asked again for ${minutesOf(waitMs)} min`}`);
     return false;
   };
   try {
