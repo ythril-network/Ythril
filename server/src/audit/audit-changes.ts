@@ -143,6 +143,9 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // Q-757: what a SPARQL query did, never its text: the form, the text's length in bytes, the members read, the records read, the rows (or
   // statements) answered and the outcome; `complete: false` when the client went away first.
   'brain.sparql_query': ['form', 'length', 'members', 'recordsRead', 'rows', 'outcome', 'complete'],
+  // Q-761: what a SPARQL Update landed, never its text: the text's length, the records inserted, converged and deleted (0 when refused),
+  // `recordsChanged`, the attempts it took and the outcome (`landed`, or the code it was answered with).
+  'brain.sparql_update': ['form', 'length', 'inserted', 'converged', 'deleted', 'recordsChanged', 'attempts', 'outcome', 'complete'],
   // Q-758: a Linked Data read names its kind and counts; the address is never a field.
   'ld.read': ['kind', 'statements', 'truncated'],
   'schema.rdf.export': ['format', 'fingerprint', 'leftOut'],
@@ -327,7 +330,7 @@ export function dismissShownChanges(given: Record<string, unknown>, dismissed: n
  * recorded (the entry would claim an edit that did not happen); a SPARQL query that a bound refused after it ran HAS read what its counts
  * say, so its entry says how far it got and the code it ended with (`recordsRead`, `rows`, `outcome`).
  */
-const CHANGES_WHEN_REFUSED: ReadonlySet<string> = new Set(['brain.sparql_query']);
+const CHANGES_WHEN_REFUSED: ReadonlySet<string> = new Set(['brain.sparql_query', 'brain.sparql_update']);
 
 /** Does the entry of `operation` that ended with `status` carry the changes the act handed over? Both doors (REST, MCP) ask this. */
 export function recordsChangesAtStatus(operation: string, status: number): boolean {

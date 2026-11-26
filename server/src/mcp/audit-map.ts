@@ -190,6 +190,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // Q-753: the operations their REST twins record.
   import_rdf: 'rdf.import',
   import_rdf_status: 'rdf.import.status',
+  // Q-761: the operation its REST twin records, by the act's counts.
+  sparql_update: 'brain.sparql_update',
 
   // ── Not audited operations, with the reason each. ──────────────────────────────────────────────
   // Returns this instance's own documentation. Reads no space and no record.

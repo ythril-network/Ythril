@@ -14,6 +14,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { INSTANCES, post, patch, del, reqJson, waitFor, getInstanceId, createTestSpace } from './helpers.js';
+import { ownTokens } from '../_shared/own-token.mjs';
+
+// An Update that deletes pays the heavy-call budget: it is sent with a token of this file's own, not the suite's shared one.
+const own = ownTokens();
 
 const CONFIGS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'configs');
 const RUN = Date.now();
@@ -60,10 +64,13 @@ describe('a SPARQL Update reaches a peer as rows and tombstones', () => {
 
   it('B receives exactly the rows and the tombstone the Update landed', async () => {
     const at = (id) => `${baseOf(SPACE)}entity/${id}`;
+    // A rename removes the old label as it inserts the new one: a name holds one value, and a second label is refused `several-values`.
     const text = `DELETE WHERE { <${at(ids.Drop)}> ?p ?o } ;
-      INSERT DATA { <${at(ids.Change)}> <${LABEL}> "Changed-${RUN}" . <${baseOf(SPACE)}entity/fresh> a <${Y}Entity>, <${baseOf(SPACE)}vocab/entity/concept> ; <${LABEL}> "Fresh-${RUN}" }`;
+      DELETE DATA { <${at(ids.Change)}> <${LABEL}> "Change-${RUN}" } ;
+      INSERT DATA { <${at(ids.Change)}> <${LABEL}> "Changed-${RUN}" .<${baseOf(SPACE)}entity/fresh> a <${Y}Entity>, <${baseOf(SPACE)}vocab/entity/concept> ; <${LABEL}> "Fresh-${RUN}" }`;
+    const updater = await own.mint('spu-sync-update');
     const r = await fetch(`${INSTANCES.a}/api/brain/spaces/${SPACE}/sparql/update`, {
-      method: 'POST', headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/sparql-update' }, body: text,
+      method: 'POST', headers: { Authorization: `Bearer ${updater}`, 'Content-Type': 'application/sparql-update' }, body: text,
     });
     const body = await r.json().catch(() => null);
     assert.equal(r.status, 200, `the Update on A: ${r.status} ${JSON.stringify(body)}`);

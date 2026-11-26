@@ -9,15 +9,14 @@
  *
  * Run: node --test testing/red-team-tests/a-sparql-update-needs-the-write-rung-and-stays-in-its-space.test.js
  */
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { INSTANCES, post, patch, get, del } from '../sync/helpers.js';
+import { INSTANCES, post, patch, del, readRecord } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { ownTokens } from '../_shared/own-token.mjs';
 
-const TOKEN_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'sync', 'configs', 'a', 'token.txt');
+// An Update that deletes pays the heavy-call budget: this file's admin token is its own, not the suite's shared one.
+const own = ownTokens();
 const RUN = Date.now();
 const S = `rt-spu-${RUN}`;
 const BASE = `https://${S}.example.org/ld/${S}/`;
@@ -39,7 +38,12 @@ async function update(door, token, space, text) {
   let json = null; try { json = JSON.parse(body); } catch { /* not JSON */ }
   return { status: r.status, code: json?.code ?? json?.data?.code, text: body };
 }
-const nickOf = async () => (await get(INSTANCES.a, admin, `/api/brain/spaces/${S}/entities/${entityId}`)).body?.properties?.nick;
+// Read by the filter door (`readRecord`): the by-id GET route was removed, and its 404 would read as `undefined`, never as 'kept'.
+const nickOf = async () => {
+  const r = await readRecord(INSTANCES.a, admin, S, 'entities', entityId);
+  assert.equal(r.status, 200, `the target is not readable: ${JSON.stringify(r.body)}`);
+  return r.body.properties?.nick;
+};
 const fmt = (a) => `${a.status} ${a.code} ${a.text.slice(0, 300)}`;
 const mintWith = async (name, rights) => {
   const r = await post(INSTANCES.a, admin, '/api/tokens', { name: `${name}-${RUN}`, rights });
@@ -50,7 +54,7 @@ const mintWith = async (name, rights) => {
 
 describe('a SPARQL Update needs the write rung and stays in its space', () => {
   before(async () => {
-    admin = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+    admin = await own.mint('rt-spu-admin');
     const sp = await post(INSTANCES.a, admin, '/api/spaces', { id: S, label: S });
     assert.equal(sp.status, 201, JSON.stringify(sp.body));
     const on = await patch(INSTANCES.a, admin, `/api/spaces/${S}`, { meta: { rdf: { enabled: true, base: BASE } } });
@@ -67,7 +71,7 @@ describe('a SPARQL Update needs the write rung and stays in its space', () => {
     viewId = v.body?.view?.id ?? v.body?.id;
     assert.ok(viewId, JSON.stringify(v.body));
   });
-  after(async () => {
+  own.after(async () => {
     if (viewId) await del(INSTANCES.a, admin, `/api/views/${encodeURIComponent(viewId)}`).catch(() => {});
     for (const id of tokenIds) if (id) await del(INSTANCES.a, admin, `/api/tokens/${id}`).catch(() => {});
     await del(INSTANCES.a, admin, `/api/spaces/${S}`).catch(() => {});

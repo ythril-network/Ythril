@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Operations:** `ythril_write_group_aborts_total{reason}` counts write groups that landed nothing: the all-or-nothing writer a SPARQL Update will use (no door reaches it yet). A delete in it is refused whole (`referenced`) while something still names the record.
+- **Operations:** `ythril_write_group_aborts_total{reason}` counts write groups that landed nothing: the all-or-nothing writer a SPARQL Update uses. A delete in it is refused whole (`referenced`) while something still names the record.
 - **Schema:** every schema violation row carries a stable `code` and its `params` beside its `reason` on every REST door and MCP tool, and the web app words it in your language; a bulk warning row gains `warning`. The integration guide lists the codes; an older unconverted item has none.
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.
 - **Schema:** the schema versions a space uses are kept privately in `<space>_schema_snapshots`, named by their fingerprint, with what each was built from (own types, network layers). A database backup carries them.
@@ -67,7 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web:** a vote that comes with a conversion shows its steps in words and this instance's own record counts before a member votes.
 - **Web:** Settings → About has a "Third-party software" card, and Settings → Help offers the third-party notices as a document readable inside the instance.
 - **Web:** the namespace field of the Schema Library says an address ending in `/` with no `#`.
-- **RDF:** the statements a SPARQL Update will remove and insert are read into record writes by the import's own rules, or refused with a named reason (`server-owned-removed`, `edge-ends-change`, `not-writable-here`, `field-not-removable`, `subject-not-an-address-here`); no door reaches it yet.
+- **RDF:** the statements a SPARQL Update removes and inserts are read into record writes by the import's own rules, or refused with a named reason (`server-owned-removed`, `edge-ends-change`, `not-writable-here`, `field-not-removable`, `subject-not-an-address-here`).
+- **RDF:** SPARQL 1.1 Update on one space: `POST /api/brain/spaces/:spaceId/sparql/update` and MCP `sparql_update` (`knowledge: write`), through the write rules every door keeps, whole or not at all ([SPARQL Update](docs/integration-guide/04j-sparql-api.md#sparql-update)).
+- **RDF:** an Update names a refused statement (`422 sparql_update_refused`), refuses to delete an entity something still names (`409 sparql_update_referenced`), and runs again after a lost race, at most 3 times (`409 sparql_update_conflict`).
+- **RDF:** config key `sparql.maxRecordsChanged` (default 1 000, at most 5 000), read live; more is `413 sparql_too_many_changes`. One Update at a time per token; one that deletes is a destructive call.
+- **RDF:** audit event `brain.sparql_update` with an Update's counts and outcome, never its text, and metric `ythril_sparql_update_total{outcome}`.
+- **RDF:** the `bulk.write` webhook gains `source: "sparql.update"` and an additive `deleted` count; read an unknown `source` as a bulk summary ([Webhooks](docs/integration-guide/14-duplicates-and-webhooks.md)).
 - **RDF:** `meta.rdf` (`enabled`, `base`, `vocab`) gives a space's records and terms web addresses, at the schema admin rung; the base moves only by `rdf.rebase`, on a shared space by a vote counted like a deletion.
 - **RDF:** a type or property may name an outside term (`iri`); two terms with one address are refused (`rdf_term_clash`); a library group can declare a namespace for its entries.
 - **RDF:** `GET /api/brain/spaces/:spaceId/export/rdf` and MCP `export_rdf` export a space, or a personal view, as Turtle, TriG, N-Quads or JSON-LD, page by page ([Exports](docs/integration-guide/06f-exports.md)).

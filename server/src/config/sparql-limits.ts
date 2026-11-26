@@ -34,14 +34,16 @@ export interface SparqlLimitsConfig {
     maxResults?: number;
     /** The most bytes of values (every term of every row or statement) one answer may hold; more is 413 `sparql_answer_too_large`. Default 64 MiB. */
     maxResultBytes?: number;
+    /** The most records one SPARQL Update may change (insert, converge or delete); more is 413 `sparql_too_many_changes`. Default 1 000. */
+    maxRecordsChanged?: number;
   };
 }
 
 /** The limits in effect, every key set. */
-export interface SparqlLimits { timeoutMs: number; maxRecordsRead: number; maxResults: number; maxResultBytes: number }
+export interface SparqlLimits { timeoutMs: number; maxRecordsRead: number; maxResults: number; maxResultBytes: number; maxRecordsChanged: number }
 
 /** The defaults; `maxRecordsRead` is the measured one (the module's docblock gives the measurement). */
-export const SPARQL_LIMIT_DEFAULTS: Readonly<SparqlLimits> = Object.freeze({ timeoutMs: 30_000, maxRecordsRead: 200_000, maxResults: 10_000, maxResultBytes: 64 * 1024 * 1024 });
+export const SPARQL_LIMIT_DEFAULTS: Readonly<SparqlLimits> = Object.freeze({ timeoutMs: 30_000, maxRecordsRead: 200_000, maxResults: 10_000, maxResultBytes: 64 * 1024 * 1024, maxRecordsChanged: 1_000 });
 
 /** The bounds each key is held to, inclusive. */
 const TIMEOUT_MS_MIN = 1_000;
@@ -51,11 +53,17 @@ const RECORDS_READ_MAX = 10_000_000;
 const RESULTS_MAX = 1_000_000;
 const RESULT_BYTES_MIN = 1024 * 1024;
 const RESULT_BYTES_MAX = 1024 * 1024 * 1024;
+/**
+ * The most records one SPARQL Update may be allowed to change: a write group's own ceiling (`GROUP_MAX_RECORDS`, `brain/write-plan/write-group.ts`),
+ * written out so this module stays a leaf; `a-sparql-update-lands-whole-or-is-refused-by-its-code-db` holds the two equal.
+ */
+const RECORDS_CHANGED_MAX = 5_000;
 export const SPARQL_LIMIT_BOUNDS: Readonly<Record<keyof SparqlLimits, { min: number; max: number }>> = Object.freeze({
   timeoutMs: { min: TIMEOUT_MS_MIN, max: TIMEOUT_MS_MAX },
   maxRecordsRead: { min: RECORDS_READ_MIN, max: RECORDS_READ_MAX },
   maxResults: { min: 1, max: RESULTS_MAX },
   maxResultBytes: { min: RESULT_BYTES_MIN, max: RESULT_BYTES_MAX },
+  maxRecordsChanged: { min: 1, max: RECORDS_CHANGED_MAX },
 });
 
 const KEYS = Object.keys(SPARQL_LIMIT_BOUNDS) as (keyof SparqlLimits)[];
@@ -92,5 +100,6 @@ export function sparqlLimits(cfg: SparqlLimitsConfig): SparqlLimits {
     maxRecordsRead: s.maxRecordsRead ?? SPARQL_LIMIT_DEFAULTS.maxRecordsRead,
     maxResults: s.maxResults ?? SPARQL_LIMIT_DEFAULTS.maxResults,
     maxResultBytes: s.maxResultBytes ?? SPARQL_LIMIT_DEFAULTS.maxResultBytes,
+    maxRecordsChanged: s.maxRecordsChanged ?? SPARQL_LIMIT_DEFAULTS.maxRecordsChanged,
   };
 }

@@ -10,7 +10,8 @@
  *   (`app.ts` keeps the global parsers off this path), and a body past it is `413 sparql_query_too_large`, the act's own code, never the
  *   parser's bare 413. GET is bounded by the server's header size; the guide recommends POST.
  * - **A media type taken for another.** A POST answers only `application/sparql-query` and the urlencoded form; an update
- *   (`application/sparql-update`, `update=`) is `400 sparql_update_not_here`, anything else `415 sparql_unsupported_media_type`.
+ *   (`application/sparql-update`, `update=`) is `400 sparql_update_not_here`, pointing to the Update's own door
+ *   (`POST .../sparql/update`, `sparql-update.ts`, Q-761), anything else `415 sparql_unsupported_media_type`.
  * - **A standard body with keys of its own.** What the answer left out is said in headers (`X-Ythril-Members-Left-Out`,
  *   `X-Ythril-File-Triples-Withheld`, percent-encoded member ids), never in the results body a SPARQL client parses. Every answer says
  *   `Vary: Accept`.
@@ -31,6 +32,7 @@ import { sendCaughtFailure } from '../send-failure.js';
 import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { SPARQL_QUERY_MAX_BYTES } from '../../rdf/sparql-engine.js';
+import { sparqlUpdateRouter } from './sparql-update.js';
 import { SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_QUERY_TOO_LARGE, SPARQL_UPDATE_NOT_HERE } from '../../rdf/sparql-refusal.js';
 import {
   answerSparql, prepareSparql, renderSparql, headerList, isSparqlRefusal, sparqlRefusalBody, CallerGone, SparqlEngineFailure, SPARQL_NO_QUERY, SPARQL_UNSUPPORTED_MEDIA_TYPE, SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS,
@@ -95,7 +97,7 @@ function parserRefusal(type: unknown): SparqlAnswerRefusal {
 
 const updateRefusal: SparqlAnswerRefusal = {
   status: SPARQL_BAD_REQUEST, code: SPARQL_UPDATE_NOT_HERE,
-  error: 'This endpoint answers queries only: SPARQL Update is not offered here (the update door is planned as its own endpoint)',
+  error: 'This endpoint answers queries only: send a SPARQL Update to POST /api/brain/spaces/:spaceId/sparql/update (or the tool sparql_update)',
 };
 
 /** The protocol's parameters, from where the request's method and media type put them; or the refusal of a body that is none. */
@@ -173,3 +175,5 @@ async function answer(req: Request, res: Response): Promise<void> {
 sparqlRouter.get('/spaces/:spaceId/sparql', globalRateLimit, requireSpaceAuth, answer);
 // POST /api/brain/spaces/:spaceId/sparql - the same query as an application/sparql-query body or an urlencoded form; a read.
 sparqlRouter.post('/spaces/:spaceId/sparql', globalRateLimit, requireSpaceAuth, parsed(queryBody), parsed(formBody), answer);
+// POST /api/brain/spaces/:spaceId/sparql/update - the protocol's update operation, its own address and act (Q-761, `sparql-update.ts`).
+sparqlRouter.use(sparqlUpdateRouter);

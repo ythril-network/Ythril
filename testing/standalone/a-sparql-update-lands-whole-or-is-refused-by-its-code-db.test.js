@@ -48,10 +48,11 @@ const edges = (space) => d.col(d.spaceCollection(space, 'edges'));
 
 /** The records every space starts with: two people with a nick, a third, a fourth nothing names, and an edge between the first two. */
 async function seedPeople(space) {
-  // Shaped as a write stores them: the space they belong to (a delete and a triplet are read under it), a version, the edge's end kinds.
+  // Shaped as a write stores them: the space they belong to (a delete and a triplet are read under it), a version, and the edge's end
+  // kinds left out, as `storedEdgeKind` stores an `entity` end: a stored `'entity'` is not found by the edge's own triplet lookup.
   const e = (id, name, properties = {}) => ({ _id: id, spaceId: space, name, type: 'person', properties, seq: 1, createdAt: STAMP, updatedAt: STAMP });
   await d.seed(space, 'entity', [e('e1', 'Ada', { nick: 'ada' }), e('e2', 'Bob', { nick: 'bob' }), e('e3', 'Cy'), e('e4', 'Dee')]);
-  await d.seed(space, 'edge', [{ _id: 'k1', spaceId: space, from: 'e1', to: 'e2', fromKind: 'entity', toKind: 'entity', label: 'knows', properties: { note: 'old' }, seq: 1, createdAt: STAMP, updatedAt: STAMP }]);
+  await d.seed(space, 'edge', [{ _id: 'k1', spaceId: space, from: 'e1', to: 'e2', label: 'knows', properties: { note: 'old' }, seq: 1, createdAt: STAMP, updatedAt: STAMP }]);
 }
 
 describe('a SPARQL Update lands whole through the write rules, or is refused by its code', { skip }, () => {
@@ -66,7 +67,10 @@ describe('a SPARQL Update lands whole through the write rules, or is refused by 
       ],
     });
     const links = await import('../../server/dist/brain/links-conversion.js');
-    for (const s of [...DOORS.map(spaceOf), STRICT, BOUNDS]) { await seedPeople(s); await links.convertSpaceLinks(s); }
+    for (const s of [...DOORS.map(spaceOf), STRICT, BOUNDS]) await seedPeople(s);
+    // Converted AND marked (`completeLinkage`), as every space is after its first boot: a delete reads the links naming its record.
+    const converted = await links.convertAndMarkSpaces([...DOORS.map(spaceOf), STRICT, BOUNDS].map(id => ({ id })));
+    assert.deepEqual(converted.failedSpaces ?? [], [], 'a seeded space was not converted');
     // A token per door: an Update that deletes pays a destructive call, five a minute per caller.
     for (const t of [...DOORS, 'bounds']) tokens[t] = await d.mint(`spu-admin-${t}`, {}, { admin: true });
   });
@@ -197,7 +201,9 @@ describe('a SPARQL Update lands whole through the write rules, or is refused by 
 
     it('an effect after the commit that failed answers 500 sparql_update_cascade_incomplete, naming it and what landed', async () => {
       const proto = Object.getPrototypeOf(d.col('probe'));
-      const fault = await injectStoreFault(proto, ['deleteMany', 'updateMany', 'bulkWrite'], d.spaceCollection(S, 'embedJobs'));
+      // The entity's cascade (its face labels, `unlabelFacesForEntities` on the files) is the effect faulted: a removal's embed jobs are
+      // retired best-effort, warned and never thrown (`afterRemovalCommitted`), so a fault there is no failed effect.
+      const fault = await injectStoreFault(proto, ['deleteMany', 'updateMany', 'bulkWrite'], d.spaceCollection(S, 'files'));
       let a;
       try {
         a = await d.sparqlUpdate('rest', key(), S, `DELETE WHERE { <${at(S, 'entity', 'e4')}> ?p ?o }`);

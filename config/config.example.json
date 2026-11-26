@@ -20,7 +20,7 @@
   "importBodyMaxBytes": 1073741824,
   "importMaxDocuments": 5000000,
   "maxChunkedUploadBytes": 10737418240,
-  "sparql": { "timeoutMs": 30000, "maxRecordsRead": 200000, "maxResults": 10000, "maxResultBytes": 67108864 },
+  "sparql": { "timeoutMs": 30000, "maxRecordsRead": 200000, "maxResults": 10000, "maxResultBytes": 67108864, "maxRecordsChanged": 1000 },
   "allowInsecurePlaintext": false,
   "allowInsecurePeers": false,
   "requireEncryptedTransport": false,

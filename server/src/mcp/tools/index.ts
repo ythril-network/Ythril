@@ -5,6 +5,7 @@ import { space_schema_rdfTool } from './schema-rdf.js';
 import { import_schema_rdfTool } from './schema-rdf-import.js';
 import { export_rdfTool } from './rdf.js';
 import { sparql_queryTool } from './sparql.js';
+import { sparql_updateTool } from './sparql-update.js';
 import { import_rdfTool, import_rdf_statusTool } from './rdf-import.js';
 import { space_schema_convertTool, space_schema_conversionTool } from './schema-convert.js';
 import { list_unconvertedTool, dismiss_unconvertedTool, dismiss_unconverted_shownTool } from './unconverted.js';
@@ -61,6 +62,7 @@ export const ALL_TOOLS: ToolHandler[] = [
   import_schema_rdfTool,
   export_rdfTool,
   sparql_queryTool,
+  sparql_updateTool,
   import_rdfTool,
   import_rdf_statusTool,
   space_schema_convertTool,

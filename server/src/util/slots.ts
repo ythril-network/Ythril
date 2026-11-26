@@ -27,7 +27,7 @@ const RETRY_AFTER_SECONDS = 5;
 const BUDGET: SlotFamily = Object.freeze({ instance: SLOTS_PER_INSTANCE, perCaller: SLOTS_PER_CALLER, retryAfterSeconds: RETRY_AFTER_SECONDS });
 
 /** Every family and its budget: today both hold the same one. */
-export const SLOT_FAMILIES = Object.freeze({ export: BUDGET, sparql: BUDGET } satisfies Record<string, SlotFamily>);
+export const SLOT_FAMILIES = Object.freeze({ export: BUDGET, sparql: BUDGET, sparql_update: BUDGET } satisfies Record<string, SlotFamily>);
 
 export type SlotFamilyName = keyof typeof SLOT_FAMILIES;
 

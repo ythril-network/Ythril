@@ -43,7 +43,7 @@ export const graphManagementRefusal = (what: string): SparqlRefusal => new Sparq
 
 /** The refusal of a change set past a cap; it names the cap, never a statement. */
 const tooManyChangesRefusal = (bound: string): SparqlRefusal => new SparqlRefusal(SPARQL_TOO_LARGE, SPARQL_TOO_MANY_CHANGES,
-  `The Update changes more than ${bound}, so nothing of it is answered: narrow its WHERE or split it`);
+  `The Update changes more than ${bound}, so nothing of it was written: narrow its WHERE or split it`);
 
 /** One Update's count of the statements its change set took, in statements and bytes: {@link ChangeMeter.add} throws past either cap. */
 export class ChangeMeter {

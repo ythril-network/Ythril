@@ -28,7 +28,7 @@ const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 process.env['DATA_ROOT'] = path.join(tmpDir, 'data');
 
-const GOOD = { timeoutMs: 20_000, maxRecordsRead: 50_000, maxResults: 500, maxResultBytes: 2_097_152 };
+const GOOD = { timeoutMs: 20_000, maxRecordsRead: 50_000, maxResults: 500, maxResultBytes: 2_097_152, maxRecordsChanged: 200 };
 const base = { instanceId: 'sparql-limits-test', instanceLabel: 'test', tokens: [], networks: [], spaces: [{ id: 'general', label: 'General', folders: [] }] };
 const write = (sparql) => fs.writeFileSync(CONFIG_PATH, JSON.stringify({ ...base, ...(sparql === undefined ? {} : { sparql }) }, null, 2), { mode: 0o600 });
 
@@ -38,6 +38,8 @@ const BAD = {
   maxRecordsRead: { zero: 0, negative: -1, 'past ten million': 10_000_001, fraction: 10.5, string: '1000' },
   maxResults: { zero: 0, 'past a million': 1_000_001, fraction: 2.5, 'a number past the safe integers': 2 ** 60 },
   maxResultBytes: { zero: 0, 'below a mebibyte': 1_048_575, 'past a gibibyte': 1_073_741_825, fraction: 1_048_576.5, string: '2097152' },
+  // Q-761: the records one SPARQL Update may change, at most a write group's ceiling.
+  maxRecordsChanged: { zero: 0, negative: -1, 'past a write group': 5_001, fraction: 10.5, string: '1000' },
 };
 
 let loader, limits;

@@ -48,7 +48,8 @@ describe('a SPARQL Update leaves no trace of its text', { skip }, () => {
     d = await openSparqlDoors({ suite: 'q761-trace', spaces: [{ id: S }] });
     const e = (id, nick) => ({ _id: id, spaceId: S, name: `N ${id}`, type: 'person', properties: { nick }, seq: 1, createdAt: STAMP, updatedAt: STAMP });
     await d.seed(S, 'entity', [e('e1', 'a'), e('e2', 'b'), e('e3', 'c'), e('gone', 'g')]);
-    await (await import('../../server/dist/brain/links-conversion.js')).convertSpaceLinks(S);
+    // Converted AND marked (`completeLinkage`), as every space is after its first boot: a delete reads the links naming its record.
+    await (await import('../../server/dist/brain/links-conversion.js')).convertAndMarkSpaces([{ id: S }]);
     tok = await d.mint('spu-trace', { [S]: d.row({ knowledge: 'write' }) });
     dispatcher = await import('../../server/dist/webhooks/dispatcher.js');
     store = await import('../../server/dist/webhooks/store.js');

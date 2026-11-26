@@ -190,6 +190,10 @@ export function classifyOperation(operation: string): CallClass | null {
   // the "is anyone reading its files" one.
   if (MUTATION_VERB.test(operation)) return 'write';
 
+  // A SPARQL Update (Q-761) changes records as a bulk write does: knowledge going in, the same signal. Its operation ends in
+  // `sparql_update`, not `.update`, so the verb pattern does not see it.
+  if (operation === 'brain.sparql_update') return 'write';
+
   // Demand on the file store, reads only (the mutations went to `write` above).
   if (/^file\./.test(operation)) return 'file';
 

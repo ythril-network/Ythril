@@ -565,6 +565,13 @@ per-type files under `schemas/` again on the next schema save. The records keep 
 hashes it into the space's Merkle root where 6.6 leaves it out: on a network with `merkle: true`, a member below 6.6 (or one
 rolled back to 6.5) reports divergence against the 6.6 members. Upgrade or roll back every member of such a network together.
 
+**A SPARQL Update is an ordinary write to the members, and its config key must go before a rollback to a build without it.** What an
+Update ([SPARQL Update](04j-sparql-api.md#sparql-update)) lands replicates as the record writes and tombstones any write door makes, so a
+member of any version takes it; a member below 6.6.0 has no Update door and answers its address `404`. A webhook consumer meets
+`bulk.write` with `source: "sparql.update"` and a `deleted` count ([Webhooks](14-duplicates-and-webhooks.md)). A build that reads the
+`sparql` block of `config.json` but does not know `sparql.maxRecordsChanged` refuses the file, naming the key: remove the key before you
+start such a build. 6.5 does not read the `sparql` block at all.
+
 **Vector indexes are rebuilt on boot**, so a rollback that changes the embedding model or its dimensions costs a
 reindex, not data. Check `GET /ready` before sending traffic — see [Runtime Model Downloads](02-hosting.md#runtime-model-downloads)
 if you also pinned a different model.

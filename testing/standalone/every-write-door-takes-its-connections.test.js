@@ -60,6 +60,11 @@ const NOT_A_DOOR = new Map([
       + 'checked by rdf/quads-to-ops.ts, and no caller argument named linkEntities or edges reaches it',
     reviewBy: '2027-05-20',
   }],
+  ['server/src/rdf/sparql-update-plan.ts', {
+    reason: 'a SPARQL Update plans the records its statements state: a record\'s links come from its dcterms:references statements, translated '
+      + 'and checked by rdf/quads-to-ops.ts as the import\'s are, and no caller argument named linkEntities or edges reaches it',
+    reviewBy: '2027-05-26',
+  }],
 ]);
 const doors = trackedSources(SERVER_CODE_ROOTS, { floor: 100 })
   .filter(f => CREATORS.test(code(f)) && !DEFINES_CREATOR.test(code(f)) && !NOT_A_DOOR.has(f));
