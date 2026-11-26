@@ -128,7 +128,7 @@ export const UNBOUNDED_DB_METHODS: Readonly<Record<string, string>> = {
   runCursorCommand: 'an arbitrary cursor command: what it does is stated by the caller, and nothing in the server issues one',
   aggregate: 'a database-level pipeline (currentOp, session listing) that nothing in the server issues',
   stats: 'the driver\'s dbStats wrapper, which nothing in the server issues (the quota reads dbStats through command)',
-  renameCollection: 'moves a whole collection and nothing in the server calls it (a space is moved by renaming its collections one by one)',
+  renameCollection: 'moves a whole collection, applied whole or not at all: only the triple index rebuild\'s swap calls it, and a bound that ended it would leave the index half swapped (a space is moved by renaming its collections one by one)',
   dropDatabase: 'drops the whole database: a restore or a test teardown, for which no per-operation figure is right',
   createIndex: 'an index build scales with the data in the collection, so no one figure is right for every collection',
   indexInformation: 'a listing of a collection\'s indexes, unbounded with the index calls for the same reason (write-bound.ts)',

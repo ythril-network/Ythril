@@ -268,6 +268,8 @@ describe('the horizon and the filters have named callers', () => {
     ['server/src/files/file-feed-floor.ts', 'the change feed\'s floor raised to the settled head at a wipe or restore (`raiseFileFeedFloorToHead`): a write of a bound, no read'],
     // bundle-273 S2: not a reader of its own. The journal wakes the follower, which is handed the cap the way the clock's settled hook hands it.
     ['server/src/rdf/triple-index/follow.ts', 'the triple index follower woken by its write journal (`wakeFollower`): handed the records stream\'s settled cap, as the clock\'s settled hook hands it'],
+    // bundle-273 S4: not a reader by position. A rebuild reads the cap once, before any record, pages the records by `_id`, and hands the follower the rest.
+    ['server/src/rdf/triple-index/rebuild.ts', 'a triple index rebuild reads the records stream\'s settled cap once at its start, before it reads any record by `_id`: every record below the cap is visible to its fill, and the swap sets `appliedPos` one below it so the follower reads the rest through readAfterPosition'],
   ]);
   const callers = () => sources.filter(s => s.file !== CLOCK && /\bsettledPositionCap\b/.test(s.text)).map(s => s.file);
 

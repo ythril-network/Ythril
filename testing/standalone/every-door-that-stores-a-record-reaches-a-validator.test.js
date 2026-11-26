@@ -209,6 +209,11 @@ const EXEMPT = {
   'server/src/brain/edge-rekey.ts:rekeyEdges':
     'moves a stored edge to the id its endpoints derive: the document is carried across, so no caller-chosen property is written; the doors that '
     + 'change an edge\'s label or endpoints validate it themselves before they reach this',
+  'server/src/rdf/triple-index/store.ts:applyRecordChanges':
+    'the triple index (Q-764) states records already stored as statements, counts and record rows, in the collections the caller names '
+    + '(the live ones, or a rebuild\'s own before its swap): it derives an index, and stores no record and no property',
+  'server/src/rdf/triple-index/terms.ts:termIds':
+    'the triple index dictionary (Q-764): term rows in the collection the caller names; it stores no record and no property',
   'server/src/files/rekey-rows.ts:rekeyRows':
     'moves the derived rows of a FILE to a new path (a file move): a re-key of rows no door authors, whatever collection the '
     + 'caller names; it writes no entity, edge, fact or chrono property',

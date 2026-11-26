@@ -133,6 +133,9 @@ const EXEMPT = {
   'server/src/sync/delivered-by-backfill.ts:stampCollection':
     'the one-time stamp of who delivered the rows stored before `deliveredBy` existed (bundle-51): a migration of LOCAL state (a '
     + 'local-only field of rows already held) run once per space by the sync cycle, never a create or a converge',
+  // The SPARQL triple index (bundle-273, Q-764 S4): its writers take the collections they write as a parameter, so a rebuild can fill its own.
+  'server/src/rdf/triple-index/store.ts:applyRecordChanges': 'the triple index\'s own write (Q-764): statements, counts and record rows into the collections the caller names (`IndexCollections`: the live ones, or a rebuild\'s own before its swap); never a record collection',
+  'server/src/rdf/triple-index/terms.ts:termIds': 'the triple index\'s dictionary (Q-764): term rows and their counter in the collection the caller names (the live one, or a rebuild\'s own before its swap); never a record collection',
   // migrations and restore
   'server/src/db/rekey-memory-kind-to-fact.ts:rekeyMemoryKindToFact': 'boot migration over local state',
   'server/src/db/drop-link-arrays.ts:dropLinkArrays': 'boot migration: drops the 4.x link arrays',

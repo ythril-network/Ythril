@@ -140,6 +140,8 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/brain/spaces/:spaceId/sparql', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
   // Q-761: a SPARQL Update on one space (a write; the schema rung is never asked, so never implied); a view id is no space a write row takes.
   { route: '/api/brain/spaces/:spaceId/sparql/update', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
+  // The twin of `space_rdf_rebuild` (Q-764): it rewrites what every query of the space reads, so the rung of the other rebuilds.
+  { route: '/api/brain/spaces/:spaceId/rdf-index/rebuild', method: 'POST', area: 'knowledge', needs: 'admin', scope: 'path' },
   // Q-758: a Linked Data address, the twin of the export it is a name in: knowledge read on the space whose BASE holds the address
   // (`resolved`, never the URL segment, DEC-2); a file's address asks `files: read` as well inside the door, as the export does.
   { route: '/ld/:spaceId/:kind/:id', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },

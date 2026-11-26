@@ -100,8 +100,9 @@ record that differs is logged and starts a rebuild, and so does a dictionary mor
 reads every record (also those stored before positions) into collections of its own and swaps them in when it is done; meanwhile the space
 is read from its index as before, or from its records. Only one rebuild of a space runs at a time, across instances sharing a database. A
 query that read an index which a rebuild swapped in while the query ran is answered again from that space's records, so no answer mixes
-two builds. An admin rebuilds one space at once with `space_rdf_rebuild` (MCP, or `POST /api/space_rdf_rebuild` with `{"space": "<id>"}`;
-the knowledge `admin` right on the space; `409 rdf_off` for a space with RDF off) and reads its state with `space_rdf_index`
+two builds. An admin rebuilds one space at once with `space_rdf_rebuild` (MCP, `POST /api/space_rdf_rebuild` with `{"space": "<id>"}`, or
+`POST /api/brain/spaces/:spaceId/rdf-index/rebuild`; the knowledge `admin` right on the space; `409 rdf_off` for a space with RDF off;
+audited as `space.rdf.rebuild`) and reads its state with `space_rdf_index`
 (`POST /api/space_rdf_index`; knowledge `read`): `status` (`ready`, `catching-up`, `stale` or `absent`), `buildId`, `appliedPos` and
 `rebuilding`.
 

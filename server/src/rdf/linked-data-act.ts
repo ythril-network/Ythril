@@ -7,6 +7,8 @@
  *
  * - **Business logic in a route.** The reads and their bounds (the cap on statements, the half of an answer that is cut, the slot, the
  *   deadline) are decided here and can be driven without a response; the route puts the outcome on its wire.
+ * - **A read of two builds of an index.** Every read runs through `readAcrossSwaps`: a space whose triple index a rebuild swapped while the
+ *   read ran is read again from its records (design-r2 R5, contract row 2).
  * - **A read outside the caller's scope.** Every read goes through the quad source of the one space the address resolved to, with the caller's
  *   rights (the source withholds a file's statements from a member read without `files: read`).
  * - **A slot held past the read.** Every ending (an answer, a refusal, a caller that left, a failure) releases the slot.
@@ -23,6 +25,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { takeSlot } from '../util/slots.js';
 import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
 import { createQuadSource, type QuadSource } from './quad-source.js';
+import { readAcrossSwaps } from './read-across-swaps.js';
 import { addressNames, recordOfAddress, termOfIri } from './term-reverse.js';
 import { fromRdfJs, type RdfJsLike } from './rdf-js-terms.js';
 import type { RdfMember } from './rdf-members.js';
@@ -139,48 +142,8 @@ export async function readStatements(input: StatementsInput): Promise<LdOutcome<
   const slot = takeSlot('sparql', input.callerKey);
   if (!slot) return busyOutcome();
   try {
-    const { timeoutMs, maxResults, maxResultBytes } = sparqlLimits(getConfig());
-    const source = createQuadSource({ members: [space], caller: input.caller, fingerprintOf: schemaFingerprintOf }, { deadline: Date.now() + timeoutMs, signal: input.signal });
-    // One meter for the whole answer, both halves: the bytes of every statement kept (`sparql.maxResultBytes`).
-    const meter = new ByteMeter(maxResultBytes);
-    // The chrono entry's time nodes are its own statements: a fragment never travels, so they are answered at the entry's address.
-    const subjects = kind === 'chrono' ? [address, `${address}#start`, `${address}#end`] : [address];
-    const about: RdfJsLike[] = [];
-    for (const s of subjects) {
-      const got = await takeStatements(source, source.match(DataFactory.namedNode(s), undefined, undefined, undefined), maxResults + 1 - about.length, undefined, meter);
-      about.push(...got.quads);
-      if (about.length > maxResults) {
-        return {
-          answer: 'refused',
-          refusal: {
-            status: SPARQL_TOO_LARGE, title: 'Too many statements', code: SPARQL_TOO_MANY_RESULTS,
-            detail: `The address has more than ${maxResults} statements of its own (sparql.maxResults), so none of them is answered: ask a SPARQL query for a part of them`,
-          },
-        };
-      }
-    }
-    if (about.length === 0) return { answer: 'not-found' };
-    let pointing: RdfJsLike[] = [];
-    let truncated = false;
-    // An agent is pointed at by every record it wrote: its answer is its own statements.
-    if (kind !== 'agent') {
-      const own = new Set(subjects);
-      try {
-        // A statement of the record's own (a self-reference) is answered in its own half: it is filtered before the cap counts, so an answer
-        // that fits the cap is not called cut because of a statement it would not carry twice.
-        const got = await takeStatements(source, source.match(undefined, undefined, DataFactory.namedNode(address), undefined), maxResults - about.length,
-          q => !own.has(q.subject!.value), meter);
-        pointing = got.quads;
-        truncated = got.more;
-      } catch (err) {
-        // The pointing half stops at a bound of the read (the records read, the time, the bytes) as it stops at the cap: what was read about
-        // the record is answered whole, and the answer says its inbound half was cut.
-        const named = sparqlRefusalOf(err);
-        if (named?.code !== SPARQL_TOO_MUCH_READ && named?.code !== SPARQL_TIMEOUT && named?.code !== SPARQL_ANSWER_TOO_LARGE) throw err;
-        truncated = true;
-      }
-    }
-    return { answer: 'read', id, statements: [...about, ...pointing].map(statementOf), truncated };
+    const { maxResults, maxResultBytes } = sparqlLimits(getConfig());
+    return await readAcrossSwaps(sourcesOf(space, input), source => statementsOf(source, address, id, kind, maxResults, maxResultBytes), () => input.signal.aborted);
   } catch (err) {
     if (input.signal.aborted) return { answer: 'gone' };
     const refusal = refusalOfError(err);
@@ -189,6 +152,61 @@ export async function readStatements(input: StatementsInput): Promise<LdOutcome<
   } finally {
     slot.release();
   }
+}
+
+/**
+ * The quad sources of one Linked Data read of `space`: the first reads its index when it may, the second (a rerun across a swap,
+ * `read-across-swaps.ts`) reads the swapped members from their records. One deadline for both.
+ */
+function sourcesOf(space: string, input: { caller: RdfCaller | undefined; signal: AbortSignal }): (recordsFor: readonly string[]) => QuadSource {
+  const deadline = Date.now() + sparqlLimits(getConfig()).timeoutMs;
+  return recordsFor => createQuadSource({ members: [space], caller: input.caller, fingerprintOf: schemaFingerprintOf },
+    { deadline, signal: input.signal, ...(recordsFor.length > 0 ? { recordsFor } : {}) });
+}
+
+/** One read of the statements `readStatements` answers, over `source`. */
+async function statementsOf(source: QuadSource, address: string, id: string, kind: LdStatementsKind, maxResults: number, maxResultBytes: number)
+  : Promise<LdOutcome<{ id: string; statements: Quad[]; truncated: boolean }>> {
+  // One meter for the whole answer, both halves: the bytes of every statement kept (`sparql.maxResultBytes`).
+  const meter = new ByteMeter(maxResultBytes);
+  // The chrono entry's time nodes are its own statements: a fragment never travels, so they are answered at the entry's address.
+  const subjects = kind === 'chrono' ? [address, `${address}#start`, `${address}#end`] : [address];
+  const about: RdfJsLike[] = [];
+  for (const s of subjects) {
+    const got = await takeStatements(source, source.match(DataFactory.namedNode(s), undefined, undefined, undefined), maxResults + 1 - about.length, undefined, meter);
+    about.push(...got.quads);
+    if (about.length > maxResults) {
+      return {
+        answer: 'refused',
+        refusal: {
+          status: SPARQL_TOO_LARGE, title: 'Too many statements', code: SPARQL_TOO_MANY_RESULTS,
+          detail: `The address has more than ${maxResults} statements of its own (sparql.maxResults), so none of them is answered: ask a SPARQL query for a part of them`,
+        },
+      };
+    }
+  }
+  if (about.length === 0) return { answer: 'not-found' };
+  let pointing: RdfJsLike[] = [];
+  let truncated = false;
+  // An agent is pointed at by every record it wrote: its answer is its own statements.
+  if (kind !== 'agent') {
+    const own = new Set(subjects);
+    try {
+      // A statement of the record's own (a self-reference) is answered in its own half: it is filtered before the cap counts, so an answer
+      // that fits the cap is not called cut because of a statement it would not carry twice.
+      const got = await takeStatements(source, source.match(undefined, undefined, DataFactory.namedNode(address), undefined), maxResults - about.length,
+        q => !own.has(q.subject!.value), meter);
+      pointing = got.quads;
+      truncated = got.more;
+    } catch (err) {
+      // The pointing half stops at a bound of the read (the records read, the time, the bytes) as it stops at the cap: what was read about
+      // the record is answered whole, and the answer says its inbound half was cut.
+      const named = sparqlRefusalOf(err);
+      if (named?.code !== SPARQL_TOO_MUCH_READ && named?.code !== SPARQL_TIMEOUT && named?.code !== SPARQL_ANSWER_TOO_LARGE) throw err;
+      truncated = true;
+    }
+  }
+  return { answer: 'read', id, statements: [...about, ...pointing].map(statementOf), truncated };
 }
 
 /**
@@ -248,20 +266,20 @@ export async function usedPropertiesOf(input: UsedPropertiesInput): Promise<LdOu
   const slot = takeSlot('sparql', input.callerKey);
   if (!slot) return busyOutcome();
   try {
-    const { timeoutMs } = sparqlLimits(getConfig());
-    const source = createQuadSource({ members: [input.space], caller: input.caller, fingerprintOf: schemaFingerprintOf }, { deadline: Date.now() + timeoutMs, signal: input.signal });
-    const names = new Set<string>();
-    const prefix = `${input.address}#`;
-    for await (const q of source.match(undefined, undefined, undefined, undefined) as AsyncIterable<RdfJsLike>) {
-      const predicate = q.predicate!.value;
-      if (!predicate.startsWith(prefix)) continue;
-      // A name counts when the forward rule gives the predicate back for it: no spelling the export does not write is a property here.
-      const name = nameOfFragment(predicate.slice(prefix.length));
-      if (name !== undefined && name !== '' && resolveTermIri(input.meta, input.kind, null, name) === predicate) names.add(name);
-      if (names.size >= PROPERTY_NAMES_MAX) return { answer: 'read', names: [...names].sort() };
-    }
-    throwWhenFailed(source);
-    return { answer: 'read', names: [...names].sort() };
+    return await readAcrossSwaps(sourcesOf(input.space, input), async (source): Promise<LdOutcome<{ names: string[] }>> => {
+      const names = new Set<string>();
+      const prefix = `${input.address}#`;
+      for await (const q of source.match(undefined, undefined, undefined, undefined) as AsyncIterable<RdfJsLike>) {
+        const predicate = q.predicate!.value;
+        if (!predicate.startsWith(prefix)) continue;
+        // A name counts when the forward rule gives the predicate back for it: no spelling the export does not write is a property here.
+        const name = nameOfFragment(predicate.slice(prefix.length));
+        if (name !== undefined && name !== '' && resolveTermIri(input.meta, input.kind, null, name) === predicate) names.add(name);
+        if (names.size >= PROPERTY_NAMES_MAX) return { answer: 'read', names: [...names].sort() };
+      }
+      throwWhenFailed(source);
+      return { answer: 'read', names: [...names].sort() };
+    }, () => input.signal.aborted);
   } catch (err) {
     if (input.signal.aborted) return { answer: 'gone' };
     const refusal = refusalOfError(err);
@@ -294,11 +312,11 @@ export async function typeInUse(input: TypeInUseInput): Promise<LdOutcome<{ used
   const slot = takeSlot('sparql', input.callerKey);
   if (!slot) return busyOutcome();
   try {
-    const { timeoutMs } = sparqlLimits(getConfig());
-    const source = createQuadSource({ members: [input.space], caller: input.caller, fingerprintOf: schemaFingerprintOf }, { deadline: Date.now() + timeoutMs, signal: input.signal });
     const term = DataFactory.namedNode(input.address);
-    const stream = input.used.kind === 'edge' ? source.match(undefined, term, undefined, undefined) : source.match(undefined, DataFactory.namedNode(RDF_TYPE), term, undefined);
-    return { answer: 'read', used: (await takeStatements(source, stream, 1)).quads.length > 0 };
+    return await readAcrossSwaps(sourcesOf(input.space, input), async (source): Promise<LdOutcome<{ used: boolean }>> => {
+      const stream = input.used.kind === 'edge' ? source.match(undefined, term, undefined, undefined) : source.match(undefined, DataFactory.namedNode(RDF_TYPE), term, undefined);
+      return { answer: 'read', used: (await takeStatements(source, stream, 1)).quads.length > 0 };
+    }, () => input.signal.aborted);
   } catch (err) {
     if (input.signal.aborted) return { answer: 'gone' };
     const refusal = refusalOfError(err);

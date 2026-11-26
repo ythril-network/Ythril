@@ -107,6 +107,9 @@ const EXEMPT = {
   ...reasoned('its collection name is computed and is never one of the four (candidate rows, a file move)', [
     'brain/candidate-prune.ts:pruneCandidateCollection', 'files/rekey-rows.ts:rekeyRows',
   ]),
+  ...reasoned('the triple index (Q-764): its collections are named by the caller (the live ones, or a rebuild\'s own before its swap) and are never one of the four', [
+    'rdf/triple-index/store.ts:applyRecordChanges', 'rdf/triple-index/terms.ts:termIds',
+  ]),
   // The fork module is the writer of fork rows: the keep-writer writes the PARENT, and the re-mint inserts a new row and removes the old one.
   'server/src/brain/forks.ts:*': 'the fork module itself: `writeKeptBody` and the re-mint, which change a fork only by resolve or re-mint',
 };

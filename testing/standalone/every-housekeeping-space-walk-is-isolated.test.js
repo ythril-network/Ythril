@@ -126,6 +126,12 @@ const UNBOUNDED_CALL_EXEMPTIONS = [
     why: 'Space initialisation: a one-off metadata change when a collection is first made, not repeated work of a housekeeping unit.',
   },
   {
+    methods: ['renameCollection'], files: ['server/src/rdf/triple-index/rebuild.ts'],
+    why: 'The swap of a triple index rebuild (Q-764 S4) renames each of its three collections onto the live name: a metadata change of one '
+      + 'collection that MongoDB applies whole or not at all, fenced and under the follower\'s lease; a bound that ended it would leave the index '
+      + 'half swapped with no transaction to roll it back.',
+  },
+  {
     methods: ['command'], files: ['server/src/db/store-answers.ts'],
     why: 'The raw client\'s `admin` ping that answers "does the store answer at all?": it is the question a bound that ended asks, so it carries '
       + 'its own `maxTimeMS` (3 s) and an abort `signal`, and is never inside a scope; it writes nothing.',

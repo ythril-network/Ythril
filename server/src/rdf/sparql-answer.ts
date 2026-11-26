@@ -34,6 +34,7 @@ import {
 } from './sparql-refusal.js';
 import { renderGraph, unwritable, type RenderedAnswer } from './graph-render.js';
 import { createQuadSource } from './quad-source.js';
+import { readAcrossSwaps } from './read-across-swaps.js';
 import { rdfMembers } from './rdf-members.js';
 import { fromRdfJs, type RdfJsLike } from './rdf-js-terms.js';
 import type { RdfFormat } from './serialize.js';
@@ -335,31 +336,14 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
   try {
     const { timeoutMs, maxResultBytes } = sparqlLimits(getConfig());
     const deadline = Date.now() + timeoutMs;
-    // R5 (design-r2): a member read from an index that a rebuild swapped while the query ran may have answered from two builds, so the
-    // query is asked once more with those members read from their records. Once: the second run reads no swapped index.
-    let recordsFor: string[] = [];
-    for (;;) {
-      let answered: SparqlAnswer | SparqlAnswerRefusal;
-      let made: ReturnType<typeof createQuadSource> | null = null;
-      try {
-        made = createQuadSource({ members: input.spaces, caller: input.caller, fingerprintOf: input.fingerprintOf },
-          { deadline, ...(recordsFor.length > 0 ? { recordsFor } : {}), ...(input.signal ? { signal: input.signal } : {}) });
-        source = made;
-        answered = await answerOnce(made, deadline, maxResultBytes);
-      } catch (err) {
-        if (err instanceof CallerGone || made === null || recordsFor.length > 0) throw err;
-        const swapped = await made.indexesSwapped();
-        if (swapped.length === 0) throw err;
-        recordsFor = swapped;
-        startOver();
-        continue;
-      }
-      if (recordsFor.length === 0 && made !== null) {
-        const swapped = await made.indexesSwapped();
-        if (swapped.length > 0) { recordsFor = swapped; startOver(); continue; }
-      }
-      return answered;
-    }
+    // R5 (design-r2): a member read from an index that a rebuild swapped while the query ran is read again from its records.
+    const open = (recordsFor: readonly string[]): ReturnType<typeof createQuadSource> => {
+      startOver();
+      source = createQuadSource({ members: input.spaces, caller: input.caller, fingerprintOf: input.fingerprintOf },
+        { deadline, ...(recordsFor.length > 0 ? { recordsFor } : {}), ...(input.signal ? { signal: input.signal } : {}) });
+      return source;
+    };
+    return await readAcrossSwaps(open, made => answerOnce(made, deadline, maxResultBytes), err => err instanceof CallerGone);
   } catch (err) {
     if (err instanceof CallerGone) throw err;
     const named = sparqlRefusalOf(err);
@@ -369,7 +353,9 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
     if (input.signal?.aborted) throw new CallerGone();
     // An error nothing here maps: only its class goes on. Its message may hold the query's text (an engine names the function or the IRI it
     // met), and a thrown error is logged by whoever catches it, so what is thrown is a fixed sentence and the class.
-    throw new SparqlEngineFailure(err, auditChangesOf(countsOf(p), source?.recordsRead() ?? 0, 0, SPARQL_OUTCOME_ENGINE_FAILED));
+    // Set inside `open`, which the compiler's narrowing of this scope does not see.
+    const read = (source as ReturnType<typeof createQuadSource> | null)?.recordsRead() ?? 0;
+    throw new SparqlEngineFailure(err, auditChangesOf(countsOf(p), read, 0, SPARQL_OUTCOME_ENGINE_FAILED));
   } finally {
     if (onAbort) input.signal?.removeEventListener('abort', onAbort);
     // Set inside `answerOnce`, which the compiler's narrowing of this scope does not see.
@@ -377,7 +363,7 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
     slot.release();
   }
 
-  /** A run given up for another: its engine stopped and its abort listener taken off. */
+  /** Before a run: the engine of a run given up for it stopped and its abort listener taken off (none before the first). */
   function startOver(): void {
     if (onAbort) input.signal?.removeEventListener('abort', onAbort);
     onAbort = null;

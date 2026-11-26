@@ -14,7 +14,8 @@
  *
  * ## Seen red
  *
- * On 2b166cbe2 (the SPARQL door reruns; the Linked Data reads do not): a trial that crossed answered the name the swapped-out index stated.
+ * On 2b166cbe2 (the SPARQL door reruns; the Linked Data reads do not): the first trial's read crossed the swap and was answered `500`
+ * (`500 !== 200`): the collections renamed under it failed the read, and the act did not read the space again from its records.
  *
  * Run: a Mongo the harness accepts, npm run build:server, then
  *      node --test testing/standalone/a-linked-data-read-across-a-triple-index-swap-reads-the-records-db.test.js

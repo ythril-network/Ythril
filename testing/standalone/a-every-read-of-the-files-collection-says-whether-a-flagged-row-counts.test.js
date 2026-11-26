@@ -179,7 +179,9 @@ const EXEMPT = {
   // ── it must SEE the flagged row, so its statements go (bundle-273, design-r2 R7)
   'server/src/rdf/triple-index/follow.ts:changesAfter': 'the triple index follower reads every file row above where it stands, soft deletes and feed markers included: the record form gives such a row no statements, so a file that was deleted drops what it stated; a predicate would hide the deletion and keep its statements',
   'server/src/rdf/triple-index/read.ts:lagOf': 'the query barrier counts every file row above the index\'s appliedPos, soft deletes and feed markers included: the follower applies those rows too (R7), so one not yet applied is a lag like any other',
-  'server/src/rdf/triple-index/follow.ts:currentForms': 'reads the current row of a record a tombstone names, with no predicate, for the same reason: a flagged row has no form and its statements are dropped',
+  'server/src/rdf/triple-index/rebuild.ts:fillTripleIndexBuild':'a triple index rebuild (Q-764 S4) reads every file row by `_id` and states each by the record form, as the follower does: a flagged row gets no statements, so the rebuilt index states exactly what the follower would; a predicate here would add a second rule for which rows count',
+  'server/src/rdf/triple-index/verify.ts:verifyTripleIndex':'the drift verify (Q-764 S4) recomputes a rolling sample of file rows by `_id` with the record form and compares each with its record row: a flagged row must be in the sample, since its expected statements (none) are compared too; a predicate would leave a flagged row the index still states unseen',
+  'server/src/rdf/triple-index/follow.ts:currentForms':'reads the current row of a record a tombstone names, with no predicate, for the same reason: a flagged row has no form and its statements are dropped',
 };
 
 const INDEX = moduleIndex(SERVER_CODE_ROOTS);

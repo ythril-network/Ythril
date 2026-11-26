@@ -45,6 +45,8 @@ const PAGER = 'server/src/db/id-keyset-page.ts';
 const EXEMPT = {
   // bundle-273 (Q-764 S3): an index lookup, not a page.
   'server/src/rdf/triple-index/read.ts:filterOf': 'a triple index row\'s `_id` is its statement packed as (s, p, o); a range on it is a lookup of every statement of one subject (and predicate) on the primary index, read in one bounded find, never a page a caller continues',
+  // bundle-273 (Q-764 S4): the dictionary's ids are integers, which the pager's string cursor cannot order.
+  'server/src/rdf/triple-index/verify.ts:sampleTerms': 'the triple index dictionary keys its rows by an integer term id; the pager\'s cursor is a string, and a string `$gt` on a numeric `_id` matches no row in MongoDB\'s type order, so the drift verify reads its next terms with a numeric cursor it stores between runs, sorted and limited',
   'server/src/brain/queue-embed-sweep.ts:kindsFrom': 'the embed sweep resumes per kind with `_id > lastId` inside ONE aggregate stream that computes `holdsVector` and carries a total `$limit` across kinds; a page per kind would be a different walk. Whether it converts is the owner\'s D-57',
   'server/src/util/seq-keyset.ts:isoKeysetFilters': 'the `_id` is the TIE under another primary key (an ISO time): the page is ordered by that key, and `_id` only breaks a tie inside one value of it',
   'server/src/util/position-keyset.ts:positionKeysetFilters': 'the `_id` is the TIE under another primary key (`pos`, a record\'s position): the page is ordered by position, and `_id` only breaks a tie inside one position (the legacy band has them)',

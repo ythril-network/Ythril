@@ -18,7 +18,8 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { setTimeout as sleep } from 'node:timers/promises';
+import { elapse } from '../_shared/sleep.mjs';
+import { waitForReading } from '../_shared/wait-for.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openSparqlDoors, rdfMeta } from './_sparql-doors.mjs';
 import { landAll, followUntilReady, entityDoc } from './_triple-index-read.mjs';
@@ -43,14 +44,13 @@ const buildOf = async (space) => (await d.col(`${space}_rdf_state`).findOne({ _i
 
 /** Poll `space_rdf_index` on MCP until the index is ready on a build other than `was` and no rebuild runs; answers the status. */
 async function readyAfter(key, space, was) {
-  for (let i = 0; i < 200; i++) {
+  const read = async () => {
     const m = await d.toolCall(key, 'space_rdf_index', { space });
     assert.equal(m.isError, false, m.text);
-    const s = m.structured;
-    if (s.status === 'ready' && s.buildId && s.buildId !== was && s.rebuilding === false) return s;
-    await sleep(50);
-  }
-  throw new Error(`the index of ${space} did not become ready on a new build`);
+    return m.structured;
+  };
+  const fresh = (s) => s.status === 'ready' && s.buildId && s.buildId !== was && s.rebuilding === false;
+  return waitForReading(read, fresh, 10_000, 50, { what: `the index of ${space} ready on a build other than ${was}` });
 }
 
 describe('the triple index rebuild door needs the admin rung', { skip }, () => {
@@ -72,7 +72,7 @@ describe('the triple index rebuild door needs the admin rung', { skip }, () => {
     assert.match(mcp.text, /admin/i, `the refusal names the rung: ${mcp.text}`);
     const rest = await toolDoor(writer.key, 'space_rdf_rebuild', { space: S });
     assert.equal(rest.status, 403, `REST refuses the writer: ${rest.text}`);
-    await sleep(200);
+    await elapse(200, 'absence window: a rebuild the refused calls had started would have swapped in by now');
     assert.equal(await buildOf(S), was, 'the index was not rebuilt');
   });
 

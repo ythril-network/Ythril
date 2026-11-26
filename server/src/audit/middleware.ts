@@ -231,6 +231,8 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/sparql$/,             operation: 'brain.sparql_query', spaceGroup: 1, writtenWhenCutOff: true },
   // Q-761: a SPARQL Update, by the act's counts and outcome (never its text), also when the caller went away. MCP `sparql_update` records it too.
   { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/sparql\/update$/,     operation: 'brain.sparql_update', spaceGroup: 1, writtenWhenCutOff: true },
+  // Q-764: a rebuild of the space's triple index started; MCP `space_rdf_rebuild` and `POST /api/space_rdf_rebuild` record the same operation.
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/rdf-index\/rebuild$/, operation: 'space.rdf.rebuild', spaceGroup: 1 },
   // Q-758: a Linked Data address read, a read like the record reads it is the twin of. No space group: the space is the one whose BASE holds
   // the address (a renamed space keeps its old segment), which the door resolved and handed over as `authorisedSpaces`; the record's id is
   // `entryId`, and `changes` holds counts only.

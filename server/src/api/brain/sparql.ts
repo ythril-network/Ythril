@@ -33,6 +33,7 @@ import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { SPARQL_QUERY_MAX_BYTES } from '../../rdf/sparql-engine.js';
 import { sparqlUpdateRouter } from './sparql-update.js';
+import { rdfIndexRouter } from './rdf-index.js';
 import { SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_QUERY_TOO_LARGE, SPARQL_UPDATE_NOT_HERE } from '../../rdf/sparql-refusal.js';
 import {
   answerSparql, prepareSparql, renderSparql, headerList, isSparqlRefusal, sparqlRefusalBody, CallerGone, SparqlEngineFailure, SPARQL_NO_QUERY, SPARQL_UNSUPPORTED_MEDIA_TYPE, SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS,
@@ -177,3 +178,5 @@ sparqlRouter.get('/spaces/:spaceId/sparql', globalRateLimit, requireSpaceAuth, a
 sparqlRouter.post('/spaces/:spaceId/sparql', globalRateLimit, requireSpaceAuth, parsed(queryBody), parsed(formBody), answer);
 // POST /api/brain/spaces/:spaceId/sparql/update - the protocol's update operation, its own address and act (Q-761, `sparql-update.ts`).
 sparqlRouter.use(sparqlUpdateRouter);
+// POST /api/brain/spaces/:spaceId/rdf-index/rebuild - a rebuild of the space's triple index, the twin of `space_rdf_rebuild` (Q-764, `rdf-index.ts`).
+sparqlRouter.use(rdfIndexRouter);
