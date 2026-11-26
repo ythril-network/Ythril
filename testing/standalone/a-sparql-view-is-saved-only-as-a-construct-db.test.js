@@ -42,6 +42,16 @@ const REFUSED = [
 let d, owner, receiver;
 const codeOf = (a) => a.body?.code ?? a.structured?.code ?? /\b(view_[a-z_]+)\b/.exec(a.text ?? '')?.[1];
 const fmt = (a) => `${a.status} ${(a.text ?? '').slice(0, 300)}`;
+/**
+ * A tool call answered by the message that answers it: `view_create` and `view_update` stream `notifications/tools/list_changed` before
+ * their result, so the first message of the answer is not the result.
+ */
+async function tool(key, name, args) {
+  const r = await d.rpc(key, 'tools/call', { name, arguments: args });
+  const res = r.result?.result;
+  const text = (res?.content ?? []).map(c => c.text ?? '').join('\n') || r.result?.error?.message || '';
+  return { isError: res?.isError === true || !!r.result?.error, text, structured: res?.structuredContent ?? null };
+}
 
 describe('a SPARQL view is saved only as a CONSTRUCT, on both doors', { skip }, () => {
   before(async () => {
@@ -60,7 +70,7 @@ describe('a SPARQL view is saved only as a CONSTRUCT, on both doors', { skip }, 
     const listed = viewsOf(await d.rest(owner.key, 'GET', '/api/views')).find(v => v.id === '@q762-rest');
     assert.deepEqual(listed?.sparql, { query: KEEP_ENTITIES }, 'GET /api/views shows the query');
 
-    const viaMcp = await d.mcp(owner.key, 'view_create', { name: 'q762-mcp', members: [S], sparql: { query: KEEP_ENTITIES } });
+    const viaMcp = await tool(owner.key, 'view_create', { name: 'q762-mcp', members: [S], sparql: { query: KEEP_ENTITIES } });
     assert.equal(viaMcp.isError, false, viaMcp.text.slice(0, 300));
     assert.deepEqual(viewOf(viaMcp).sparql, { query: KEEP_ENTITIES }, 'view_create answers the query');
     const mcpListed = viewsOf(await d.mcp(owner.key, 'view_list', {})).find(v => v.id === '@q762-mcp');
@@ -75,7 +85,7 @@ describe('a SPARQL view is saved only as a CONSTRUCT, on both doors', { skip }, 
     const patched = await d.rest(owner.key, 'PATCH', '/api/views/@q762-plain', { sparql: { query: other } });
     assert.equal(patched.status, 200, fmt(patched));
     assert.deepEqual(viewOf(patched).sparql, { query: other }, 'PATCH sets the query');
-    const updated = await d.mcp(owner.key, 'view_update', { view: '@q762-plain', sparql: null });
+    const updated = await tool(owner.key, 'view_update', { view: '@q762-plain', sparql: null });
     assert.equal(updated.isError, false, updated.text.slice(0, 300));
     assert.equal('sparql' in viewOf(updated), false, 'view_update with sparql: null makes it a plain view again');
     assert.equal('sparql' in viewOf(await d.rest(owner.key, 'GET', '/api/views/@q762-plain')), false, 'and it stays plain');
@@ -88,13 +98,13 @@ describe('a SPARQL view is saved only as a CONSTRUCT, on both doors', { skip }, 
       const restCreate = await d.rest(owner.key, 'POST', '/api/views', { name: 'q762-refused', members: [S], sparql: { query } });
       assert.equal(restCreate.status, 400, `${what}, REST create: ${fmt(restCreate)}`);
       assert.equal(codeOf(restCreate), code, `${what}, REST create: ${fmt(restCreate)}`);
-      const mcpCreate = await d.mcp(owner.key, 'view_create', { name: 'q762-refused', members: [S], sparql: { query } });
+      const mcpCreate = await tool(owner.key, 'view_create', { name: 'q762-refused', members: [S], sparql: { query } });
       assert.equal(mcpCreate.isError, true, `${what}, MCP create was saved`);
       assert.equal(codeOf(mcpCreate), code, `${what}, MCP create: ${mcpCreate.text.slice(0, 300)}`);
       const restPatch = await d.rest(owner.key, 'PATCH', '/api/views/@q762-target', { sparql: { query } });
       assert.equal(restPatch.status, 400, `${what}, REST update: ${fmt(restPatch)}`);
       assert.equal(codeOf(restPatch), code, `${what}, REST update`);
-      const mcpPatch = await d.mcp(owner.key, 'view_update', { view: '@q762-target', sparql: { query } });
+      const mcpPatch = await tool(owner.key, 'view_update', { view: '@q762-target', sparql: { query } });
       assert.equal(mcpPatch.isError, true, `${what}, MCP update was saved`);
       assert.equal(codeOf(mcpPatch), code, `${what}, MCP update: ${mcpPatch.text.slice(0, 300)}`);
     }

@@ -44,6 +44,19 @@ Parameters, on both doors:
 - **Edges in RDF 1.2 form:** an edge is `<from> <label> <to>`, and its details (weight, type, properties) are on its reifier,
   `?r rdf:reifies <<( <from> <label> <to> )>>`. The annotation syntax `<< <from> <label> <to> >> ythril:weight ?w` reads them.
 
+### A SPARQL view
+
+A personal view can carry a SPARQL CONSTRUCT ([Personal Views](06d-personal-views.md#a-view-defined-by-a-sparql-construct)). A query on
+such a view (`GET /api/brain/spaces/{spaceId}/sparql` with the view's id, `sparql_query` with `space: "@<name>"`) reads the statements the CONSTRUCT makes, not
+the members' own:
+
+- The CONSTRUCT runs first, over the members as you read them now, with every rule above (your rights, `files: read`, the bounds). A member
+  you cannot read contributes nothing.
+- Its statements are one default graph: `GRAPH ?g { ... }` finds nothing, and FROM, FROM NAMED and the dataset parameters name no graph of it.
+- It may make at most 50 000 statements. More is `413 view_construct_too_large`, and nothing of it is answered. Your query is then bound
+  as any other (`sparql.maxResults`, `limit`).
+- SPARQL Update refuses such a view as its target: `409 view_is_construct`.
+
 ## Answers
 
 | Query form | Media types, by `Accept` | Default |
@@ -138,6 +151,7 @@ text, and a `503` adds `retryAfterSeconds` and `Retry-After`.
 | 413 | `sparql_too_many_results` | The answer holds more than `sparql.maxResults` rows, or more than `limit`. |
 | 413 | `sparql_answer_too_large` | The answer holds more than `sparql.maxResultBytes` bytes of values, however few rows: a record may be 10 MB. |
 | 413 | `sparql_too_much_read` | The query reads more than `sparql.maxRecordsRead` records, or more than `sparql.maxIndexRowsRead` statements of its spaces' triple indexes. |
+| 413 | `view_construct_too_large` | The query names a SPARQL view whose CONSTRUCT makes more than 50 000 statements. |
 | 415 | `sparql_unsupported_media_type` | A POST that is neither `application/sparql-query` nor a form, or whose charset or `Content-Encoding` is not read. |
 | 503 | `sparql_timeout` | The query ran past `sparql.timeoutMs`. |
 | 503 | `sparql_store_unavailable` | The store did not answer a read. |

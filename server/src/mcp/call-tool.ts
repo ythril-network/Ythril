@@ -38,7 +38,7 @@ import { toolErrorText, toolErrorResult } from './tool-error-text.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
 import { TOOL_RIGHTS, toolTakesAView } from '../auth/space-rights.js';
-import { isViewId, resolveOwnView, viewOwnerOf, viewReadMembers, viewsOfOwner } from '../config/views.js';
+import { constructViewRefusal, isViewId, resolveOwnView, viewOwnerOf, viewReadMembers, viewsOfOwner } from '../config/views.js';
 import { ownViewNamedIn, retiredIdNamedIn, unknownSpaceAnswer } from '../spaces/unknown-space.js';
 import { peerBoundTo, peerTokenToolRefusal } from '../auth/peer-bound.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
@@ -239,6 +239,14 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
 
   // The caller's OWN view named on a tool that does not take one (every write) is answered as what it is, with the owner-only hint, BEFORE the
   // rights below are judged - the REST path routes ask the existence rule first, so the order is one on every door (`ownViewNamedIn`).
+  // A SPARQL view (Q-762) is read by the RDF tools alone: every other tool, a write included, refuses it with its reason, here, where the
+  // REST path guard refuses it (before reach and rights).
+  const named = typeof a['space'] === 'string' ? [a['space']] : Array.isArray(a['space']) ? a['space'] : [];
+  for (const sid of named) {
+    const mine = tool && typeof sid === 'string' && isViewId(sid.trim()) ? resolveOwnView(ownerKey, sid.trim(), cfg) : null;
+    const construct = mine ? constructViewRefusal(mine, { tool: name }) : null;
+    if (construct) return refuse(construct.status, toolErrorText(`${construct.message} (${construct.code})`), '', construct.body);
+  }
   const notASpace = tool && !toolTakesAView(name) ? ownViewNamedIn(ownerKey, a['space'], cfg) : null;
   if (notASpace) return refuse(notASpace.status, toolErrorText(notASpace.body.error));
 
@@ -340,6 +348,8 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
    */
   /** The caller's own views this call NAMED, each with the spaces it reads for this tool: handed to the handler, never recomputed there. */
   const viewReads = new Map<string, readonly string[]>();
+  /** The CONSTRUCT of each SPARQL view among them (Q-762): only a tool that reads one gets here with one. */
+  const viewConstructs = new Map<string, string>();
   const viewRow = tool && toolTakesAView(name) ? TOOL_RIGHTS.find(r => r.tool === name) : undefined;
   for (const sid of rawSpaces) {
     // The caller's OWN view, on a tool that reads data: the members it reads for this caller in this tool's area, now. Every other id
@@ -348,6 +358,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     const own = viewRow && rights && isViewId(sid) ? resolveOwnView(ownerKey, sid, cfg) : null;
     if (own && viewRow && rights) {
       viewReads.set(sid, viewReadMembers({ rights, view: own, area: viewRow.area, needs: viewRow.needs, peerId }));
+      if (own.sparql) viewConstructs.set(sid, own.sparql.query);
       continue;
     }
     const unknown = unknownSpaceAnswer(ownerKey, sid, false, cfg);
@@ -623,6 +634,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
       rights,
       ...(caller.record ? { callerRecord: caller.record } : {}),
       viewReads,
+      ...(viewConstructs.size > 0 ? { viewConstructs } : {}),
       actor: { tokenId: caller.tokenId, tokenLabel: caller.tokenLabel },
       auditIdentity: { authMethod: caller.authMethod, oidcSubject: caller.oidcSubject },
       recordChanges: (before, after) => { facts.snapshots = { before, after }; },

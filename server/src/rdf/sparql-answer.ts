@@ -41,6 +41,8 @@ import type { RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentType, RDF_FORMAT_NOT_ACCEPTABLE } from './export-format.js';
 import type { Quad } from './literals.js';
 import { RDF_NOT_ENABLED, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_UNWRITABLE, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
+import { formOf, type SparqlForm } from './sparql-form.js';
+import { constructSource, constructStatements, VIEW_CONSTRUCT_TOO_LARGE } from './view-construct.js';
 
 /** No `query`, or more than one. */
 export const SPARQL_NO_QUERY = 'sparql_no_query';
@@ -63,6 +65,7 @@ export const SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS = 415;
 export const SPARQL_ENDPOINT_CODES: readonly string[] = Object.freeze([
   ...SPARQL_REFUSAL_CODES, SPARQL_NO_QUERY, SPARQL_BAD_LIMIT, SPARQL_BAD_DATASET, SPARQL_NOT_ACCEPTABLE, SPARQL_UNSUPPORTED_MEDIA_TYPE,
   RDF_NOT_ENABLED, 'rdf_base_conflict', RDF_BASE_SHARED, RDF_BASE_NESTED, 'rdf_term_clash', RDF_UNWRITABLE, RDF_FORMAT_NOT_ACCEPTABLE,
+  VIEW_CONSTRUCT_TOO_LARGE,
 ]);
 
 /** What an answer says it left out, as MCP's `warnings` name it (REST says the same in headers). */
@@ -70,8 +73,8 @@ export const SPARQL_MEMBERS_LEFT_OUT = 'members_left_out';
 export const SPARQL_FILE_TRIPLES_WITHHELD = 'file_triples_withheld';
 export const SPARQL_WARNING_CODES: readonly string[] = Object.freeze([SPARQL_MEMBERS_LEFT_OUT, SPARQL_FILE_TRIPLES_WITHHELD]);
 
-/** The four query forms. */
-export type SparqlForm = 'select' | 'ask' | 'construct' | 'describe';
+/** The four query forms, and how a parsed query's is read (`sparql-form.ts`, shared with a view's save-time check). */
+export { formOf, type SparqlForm } from './sparql-form.js';
 
 /** The result formats a SELECT or ASK answers in, in preference order; `application/json` is answered as SPARQL results JSON. */
 export const SPARQL_RESULT_TYPES = Object.freeze(['application/sparql-results+json', 'application/json', 'text/csv', 'text/tab-separated-values'] as const);
@@ -110,6 +113,11 @@ export interface SparqlQueryInput {
   /** Who the slot counts against: the token's id, or the address of a caller with none. */
   callerKey: string;
   fingerprintOf: FingerprintOf;
+  /**
+   * The CONSTRUCT of the caller's own SPARQL view (Q-762): the query reads its statements, made over `spaces` as the caller reads them,
+   * instead of the members' own (`view-construct.ts`). Absent for a space and a plain view.
+   */
+  construct?: string | undefined;
   /** Aborts when the caller goes away. */
   signal?: AbortSignal;
 }
@@ -173,32 +181,9 @@ export const SPARQL_OUTCOME_ENGINE_FAILED = 'engine_failed';
 
 const XSD_STRING = 'http://www.w3.org/2001/XMLSchema#string';
 const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
-const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object';
-/** The algebra nodes a query form is wrapped in. */
-const WRAPPERS: ReadonlySet<string> = new Set(['from', 'slice', 'distinct', 'reduced', 'orderby']);
-/** The most wrappers a query form is looked for under: a parsed query has a handful. */
-const WRAPPER_DEPTH_MAX = 64;
 /** A UCHAR escape (`\uXXXX`): the code unit in hexadecimal, four digits. */
 const HEX = 16;
 const UCHAR_DIGITS = 4;
-
-/** The form of a parsed query and, for a SELECT, its projected variables in order. */
-export function formOf(algebra: unknown): { form: SparqlForm; vars: string[] } {
-  let node: unknown = algebra;
-  for (let depth = 0; depth < WRAPPER_DEPTH_MAX && isRecord(node); depth++) {
-    const type = node['type'];
-    if (type === 'ask') return { form: 'ask', vars: [] };
-    if (type === 'construct') return { form: 'construct', vars: [] };
-    if (type === 'describe') return { form: 'describe', vars: [] };
-    if (type === 'project') {
-      const vars = Array.isArray(node['variables']) ? node['variables'].filter(isRecord).map(v => String(v['value'])) : [];
-      return { form: 'select', vars };
-    }
-    if (typeof type === 'string' && WRAPPERS.has(type)) { node = node['input']; continue; }
-    break;
-  }
-  return { form: 'select', vars: [] };
-}
 
 /** A protocol parameter that may repeat: absent, one text or several; anything else is null (refused). */
 function texts(v: unknown): string[] | null {
@@ -374,7 +359,10 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
   /** One run of the query over `made`, collected whole up to the bound. */
   async function answerOnce(made: ReturnType<typeof createQuadSource>, deadline: number, maxResultBytes: number): Promise<SparqlAnswer | SparqlAnswerRefusal> {
     if (input.signal?.aborted) throw new CallerGone();
-    result = await runSparql(p.algebra, made, { deadline, ...(input.signal ? { signal: input.signal } : {}) });
+    // A SPARQL view: its CONSTRUCT runs first, over the members as the caller reads them (`made`), and the query reads what it made.
+    const over = input.construct === undefined ? made
+      : constructSource(await constructStatements(input.construct, made, { deadline, maxBytes: maxResultBytes, ...(input.signal ? { signal: input.signal } : {}) }));
+    result = await runSparql(p.algebra, over, { deadline, ...(input.signal ? { signal: input.signal } : {}) });
     const running = result;
     // The engine's own reader ends on the abort too; the answer is not left waiting on it, and the engine is stopped here at once.
     const gone = new Promise<never>((_, reject) => {

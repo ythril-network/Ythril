@@ -25,7 +25,7 @@
 import express, { Router, type NextFunction, type Request, type Response } from 'express';
 import { requireSpaceAuth } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { readSpacesOfRequest, viewReadOfRequest } from '../../spaces/read-scope.js';
+import { readSpacesOfRequest, viewConstructOfRequest, viewReadOfRequest } from '../../spaces/read-scope.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { abortWhenClientGoes, slotCallerKey } from '../../http/read-caller.js';
 import { sendCaughtFailure } from '../send-failure.js';
@@ -133,7 +133,7 @@ async function answer(req: Request, res: Response): Promise<void> {
   if (isSparqlRefusal(params)) { sendRefusal(res, params); return; }
   const token = req.authToken as { id?: string; admin?: boolean; rights?: TokenRights | null } | undefined;
   const input: SparqlQueryInput = {
-    spaceId, spaces: readSpacesOfRequest(req, spaceId), view: viewReadOfRequest(req, spaceId) !== undefined,
+    spaceId, spaces: readSpacesOfRequest(req, spaceId), view: viewReadOfRequest(req, spaceId) !== undefined, construct: viewConstructOfRequest(req, spaceId),
     query: params['query'], limit: params['limit'], defaultGraphUri: params['default-graph-uri'], namedGraphUri: params['named-graph-uri'],
     accept: req.headers['accept'], caller: token, callerKey: slotCallerKey(req), fingerprintOf: schemaFingerprintOf, signal: abortWhenClientGoes(res),
   };

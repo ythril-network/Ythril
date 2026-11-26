@@ -11,7 +11,7 @@ import { isSpaceAdminFor, administersAnySpace } from './editor-scope.js';
 import type { OidcTokenRecord } from './oidc.js';
 import { reachesSpace, reachableSpaceIds } from './space-reach.js';
 import { isRetiredSpaceId, unknownSpaceAnswer } from '../spaces/unknown-space.js';
-import { isViewId, resolveOwnView, viewOwnerOf, viewReadMembers } from '../config/views.js';
+import { constructViewRefusal, isViewId, resolveOwnView, viewOwnerOf, viewReadMembers } from '../config/views.js';
 import { spacesForBodyScopedRequest } from './body-scoped-space.js';
 import type { SpaceArea } from '../config/rights-shape.js';
 import { takesAView, type Rung } from './space-rights.js';
@@ -465,6 +465,12 @@ function judgeSpaceParam(
   const view = resolveOwnView(owner, spaceId, cfg);
   if (!view) return 'space';
   const routePath = registeredPathOf(req);
+  // A SPARQL view (Q-762) is read by the RDF doors alone: every other door, a write included, refuses it with its reason.
+  const construct = constructViewRefusal(view, { method: req.method, path: routePath });
+  if (construct) {
+    res.status(construct.status).json(construct.body);
+    return 'refused';
+  }
   const verdict = rungFor(req.method, routePath);
   const readsData = verdict.kind === 'requires' && verdict.scope === 'path' && takesAView(verdict);
   const rights = (record as { rights?: TokenRights }).rights;
@@ -474,7 +480,7 @@ function judgeSpaceParam(
     return 'refused';
   }
   const spaces = viewReadMembers({ rights, view, area: verdict.area, needs: verdict.needs, peerId: peerBoundTo(record as { peerInstanceId?: unknown }) });
-  req.viewRead = { id: spaceId, spaces };
+  req.viewRead = { id: spaceId, spaces, ...(view.sparql ? { construct: view.sparql.query } : {}) };
   announceViewMembers(res, spaces);
   return 'view';
 }
@@ -683,6 +689,12 @@ export function requireBodyScopedSpace(area: SpaceArea, needs: Exclude<Rung, 'no
       const sid = raw.trim();
       if (!sid) continue;
       const view = viewsTaken && isViewId(sid) ? resolveOwnView(owner, sid, cfg) : null;
+      // A SPARQL view (Q-762): no body-scoped route reads one (`constructViewRefusal`).
+      const construct = view ? constructViewRefusal(view, { method: req.method, path: registeredPathOf(req) }) : null;
+      if (construct) {
+        res.status(construct.status).json(construct.body);
+        return;
+      }
       if (view) {
         ownViews.set(sid, viewReadMembers({ rights, view, area, needs, peerId }));
         continue;

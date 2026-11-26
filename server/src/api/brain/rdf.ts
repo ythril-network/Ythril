@@ -31,7 +31,7 @@
 import { Router, type Request, type Response } from 'express';
 import { requireSpaceAuth } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { viewReadOfRequest } from '../../spaces/read-scope.js';
+import { viewConstructOfRequest, viewReadOfRequest } from '../../spaces/read-scope.js';
 import {
   rdfExportAct, rdfExportEndingWaitMs, rdfExportHeadAct, rdfExportIdleMs, rdfExportRate, type MembersLeftOut, type RdfExportPage, type RdfExportRefusal,
   type RdfExportStream,
@@ -77,7 +77,7 @@ rdfExportRouter.get('/spaces/:spaceId/export/rdf', globalRateLimit, requireSpace
   res.setHeader('Vary', EXPORT_VARY);
   res.setHeader('Access-Control-Expose-Headers', EXPOSED);
   const input = {
-    spaceId, viewMembers: viewReadOfRequest(req, spaceId), accept: req.headers['accept'],
+    spaceId, viewMembers: viewReadOfRequest(req, spaceId), viewConstruct: viewConstructOfRequest(req, spaceId), accept: req.headers['accept'],
     params: {
       format: req.query['format'], edgeDetails: req.query['edgeDetails'], after: req.query['after'], limit: req.query['limit'],
       maxChars: req.query['maxChars'], maxBytes: req.query['maxBytes'], maxTokens: req.query['maxTokens'],

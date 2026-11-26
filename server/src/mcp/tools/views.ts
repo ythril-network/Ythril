@@ -17,6 +17,7 @@ import {
 import { VIEW_OPERATIONS } from '../../audit/middleware.js';
 import { mfaStepUpRefusalFor } from '../../auth/mfa-asked.js';
 import { ToolRefusal } from '../../util/errors.js';
+import { VIEW_SPARQL_MAX_BYTES } from '../../rdf/view-construct.js';
 
 const json = (data: Record<string, unknown>, text?: string): ToolResult => ({
   content: [{ type: 'text' as const, text: text ?? JSON.stringify(data) }],
@@ -50,6 +51,19 @@ async function answering(fn: () => ToolResult | Promise<ToolResult>): Promise<To
     throw err;
   }
 }
+
+const sparqlProp = {
+  type: 'object' as const,
+  properties: {
+    query: { type: 'string' as const, maxLength: VIEW_SPARQL_MAX_BYTES, description: 'The SPARQL CONSTRUCT that defines the view, at most 16 KB of UTF-8.' },
+  },
+  required: ['query'],
+  additionalProperties: false,
+  description: 'Optional: define the view by a SPARQL CONSTRUCT over its members. The RDF doors (export_rdf, sparql_query and the view\'s own Linked Data '
+    + 'address) then read the view as the CONSTRUCT\'s statements over the members as you read them, at most 50 000 statements '
+    + '(more is refused with view_construct_too_large, never cut); every other tool refuses such a view (view_is_construct). Only a CONSTRUCT is '
+    + 'saved. null (on view_update) makes it a plain view again.',
+};
 
 const viewProp = { type: 'string' as const, description: 'The view\'s id, "@" and its name (for example "@team"). Only your own views are named.' };
 const membersProp = {
@@ -85,12 +99,13 @@ export const view_createTool: ToolHandler = {
     properties: {
       name: { type: 'string', description: 'The view\'s name, 1-40 characters of a-z, 0-9 and hyphen.' },
       members: membersProp,
+      sparql: sparqlProp,
     },
     required: ['name', 'members'],
     additionalProperties: false,
   }),
   handle: async (ctx) => answering(async () => {
-    const made = createView(actorOf(ctx), { name: ctx.args['name'], members: ctx.args['members'] });
+    const made = await createView(actorOf(ctx), { name: ctx.args['name'], members: ctx.args['members'], sparql: ctx.args['sparql'] });
     await auditViewAct(doorOf(ctx), VIEW_OPERATIONS.created, made);
     return json({ view: made.view }, `Created personal view ${made.view.id}.\n${JSON.stringify(made.view)}`);
   }),
@@ -99,7 +114,7 @@ export const view_createTool: ToolHandler = {
 export const view_updateTool: ToolHandler = {
   name: 'view_update',
   ownerScoped: true,
-  description: 'Rename and/or change the members of one of YOUR personal views. Send only what changes.',
+  description: 'Rename, change the members of, or set or remove the SPARQL CONSTRUCT of one of YOUR personal views. Send only what changes.',
   // As `view_create`: the act's coded refusals are the answer on both doors, not the validator's words (b100 row P).
   skipSchemaValidation: true,
   inputSchema: () => ({
@@ -108,12 +123,13 @@ export const view_updateTool: ToolHandler = {
       view: viewProp,
       name: { type: 'string', description: 'The new name, 1-40 characters of a-z, 0-9 and hyphen.' },
       members: membersProp,
+      sparql: sparqlProp,
     },
     required: ['view'],
     additionalProperties: false,
   }),
   handle: async (ctx) => answering(async () => {
-    const changed = updateView(actorOf(ctx), String(ctx.args['view'] ?? ''), { name: ctx.args['name'], members: ctx.args['members'] });
+    const changed = await updateView(actorOf(ctx), String(ctx.args['view'] ?? ''), { name: ctx.args['name'], members: ctx.args['members'], sparql: ctx.args['sparql'] });
     await auditViewAct(doorOf(ctx), VIEW_OPERATIONS.updated, changed);
     return json({ view: changed.view }, `Updated personal view ${changed.view.id}.\n${JSON.stringify(changed.view)}`);
   }),

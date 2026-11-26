@@ -3,7 +3,7 @@
  * (orphans, claim, purge) and migration report. Each is one capability whose MCP twin is `view_*` (`mcp/tools/views.ts`); the rules live in
  * `spaces/view-acts.ts` and are refused there, so this file only translates a request into an act and an answer.
  *
- * - `GET /api/views`, `POST /api/views {name, members}` - any token, read-only ones included: a view is a lens over what its owner
+ * - `GET /api/views`, `POST /api/views {name, members, sparql?}` - any token, read-only ones included: a view is a lens over what its owner
  *   already reads, and it writes nowhere. No `denyReadOnly`, and no area: the rights table calls these owner-scoped.
  * - `GET|PATCH|DELETE /api/views/:id` - the owner's only; another token's view is `view_not_found`, as an id that never existed.
  * - `POST /api/views/:id/copy {toTokenId}` - the guard and the second factor of managing that token.
@@ -66,8 +66,8 @@ viewsRouter.get('/', globalRateLimit, requireAuth, act((req, res) => {
 }));
 
 viewsRouter.post('/', authRateLimit, requireAuth, act(async (req, res) => {
-  const { name, members } = bodyOf(req);
-  const made = createView(actorOf(req), { name, members });
+  const { name, members, sparql } = bodyOf(req);
+  const made = await createView(actorOf(req), { name, members, sparql });
   await auditViewAct(doorOf(req, '/api/views'), VIEW_OPERATIONS.created, made);
   res.status(201).json({ view: made.view });
 }));
@@ -77,8 +77,8 @@ viewsRouter.get('/:id', globalRateLimit, requireAuth, act((req, res) => {
 }));
 
 viewsRouter.patch('/:id', globalRateLimit, requireAuth, act(async (req, res) => {
-  const { name, members } = bodyOf(req);
-  const changed = updateView(actorOf(req), idOf(req), { name, members });
+  const { name, members, sparql } = bodyOf(req);
+  const changed = await updateView(actorOf(req), idOf(req), { name, members, sparql });
   await auditViewAct(doorOf(req, '/api/views/:id'), VIEW_OPERATIONS.updated, changed);
   res.json({ view: changed.view });
 }));

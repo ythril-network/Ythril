@@ -1114,24 +1114,9 @@ export interface Config extends ConfigLimits {
   positionsSince?: string;
 }
 
-/** A personal view as `config.json` holds it. */
-export interface ViewRecord {
-  /** `@<name>`: `@` is not a legal space-id character, so a view and a space never collide. */
-  id: string;
-  /** `^[a-z0-9-]+$`, at most 40; unique per owner, not instance-wide. */
-  name: string;
-  /** `token:<id>`, `oauth:<clientId>` or `oidc:<issuer>#<sub>`. */
-  ownerId: string;
-  /** Concrete space ids, or `['*']` for every space. Never a view id. */
-  members: string[];
-  createdAt: string;
-  /** The pre-6.0 proxy id this view was made from, for idempotence by origin. */
-  migratedFrom?: string;
-  /** `<owner key>|<source view id>` of the view this one is a copy of, so a repeated copy to one receiver refreshes it instead of making `-N`. */
-  copiedFrom?: string;
-  /** When the last token of the owner went without the views being deleted (a cap eviction), so the grace sweep counts from there. */
-  ownerLeftAt?: string;
-}
+/** A personal view as `config.json` holds it (`view-record.ts`). */
+import type { ViewRecord } from './view-record.js';
+export type { ViewRecord };
 
 /** A migrated proxy definition with no owner yet (see `Config.unclaimedViews`). */
 export interface UnclaimedViewRecord {

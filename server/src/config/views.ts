@@ -255,6 +255,11 @@ export async function sweepOwnerlessViews(opts: { now?: number } = {}): Promise<
  * Every refusal the views doors answer, with its status and its code. The client has one sentence per code in each language
  * (`views.refusal.<code>`), so a code spelled anywhere else is a refusal that reaches a user as a raw code.
  */
+/** A view's `sparql` that is not saved (Q-762): the request is wrong. */
+const VIEW_SPARQL_REFUSED_STATUS = 400;
+/** A SPARQL view named at a door that does not read one (Q-762): the view is in a state that door cannot take. */
+const VIEW_IS_CONSTRUCT_STATUS = 409;
+
 export const VIEW_REFUSALS = Object.freeze({
   nameInvalid: { status: 400, code: 'view_name_invalid' },
   nameTaken: { status: 409, code: 'view_name_taken' },
@@ -274,7 +279,37 @@ export const VIEW_REFUSALS = Object.freeze({
   unclaimedUnknown: { status: 404, code: 'view_claim_unknown' },
   retiredUnknown: { status: 404, code: 'retired_id_unknown' },
   purgeConfirmOidc: { status: 409, code: 'retired_purge_unconfirmed' },
+  // Q-762: a view's SPARQL CONSTRUCT, judged at save time (`rdf/view-construct.ts`), and the doors that do not read one.
+  sparqlInvalid: { status: VIEW_SPARQL_REFUSED_STATUS, code: 'view_sparql_invalid' },
+  sparqlNotConstruct: { status: VIEW_SPARQL_REFUSED_STATUS, code: 'view_sparql_not_construct' },
+  sparqlTooLarge: { status: VIEW_SPARQL_REFUSED_STATUS, code: 'view_sparql_too_large' },
+  isConstruct: { status: VIEW_IS_CONSTRUCT_STATUS, code: 'view_is_construct' },
 } as const);
+
+/**
+ * The doors that read a SPARQL view (Q-762), by REST route (`METHOD <registered pattern>`) and by tool: the RDF export and the SPARQL query
+ * endpoint. A view's Linked Data address is answered by its own route (`api/linked-data.ts`), which no view guard resolves.
+ */
+export const VIEW_CONSTRUCT_ROUTES: ReadonlySet<string> = new Set([
+  'GET /api/brain/spaces/:spaceId/export/rdf', 'HEAD /api/brain/spaces/:spaceId/export/rdf',
+  'GET /api/brain/spaces/:spaceId/sparql', 'HEAD /api/brain/spaces/:spaceId/sparql', 'POST /api/brain/spaces/:spaceId/sparql',
+]);
+export const VIEW_CONSTRUCT_TOOLS: ReadonlySet<string> = new Set(['export_rdf', 'sparql_query']);
+
+/**
+ * The refusal a door gives the caller's own view, or null when the door may go on (DEC-3: filter, recall and traverse do not read a SPARQL
+ * view). THE rule, asked by every guard that resolves a view - the REST path guard, the body guard and the MCP dispatcher - so no record
+ * door is ever handed the members of a view whose owner defined it by computed statements, and SPARQL Update has nothing to write into.
+ * A plain view is never refused here: every door answers it as before. `door` is the REST route (its method and registered pattern) or
+ * the tool's name.
+ */
+export function constructViewRefusal(view: Pick<ViewRecord, 'id' | 'sparql'>, door: { method: string; path: string } | { tool: string }): ViewRefusal | null {
+  if (!view.sparql) return null;
+  const reads = 'tool' in door ? VIEW_CONSTRUCT_TOOLS.has(door.tool) : VIEW_CONSTRUCT_ROUTES.has(`${door.method.toUpperCase()} ${door.path}`);
+  if (reads) return null;
+  return new ViewRefusal('isConstruct', `'${view.id}' is defined by a SPARQL CONSTRUCT, so only the RDF doors read it (the RDF export, the SPARQL `
+    + 'query endpoint and its Linked Data address) and nothing writes to it. Read or write its member spaces here, or use a plain view');
+}
 
 export type ViewRefusalKind = keyof typeof VIEW_REFUSALS;
 

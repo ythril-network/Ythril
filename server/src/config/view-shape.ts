@@ -77,6 +77,9 @@ export function validateViews(views: unknown): void {
     }
     if (!Array.isArray(v?.members) || v.members.some(m => typeof m !== 'string')) problems.push(`${where}: members must be a list of space ids`);
     else for (const m of v.members) if (isViewId(m)) problems.push(`${where}: member '${m}' is itself a view; a view lists spaces only`);
+    if (v?.sparql !== undefined && (v.sparql === null || typeof v.sparql !== 'object' || typeof v.sparql.query !== 'string')) {
+      problems.push(`${where}: sparql must be { "query": "<a SPARQL CONSTRUCT>" }`);
+    }
   }
   if (problems.length > 0) {
     throw new Error(`config.json: ${problems.length} personal view problem(s): ${problems.slice(0, 5).join('; ')}${problems.length > 5 ? '; ...' : ''}`);
