@@ -129,6 +129,7 @@ test('the meaning goes into an edge\'s description only when the edge has none, 
   assert.equal(descriptionFor({ id: 'e1' }, 'the maker'), 'the maker');
   assert.equal(descriptionFor({ id: 'e1', description: '' }, 'the maker'), 'the maker');
   assert.throws(() => descriptionFor({ id: 'e1', description: 'own text' }, 'the maker'), /already has a description/);
+  assert.equal(descriptionFor({ id: 'e1', description: 'the maker' }, 'the maker'), 'the maker', 'a rerun finds the meaning it wrote');
 });
 
 test('the flag ships only when recall@10 gains at least 3 points and MRR does not fall', () => {
