@@ -46,7 +46,7 @@
  *         type-check. Both modes run the pure test files only; `--static` also skips the client unit tests, the
  *         production build and its budgets, and it is NEVER a push pass: its verdict says so, Q-584.)
  */
-import { execSync, execFile } from 'node:child_process';
+import { execSync, execFileSync, execFile } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { promisify } from 'node:util';
@@ -65,6 +65,7 @@ import { PREFLIGHT_STAGES, SOURCE_GATES, SOURCE_GATE_FILES, BUILT_GATES, createS
 import { readStageCosts, readFileTimes } from './_shared/stage-costs.mjs';
 import { slowFirstUnits } from './_shared/slow-first-units.mjs';
 import { buildPreflightRunPayload, preflightRunIdentity, recordPreflightRun } from './_shared/preflight-run-record.mjs';
+import { changelogBase } from './_shared/changelog-base.mjs';
 
 /**
  * `--static`, and nothing else: an unknown argument is refused rather than ignored, because `--statc` falling through
@@ -227,7 +228,11 @@ stage('unregistered-local-files', async () => {
 // was the failure found half an hour late most often (2026-11-16).
 stage('check-changelog', async () => {
   console.log('\n── CHANGELOG entry for shipped changes ──');
-  try { run('node ./scripts/check-changelog.mjs'); } catch {
+  // A branch on a release line is compared with that line, never main (scripts/_shared/changelog-base.mjs).
+  let trackedUpstream = '';
+  try { trackedUpstream = execFileSync('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { /* no upstream: main */ }
+  const changelogAgainst = changelogBase({ upstream: trackedUpstream, override: process.env.PREFLIGHT_CHANGELOG_BASE ?? '' });
+  try { run(`node ./scripts/check-changelog.mjs ${changelogAgainst}`); } catch {
     failures.push({ name: 'check-changelog', why: 'a file that changes what ships, with no [Unreleased] line' });
   }
 });
