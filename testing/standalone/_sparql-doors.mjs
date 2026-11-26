@@ -122,7 +122,34 @@ export async function openSparqlDoors({ suite, spaces, monitorCommands = false }
   }
   const sparqlMcp = (key, args) => toolCall(key, 'sparql_query', args);
 
-  return { ...doors, seed, path, sparqlRest, sparqlGet, sparqlPost, sparqlMcp, toolCall };
+  /**
+   * An Update (Q-761) on one of its doors, answered alike: `{door, status, code, body, text}`. `rest`: `POST .../sparql/update` with
+   * `application/sparql-update` (or `as: 'form'`, `update=`); `mcp`: the tool `sparql_update` (its status is `refused` or 200, its code read
+   * from the refusal's text); `tool`: `POST /api/sparql_update`.
+   */
+  async function sparqlUpdate(door, key, space, update, { as = 'update', params = {} } = {}) {
+    if (door === 'rest') {
+      const url = `/api/brain/spaces/${encodeURIComponent(space)}/sparql/update`;
+      const r = as === 'form'
+        ? await sparqlRest(key, 'POST', url, { body: new URLSearchParams({ update, ...params }).toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+        : await sparqlRest(key, 'POST', url, { body: update, headers: { 'Content-Type': 'application/sparql-update' } });
+      return { door, status: r.status, code: r.body?.code, body: r.body, text: r.text };
+    }
+    if (door === 'tool') {
+      const r = await fetch(`${doors.server.url}/api/sparql_update`, {
+        method: 'POST', signal: AbortSignal.timeout(120_000),
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ space, update, ...params }),
+      });
+      const text = await r.text();
+      let body = null; try { body = JSON.parse(text); } catch { /* not JSON */ }
+      return { door, status: r.status, code: body?.data?.code ?? body?.code, body: body?.data ?? body, text };
+    }
+    const m = await toolCall(key, 'sparql_update', { space, update, ...params });
+    const code = m.isError ? (/\(([a-z_]+)\)\s*$/m.exec(m.text)?.[1] ?? null) : undefined;
+    return { door, status: m.isError ? 'refused' : 200, code, body: m.structured ?? m.body, text: m.text };
+  }
+
+  return { ...doors, seed, path, sparqlRest, sparqlGet, sparqlPost, sparqlMcp, toolCall, sparqlUpdate };
 }
 
 /** The rows of a SPARQL results JSON body as sorted strings `var=value` per row, for comparing answers. */
