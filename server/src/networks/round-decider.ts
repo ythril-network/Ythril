@@ -29,11 +29,12 @@ export function pubsubDecider(net: NetworkConfig, selfId: string = getConfig().i
 
 /**
  * The round kinds each network type never opens. A club and a pub/sub network admit and remove members directly (`member-acts.ts`, `invite.ts`),
- * so a join or removal round on one can only be a peer's forgery: it is never adopted (`adoptionRefusal`) and, held, never passes (`roundVerdict`).
+ * and a pub/sub network adds a space directly too (`ADD_SPACE_POSITION` in `network-acts.ts`: the publisher adds, the subscribers learn it from the
+ * announcement), so such a round can only be a peer's forgery: it is never adopted (`adoptionRefusal`) and, held, never passes (`roundVerdict`).
  * The record type makes a new network type name its row.
  */
 export const ROUND_KINDS_NEVER_OPENED: Readonly<Record<NetworkType, readonly VoteRoundType[]>> = {
-  pubsub: ['join', 'remove'],
+  pubsub: ['join', 'remove', 'space_addition'],
   club: ['join', 'remove'],
   closed: [],
   democratic: [],

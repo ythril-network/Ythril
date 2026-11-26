@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Changes on upgrade | Action |
 |---|---|
+| A pub/sub subscriber's schema edit answers `200` and stays in its own definitions, not `202 vote_pending`; `targetNetwork` on it is refused `400` | Change the network's schema on the publisher, and upgrade the publisher: an older one still passes a subscriber's round |
 | An RDF import with `schema` set builds the space's schema from the file's classes and shapes and writes it only when the data passes; it needs `schema: write` | None; without `schema` an import is unchanged |
 | A space import (`POST /api/admin/spaces/:spaceId/import`) sent slower than 16 KiB/s over a minute, or silent for a minute, is refused `408`; the caller then waits a minute (`429`, `Retry-After`) | Send a backup over a link faster than 16 KiB/s, without pauses |
 | With `softDeleteFileMeta` off, a deleted, moved or re-keyed file leaves a feed marker (path, deletion time, position; nothing else) for `fileChangeFeedWindowDays` (default 30) | None; set the key to change the window, 0 to purge at the next sweep |
@@ -220,7 +221,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Networks:** on a pub/sub network only the publisher's cast decides a round: a subscriber's yes or veto counts nothing, and the publisher adopts and passes only rounds it opened. Every 6.5.x let one subscriber change the network's schema for every member.
 - **Networks:** a pub/sub subscriber's schema edit lands in its own definitions, opens no round and never reaches the publisher; the publisher's schema outranks it.
-- **Networks:** a join or removal round on a club or pub/sub network is never adopted and never passes: both admit and remove members directly. A club round is still decided by its proposer.
+- **Networks:** a join or removal round on a club or pub/sub network, and a space addition on a pub/sub one, is never adopted and never passes. A club round passes on its proposer's yes: any member's yes passes that member's own round.
+- **Networks:** a pub/sub publisher takes no cast on a round it did not open (`409 round_not_opened_here`); a round a subscriber opened on an older release ends at its deadline.
 - **Networks:** rounds that passed before this release stand. On a publisher, a `passed` outcome on `vote-outcomes` with `yes: 1`, `eligible` above 1 and another member as `subjectLabel` is one; an edit on the publisher puts its schema back.
 - **Security:** a not-found answer (a record id, an entry id, a file path, a backup or library name) quotes what the caller sent cut at 256 characters with the count of what was cut, on REST and MCP; a 100 000-character id is no longer echoed whole.
 

@@ -561,8 +561,10 @@ Regardless of network type:
   yes with no veto, so one member can empty the space everywhere. On `pubsub` only the publisher's cast decides a round
   (`Q-968`): only the publisher's wipe or deletion reaches the subscribers, a subscriber's is its own, and a subscriber's
   schema edit stays on the subscriber. On `closed` and `braintree` every listed member has to agree, and on `democratic`
-  it is a majority. No network type passes a join or removal round of a kind it never opens: a club and a pub/sub
-  network admit and remove members directly, so such a round is a forgery and is refused.
+  it is a majority. No network type passes a round of a kind it never opens: a club and a pub/sub
+  network admit and remove members directly (and a pub/sub network adds spaces directly), so such a round is a forgery
+  and is refused. A pub/sub publisher takes no cast on a round a subscriber opened on an older release
+  (`409 round_not_opened_here`): it ends at its deadline.
 
   > This bullet read *"Force-delete does not exist. There is no mechanism to delete data from another
   > member's instance"*. The mechanism is the wipe vote, and on a club it needs one participant, on pub/sub

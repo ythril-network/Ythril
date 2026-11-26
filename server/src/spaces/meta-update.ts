@@ -633,6 +633,16 @@ export function planSpaceMetaUpdate(input: {
     if (!writeBase) {
       return { ok: false, refusal: { status: 400, body: { error: `Network '${targetNetwork}' does not carry space '${spaceId}'` } } };
     }
+    // Q-968: a pub/sub subscriber proposes nothing to that network (its edit opens no round there, and is the instance's own), so a proposal aimed
+    // at it would fall through to the local write below: merged over the publisher's layer and stored as this instance's own definitions, copying the
+    // publisher's types into them (or, with no layer held, replacing them) and answered "applied". Refused whole, before anything is merged.
+    const target = getConfig().networks.find(n => n.id === targetNetwork);
+    if (target && actsLocallyOn(target)) {
+      return { ok: false, refusal: { status: BAD_BODY, body: {
+        error: `Network '${peerText(target.label, { max: NAME_QUOTED })}' is a pub/sub network this instance subscribes to: its schema layer is the publisher's, so it takes no proposal from here. Edit the space without targetNetwork to change this instance's own definitions.`,
+        code: 'network_layer_is_the_publishers',
+      } } };
+    }
   }
   const base: Partial<SpaceMeta> = writeBase ?? {};
 
@@ -1034,20 +1044,22 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // network's round), so nothing of it may reach the space. Each of them leaves in this ONE destructure, whatever its spelling:
   // `record-ttl-buckets.test.js` holds the RULE (a partial TTL write through `applySpaceMetaUpdate` never clears a bucket it did not name), not this text.
   const {
-    documentExtraction: _rawMode, recordTtlDays: _rawTtl, unknownWriteFields: _rawUnknownWriteFields, convertRecords: _heldOutOfTheSpace, ...storablePatch
+    documentExtraction: _rawMode, recordTtlDays: _rawTtl, unknownWriteFields: _rawUnknownWriteFields, convertRecords: _heldOutOfTheSpace,
+    // The meta is written below from the merged result (as the own definitions or as the space's meta), never from the body's fragment.
+    meta: _fragment, ...storablePatch
   } = patchData;
   // F-39.2: a space in no network has no layer, so its own definitions ARE the edited meta — kept in step, or a stale
   // `ownMeta` would come back the next time a network sends this space a layer. A pub/sub subscriber's edit (Q-968) reaches here too, on a
   // space that holds its publisher's layer: the edit is its own definitions, and the space runs on them laid under every layer, so the
   // publisher's layer outranks the edit and stays in the meta (written as the edit alone, the layer's types would leave the space).
   const held = getConfig().spaces.find(s => s.id === id);
-  const layered = held?.ownMeta !== undefined && mergedMeta !== undefined && layersFor(getConfig(), id).length > 0;
+  const layeredEdit = held?.ownMeta !== undefined && layersFor(getConfig(), id).length > 0 ? mergedMeta : undefined;
+  const layered = layeredEdit !== undefined;
   // Layered: the one writer of own definitions sets them and rebuilds the meta from them and the layers; the rest of the patch follows.
-  if (layered && !commitOwnMetaEdit(id, () => mergedMeta!)) return { outcome: 'not_found' };
+  if (layeredEdit !== undefined && !commitOwnMetaEdit(id, () => layeredEdit)) return { outcome: 'not_found' };
   if (!layered && held?.ownMeta && mergedMeta !== undefined) held.ownMeta = replicatedMetaOf(mergedMeta) as SpaceMeta;
-  const { meta: _sentMeta, ...rest } = storablePatch;
   const updated = updateSpace(id, {
-    ...rest,
+    ...storablePatch,
     ...(layered ? {} : { meta: mergedMeta }),
     ...(plan.hasDocExtraction ? { documentExtraction: plan.documentExtraction } : {}),
   });
