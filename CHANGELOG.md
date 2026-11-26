@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.5.7] — 2026-11-26
+
+**A security patch: on a pub/sub network only the publisher decides a network vote, so a subscriber can no longer change the network's schema or remove a member for everyone.**
+
 | Changes on upgrade | Action |
 |---|---|
 | A pub/sub subscriber's schema edit answers `200` and stays in its own definitions, not `202 vote_pending`; `targetNetwork` on it is refused `400` | Change the network's schema on the publisher, and upgrade the publisher: an older one still passes a subscriber's round |
+
+### Changed
+
+- **Docs:** changed: network types, the sync protocol, the spaces, schema and networks API pages, the settings guide and decision 12.
 
 ### Security
 
