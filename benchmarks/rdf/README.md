@@ -175,11 +175,46 @@ section above (the first valid-data run judged them as one whole-record `valid: 
 These queries are not comparable and say why; a variant rule that makes the data representable is for the owner of the
 benchmark.
 
+## A label's meaning in the edge text (Q-763)
+
+`embed-meaning.mjs` asks whether appending a label's meaning to an edge's embedding text improves edge recall. It runs on
+the space `load.mjs ythril --size 1000` leaves, on the same scratch instance and model, with a reembed between the arms:
+
+- **Arm A** is the text `edgeEmbedText` builds today (`server/src/brain/embed-text.ts`).
+- **Arm B** appends the label's meaning: the `description` of the label's declaration in the space schema
+  (`meta.typeSchemas.edge[<label>].description`), else the `rdfs:comment` the data states on the label's vocabulary term
+  (the declaration's `iri`). The RDF import gives the six BSBM labels an `iri` and no description, and the data states no
+  comment on a BSBM predicate, so `prepare` writes a pinned meaning per label (`MEANINGS`) into each declaration. Arm B
+  needs no server change: `meaning` sets each edge's description to its label's meaning (BSBM edges have no description,
+  tags, type or properties, so `edgeEmbedText` then ends with exactly the meaning), reembeds the edges, and checks a sample
+  of stored texts against arm A's text plus the meaning.
+- **Only edges are embedded.** `prepare` suppresses embeddings in the space and releases each edge label, since every
+  query asks for edges only (`types: ['edge']`).
+- **Queries**: fixed templates per label (`TEMPLATES`) that leave the label's words out (a template holding one is
+  refused), filled with the endpoints' names; an edge is asked about only when the filled slots name it alone among its
+  label's edges, so the target edge is the one relevant answer. Per seed, about 200 queries: the same number per label,
+  drawn by a seeded generator. Their sha256 is recorded per seed, and arm B is refused unless it asks arm A's queries.
+- **Metrics**: recall@10 and MRR@10 from `POST /api/brain/recall` (`topK: 10`, hybrid vector and lexical ranking), per
+  arm and seed (1, 2, 3), and their means. The flag `embedVocabularyMeaning` ships only when arm B gains at least 3
+  points of recall@10 and its MRR does not fall.
+
+```text
+node benchmarks/rdf/embed-meaning.mjs prepare --size 1000
+node benchmarks/rdf/embed-meaning.mjs arm --arm A --size 1000
+node benchmarks/rdf/embed-meaning.mjs meaning --size 1000
+node benchmarks/rdf/embed-meaning.mjs arm --arm B --size 1000
+node benchmarks/rdf/embed-meaning.mjs report --size 1000
+```
+
+Everything goes to `<work>/embed-meaning/`: each arm's record, the queries with their ranks per seed, and the results
+file of `report`. The meanings and the templates were written by one author, which can favour arm B; a template never
+holds the label's words, but the entity names can (`Review17`).
+
 ## Tests
 
 `stats`, `params`, `queries`, `result-record`, `prepare`, `compare`, `ythril` (the refusal wording), `ythril-params`,
-`chunk`, `answer-rows`, `validity`, `typecap`, `comparability`, `query-shape`, `not-taken`, `sparql-limits` and
-`embed-wait` have `node:test` files in `testing/standalone/bsbm-harness-<module>.test.js`, so the standalone runner (and the
+`chunk`, `answer-rows`, `validity`, `typecap`, `comparability`, `query-shape`, `not-taken`, `sparql-limits`,
+`embed-wait` and `embed-meaning` (its pure parts) have `node:test` files in `testing/standalone/bsbm-harness-<module>.test.js`, so the standalone runner (and the
 pure standalone part of CI) runs them with the repository's tests, and no workflow or script names them. Run one in a container, not on
 the host, with `node_modules` of an `npm ci` (for `n3`) at the root of what is mounted:
 
@@ -197,6 +232,7 @@ docker run --rm -v <checkout>:/w:ro -w /w node:24 node --test testing/standalone
 | `load.mjs` | `oxigraph-up/down`, `ythril-up/down`, `ythril` |
 | `run.mjs` | runs the queries, maps Ythril's parameters, judges validity, writes the record and the table |
 | `compare.mjs` | two records side by side, the queries more than 10x slower marked, invalid records refused |
+| `embed-meaning.mjs` | Q-763: edge recall with and without the label's meaning in the embedding text (see [A label's meaning in the edge text](#a-labels-meaning-in-the-edge-text-q-763)) |
 | `env.mjs`, `oxigraph.mjs`, `ythril.mjs`, `unzip.mjs` | plumbing: booked docker, the two engines, a zip reader |
 | `comparability.mjs`, `query-shape.mjs`, `not-taken.mjs` | the per-query judge, what a query's text needs, and the predicates the import does not keep (counted) |
 | `sparql-limits.mjs`, `embed-wait.mjs` | the instance's SPARQL limits (read, raised within the server's ceilings) and the bounded wait for the embed queue |
