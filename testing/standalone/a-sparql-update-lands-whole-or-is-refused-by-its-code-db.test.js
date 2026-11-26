@@ -142,7 +142,16 @@ describe('a SPARQL Update lands whole through the write rules, or is refused by 
         assert.equal(a.code, 'sparql_update_refused', fmt(a));
         if (door !== 'mcp') assert.equal(a.status, 422, fmt(a));
         assert.ok(a.text.includes('e2'), `the refusal does not name the statement's record: ${fmt(a)}`);
-        assert.ok(a.text.includes('age'), `the refusal does not name the rule's field: ${fmt(a)}`);
+        // The rule that refused is its code on the statement's predicate (`datatype-refused` on `...person#age`), not any text that holds "age"
+        // (the old assertion passed on the word `message`): B7.
+        assert.ok(a.text.includes('datatype-refused'), `the refusal does not name the rule: ${fmt(a)}`);
+        assert.ok(a.text.includes('person#age)'), `the refusal does not name the statement's predicate: ${fmt(a)}`);
+        if (door !== 'mcp') {
+          const named = (a.body?.reasons ?? []).find(r => r.code === 'datatype-refused');
+          assert.equal(named?.statements?.[0]?.predicate, `${vocab(STRICT, 'entity/person#age')}`, `the reason does not carry the predicate: ${fmt(a)}`);
+          assert.match(named?.statements?.[0]?.object ?? '', /literal of 3 characters$/, `the reason does not carry the value as its kind and length: ${fmt(a)}`);
+        }
+        assert.ok(!a.text.includes('"old"'), `the refusal sends the caller's literal back: ${fmt(a)}`);
         assert.equal((await entities(STRICT).findOne({ _id: 'e1' })).name, 'Ada', 'a valid statement of the refused Update landed');
       });
     });
