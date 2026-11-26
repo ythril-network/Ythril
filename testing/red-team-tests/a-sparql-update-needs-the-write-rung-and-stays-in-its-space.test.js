@@ -19,6 +19,7 @@ import { ownTokens } from '../_shared/own-token.mjs';
 const own = ownTokens();
 const RUN = Date.now();
 const S = `rt-spu-${RUN}`;
+const OTHER = `rt-spu-w-${RUN}`;
 const BASE = `https://${S}.example.org/ld/${S}/`;
 const NICK = `${BASE}vocab/entity/person#nick`;
 const Y = 'https://w3id.org/ythril/ns#';
@@ -65,8 +66,14 @@ describe('a SPARQL Update needs the write rung and stays in its space', () => {
     const f = await post(INSTANCES.a, admin, '/api/write_file', { space: S, path: 'secret/plan.txt', content: 'secret' });
     assert.ok(f.status < 300, `write a file: ${f.status} ${JSON.stringify(f.body)}`);
     readOnly = await mintWith('rt-spu-read', legacyRights({ spaces: [S], readOnly: true }));
-    // Not read-only: a per-space rung of `read`. `denyReadOnly` never sees it, so only the route's and the tool's rights rows refuse it (B9).
-    readRung = await mintWith('rt-spu-readrung', { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [S]: { knowledge: 'read', files: 'none', schema: 'none', dataQuality: 'none', networks: 'none' } } });
+    // Not read-only: a rung of `read` in S and of `write` in another space, so the token can write somewhere. `denyReadOnly` and the hidden
+    // tool list pass it, and only the route's and the tool's rights rows refuse it in S (B9). A token with no write rung anywhere is read-only by derivation.
+    const sp2 = await post(INSTANCES.a, admin, '/api/spaces', { id: OTHER, label: OTHER });
+    assert.equal(sp2.status, 201, JSON.stringify(sp2.body));
+    readRung = await mintWith('rt-spu-readrung', { instanceAdmin: false, createSpaces: false, floor: null, perSpace: {
+      [S]: { knowledge: 'read', files: 'none', schema: 'none', dataQuality: 'none', networks: 'none' },
+      [OTHER]: { knowledge: 'write', files: 'none', schema: 'none', dataQuality: 'none', networks: 'none' },
+    } });
     noFiles = await mintWith('rt-spu-nofiles', { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [S]: { knowledge: 'write', files: 'none', schema: 'none', dataQuality: 'none', networks: 'none' } } });
     const v = await post(INSTANCES.a, admin, '/api/views', { name: `rtspu${RUN}`, members: [S] });
     assert.ok(v.status < 300, `view: ${v.status} ${JSON.stringify(v.body)}`);
@@ -77,6 +84,7 @@ describe('a SPARQL Update needs the write rung and stays in its space', () => {
     if (viewId) await del(INSTANCES.a, admin, `/api/views/${encodeURIComponent(viewId)}`).catch(() => {});
     for (const id of tokenIds) if (id) await del(INSTANCES.a, admin, `/api/tokens/${id}`).catch(() => {});
     await del(INSTANCES.a, admin, `/api/spaces/${S}`).catch(() => {});
+    await del(INSTANCES.a, admin, `/api/spaces/${OTHER}`).catch(() => {});
   });
 
   const write = () => `DELETE { ?s <${NICK}> ?v } INSERT { ?s <${NICK}> "pwned" } WHERE { ?s <${NICK}> ?v }`;
