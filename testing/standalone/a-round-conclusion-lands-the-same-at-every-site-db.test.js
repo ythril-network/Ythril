@@ -43,7 +43,7 @@ import { quiescent } from './_quiescence.mjs';
 import { resetRunnerForTest } from './_space-act-harness.mjs';
 import { networkOf, boot, seedFacts, factCount, doors, databaseTakesCollections } from './_round-open-fixtures.mjs';
 import {
-  CANNOT_PASS_A_ROUND, AFTER_A_VOTE, AFTER_AT_OPEN, declaredUnion, settleVocabulary, driverFor, bootCell, settleCell,
+  CANNOT_PASS_A_ROUND, NEVER_PASSES, cellNeverPasses, AFTER_A_VOTE, AFTER_AT_OPEN, declaredUnion, settleVocabulary, driverFor, bootCell, settleCell,
 } from './_settle-matrix.mjs';
 
 const dir = tempInstanceDir('ythril-settle-matrix-');
@@ -121,9 +121,18 @@ describe('a round that concludes as passed lands the same by every via, and acts
     assert.deepEqual(built.requestVias, requestVias);
   });
 
+  it('each cell left out names a network type and round kinds the source declares, with its reason', () => {
+    for (const [netType, { kinds, why }] of Object.entries(NEVER_PASSES)) {
+      assert.ok(networkTypes.includes(netType), `NEVER_PASSES names '${netType}', which is not a NetworkType`);
+      for (const k of kinds) assert.ok(roundTypes.includes(k), `NEVER_PASSES names '${k}', which is not a VoteRoundType`);
+      assert.ok(typeof why === 'string' && why.length > 10, `NEVER_PASSES.${netType} gives no reason`);
+    }
+  });
+
   for (const via of vias) {
     for (const roundType of roundTypes) {
       for (const netType of networkTypes) {
+        if (cellNeverPasses(roundType, netType)) continue;
         it(`${via}: a ${roundType} round on a ${netType} network`, async () => {
           const world = await bootCell(dir, via, roundType, netType, peer);
           await mongo.col('notes_facts').deleteMany({});
@@ -148,8 +157,10 @@ describe('a round that concludes as passed lands the same by every via, and acts
   }
 
   it('every cell ran, and the product of the derived sets is no smaller than the product of the floors', () => {
-    assert.equal(cells, vias.length * roundTypes.length * networkTypes.length, 'a loop that matched nothing, or part of the product, would pass');
-    assert.ok(cells >= FLOOR_VIAS.length * FLOOR_ROUND_TYPES * FLOOR_NETWORK_TYPES, `only ${cells} cell(s) ran`);
+    const leftOut = Object.values(NEVER_PASSES).reduce((n, { kinds }) => n + kinds.length, 0);
+    assert.equal(cells, vias.length * (roundTypes.length * networkTypes.length - leftOut), 'a loop that matched nothing, or part of the product, would pass');
+    // The floor leaves out the same never-passing cells (Q-968): on this line's six round kinds, four vias run 4 x (30 - 5) cells.
+    assert.ok(cells >= FLOOR_VIAS.length * (FLOOR_ROUND_TYPES * FLOOR_NETWORK_TYPES - leftOut), `only ${cells} cell(s) ran`);
   });
 });
 
