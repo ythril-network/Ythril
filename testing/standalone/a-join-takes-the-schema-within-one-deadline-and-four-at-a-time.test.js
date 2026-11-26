@@ -74,4 +74,16 @@ describe('the join\'s schema fetches', { skip }, () => {
     assert.ok(peak > 1, 'the fetches ran one after another');
     assert.ok(peak <= 4, `${peak} fetches were in flight at once`);
   });
+
+  it('say the refusals of the whole join in one log line, not one per space', async () => {
+    mode = 'refuse'; asked.clear();
+    const { log } = await import('../../server/dist/util/log.js');
+    const lines = [];
+    const orig = log.warn;
+    log.warn = (...a) => { lines.push(a.join(' ')); };
+    try { await run(12, 'agg', {}); } finally { log.warn = orig; }
+    assert.equal(asked.size, 12, 'a space was never asked, so the lines below prove nothing');
+    assert.equal(lines.length, 1, `a join of 12 refused spaces wrote ${lines.length} warnings: ${lines.join(' | ')}`);
+    assert.match(lines[0], /12 of 12/, 'the one line does not say how many spaces were refused');
+  });
 });
