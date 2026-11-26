@@ -31,6 +31,8 @@ import { elapse } from '../_shared/sleep.mjs';
 const dir = tempInstance('ythril-pubsub-schema-local-');
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const str = { type: 'string' };
+/** The pub/sub network's id, a real one: the body schema reads `targetNetwork` as a UUID, so a made-up id is refused for its shape and proves nothing about the network. */
+const NET = 'bbbbbbbb-0000-4000-8000-00000000f1f1';
 /** The publisher's layer for `notes`: one type, `Published`, whose `title` is a string. */
 const LAYER = { typeSchemas: { entity: { Published: { propertySchemas: { title: str } } } } };
 
@@ -47,7 +49,7 @@ describe('pub/sub: a subscriber\'s schema edit stays local', { skip }, () => {
 
   /** SELF subscribes to M1 (its publisher, pulled from) and holds the publisher's layer for `notes`. */
   const subscriberNet = () => {
-    const net = networkOf('pubsub', [M1], { extra: { origin: 'joined', schemaLayers: { notes: structuredClone(LAYER) } }, memberExtra: { direction: 'pull' } });
+    const net = networkOf('pubsub', [M1], { id: NET, extra: { origin: 'joined', schemaLayers: { notes: structuredClone(LAYER) } }, memberExtra: { direction: 'pull' } });
     net.members[0].url = publisher.url;
     return net;
   };
@@ -79,7 +81,7 @@ describe('pub/sub: a subscriber\'s schema edit stays local', { skip }, () => {
     const res = await patchMeta({ meta: { typeSchemas: { entity: { Mine: { propertySchemas: { note: str } } } } } });
     assert.equal(res.code, 200, `${res.code} ${JSON.stringify(res.body)?.slice(0, 300)}`);
     assert.notEqual(res.body?.status, 'vote_pending', 'a subscriber\'s edit was put to the network');
-    assert.deepEqual(roundsOf(loader, 'net-1', 'meta_change').map(r => r.roundId), [], 'a subscriber opened a schema round on the pub/sub network');
+    assert.deepEqual(roundsOf(loader, NET, 'meta_change').map(r => r.roundId), [], 'a subscriber opened a schema round on the pub/sub network');
     const space = spaceOf(loader);
     assert.ok(space.ownMeta?.typeSchemas?.entity?.Mine, `the edit is not in the own definitions: ${JSON.stringify(space.ownMeta)}`);
     assert.equal(space.ownMeta?.typeSchemas?.entity?.Published, undefined, 'the publisher\'s type was copied into the subscriber\'s own definitions');
@@ -95,7 +97,7 @@ describe('pub/sub: a subscriber\'s schema edit stays local', { skip }, () => {
     const out = await schemaUpdateTool({ typeSchemas: { entity: { ByTool: { propertySchemas: { note: str } } } } });
     assert.equal(out.isError, false, out.text);
     assert.ok(!/vote_pending/.test(out.text), `the tool answered a vote: ${out.text.slice(0, 300)}`);
-    assert.deepEqual(roundsOf(loader, 'net-1', 'meta_change').map(r => r.roundId), [], 'schema_update opened a schema round on the pub/sub network');
+    assert.deepEqual(roundsOf(loader, NET, 'meta_change').map(r => r.roundId), [], 'schema_update opened a schema round on the pub/sub network');
     assert.ok(spaceOf(loader).ownMeta?.typeSchemas?.entity?.ByTool, 'the edit is not in the own definitions');
   });
 
@@ -103,7 +105,7 @@ describe('pub/sub: a subscriber\'s schema edit stays local', { skip }, () => {
     const loader = await bootWith([subscriberNet()]);
     const res = await patchMeta({ meta: { typeSchemas: { entity: { Published: { propertySchemas: { title: { type: 'number' } } } } } } });
     assert.equal(res.code, 200, `${res.code} ${JSON.stringify(res.body)?.slice(0, 300)}`);
-    assert.deepEqual(roundsOf(loader, 'net-1', 'meta_change').map(r => r.roundId), []);
+    assert.deepEqual(roundsOf(loader, NET, 'meta_change').map(r => r.roundId), []);
     assert.equal(spaceOf(loader).meta?.typeSchemas?.entity?.Published?.propertySchemas?.title?.type, 'string', 'the subscriber\'s edit outranked the publisher\'s layer');
   });
 
@@ -113,16 +115,45 @@ describe('pub/sub: a subscriber\'s schema edit stays local', { skip }, () => {
     const loader = await bootWith([subscriberNet(), clubNet]);
     const res = await patchMeta({ meta: { typeSchemas: { entity: { Shared: { propertySchemas: { note: str } } } } } });
     assert.ok(res.code < 300, `${res.code} ${JSON.stringify(res.body)?.slice(0, 300)}`);
-    assert.deepEqual(roundsOf(loader, 'net-1', 'meta_change').map(r => r.roundId), [], 'the pub/sub network got a schema round');
+    assert.deepEqual(roundsOf(loader, NET, 'meta_change').map(r => r.roundId), [], 'the pub/sub network got a schema round');
     assert.equal(roundsOf(loader, 'club-1', 'meta_change').length, 1, 'the club got no schema round: the twin that shows a round would be seen');
   });
 
-  it('a proposal to the pub/sub network\'s own layer is refused: that layer is the publisher\'s', async () => {
+  /** The refusal each case below asserts: that network's layer is the publisher's, so the proposal is refused whole before anything is merged or stored. */
+  const REFUSED = 'network_layer_is_the_publishers';
+
+  it('a proposal to the pub/sub network\'s own layer is refused, the publisher\'s layer held: nothing is copied into the own definitions', async () => {
     const loader = await bootWith([subscriberNet()]);
-    const res = await patchMeta({ meta: { typeSchemas: { entity: { Forged: { propertySchemas: { note: str } } } } }, targetNetwork: 'net-1' });
-    assert.ok(res.code >= 400 && res.code < 500, `a subscriber's proposal to the publisher's layer answered ${res.code} ${JSON.stringify(res.body)?.slice(0, 300)}`);
-    assert.deepEqual(roundsOf(loader, 'net-1', 'meta_change').map(r => r.roundId), []);
+    const before = structuredClone(spaceOf(loader).ownMeta ?? null);
+    const res = await patchMeta({ meta: { typeSchemas: { entity: { Forged: { propertySchemas: { note: str } } } } }, targetNetwork: NET });
+    assert.equal(res.code, 400, `a subscriber's proposal to the publisher's layer answered ${res.code} ${JSON.stringify(res.body)?.slice(0, 300)}`);
+    assert.equal(res.body?.code, REFUSED, JSON.stringify(res.body)?.slice(0, 300));
+    assert.deepEqual(roundsOf(loader, NET, 'meta_change').map(r => r.roundId), []);
     assert.equal(spaceOf(loader).meta?.typeSchemas?.entity?.Forged, undefined, 'the refused proposal landed');
+    assert.deepEqual(spaceOf(loader).ownMeta ?? null, before, 'the refused proposal changed the own definitions (the publisher\'s layer was copied into them)');
     assert.deepEqual(loader.getConfig().networks[0].schemaLayers?.notes, LAYER);
+  });
+
+  it('the same with no layer held yet: the own schema is not wiped, nothing lands', async () => {
+    const net = subscriberNet();
+    delete net.schemaLayers;
+    const loader = await boot(dir, { spaces: ['notes'], networks: [net] });
+    const patched = await patchMeta({ meta: { typeSchemas: { entity: { Mine: { propertySchemas: { note: str } } } } } });
+    assert.equal(patched.code, 200, `precondition: ${patched.code} ${JSON.stringify(patched.body)?.slice(0, 300)}`);
+    assert.ok(spaceOf(loader).meta?.typeSchemas?.entity?.Mine, 'precondition: the own type is stored');
+    const res = await patchMeta({ meta: { typeSchemas: { entity: { Forged: { propertySchemas: { note: str } } } } }, typeSchemasMode: 'replace', targetNetwork: NET });
+    assert.equal(res.code, 400, `${res.code} ${JSON.stringify(res.body)?.slice(0, 300)}`);
+    assert.equal(res.body?.code, REFUSED, JSON.stringify(res.body)?.slice(0, 300));
+    assert.deepEqual(roundsOf(loader, NET, 'meta_change').map(r => r.roundId), []);
+    assert.ok(spaceOf(loader).meta?.typeSchemas?.entity?.Mine, 'a refused proposal wiped the subscriber\'s own schema');
+    assert.equal(spaceOf(loader).meta?.typeSchemas?.entity?.Forged, undefined, 'the refused proposal landed');
+  });
+
+  it('MCP schema_update with targetNetwork: the same refusal', async () => {
+    const loader = await bootWith([subscriberNet()]);
+    const out = await schemaUpdateTool({ typeSchemas: { entity: { Forged: { propertySchemas: { note: str } } } }, targetNetwork: NET });
+    assert.equal(out.isError, true, out.text);
+    assert.deepEqual(roundsOf(loader, NET, 'meta_change').map(r => r.roundId), []);
+    assert.equal(spaceOf(loader).ownMeta?.typeSchemas?.entity?.Forged, undefined, 'the refused proposal landed in the own definitions');
   });
 });
