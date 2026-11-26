@@ -78,6 +78,7 @@ export const CAPABILITIES = [
 
   ['Brain — ops', 'space_stats', 'GET /api/brain/spaces/:spaceId/stats'],
   ['Brain — ops', 'space_reindex', 'POST /api/brain/spaces/:spaceId/reindex'],
+  ['Brain — ops', 'space_rdf_rebuild', 'POST /api/brain/spaces/:spaceId/rdf-index/rebuild'],
   ['Brain — ops', 'list_embed_jobs', 'GET /api/brain/spaces/:spaceId/embedding-queue/records'],
   // The MEDIA queue is a different queue from the record one, and priced differently — `files: read`
   // against `list_embed_jobs`'s `knowledge: read`. Mapping them together claimed a coverage that would
