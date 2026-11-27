@@ -22,9 +22,14 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import type { Space } from '../../core/api.types';
-import { RdfExportRuns, megabytes, type RdfExportRun } from '../../core/rdf-export-runs.service';
+import { RdfExportRuns, type RdfExportRun, type RdfRunFailure } from '../../core/rdf-export-runs.service';
+import { valueOfEvent } from '../../core/event-value';
+import { formatSize } from '../files/file-format';
 import { RDF_SPACE_FORMATS, RDF_VIEW_FORMATS, rdfIsOn, type RdfEdgeDetails, type RdfRecordFormat } from '../../core/rdf-names';
 import { rdfRefusalText } from '../../core/rdf-refusal';
+
+/** The words of each way a run ends without a file that is not a refusal. */
+const RUN_FAILURE_KEY: Readonly<Record<RdfRunFailure, string>> = { cut: 'rdf.export.cut', idle: 'rdf.export.idle', save: 'rdf.export.saveFailed' };
 
 @Component({
   selector: 'app-rdf-export-panel',
@@ -49,7 +54,11 @@ import { rdfRefusalText } from '../../core/rdf-refusal';
     .reason { font-size: 12px; color: var(--text-muted); }
     .run-line { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; }
     .track { height: 6px; border-radius: 3px; background: var(--bg-elevated, var(--border)); overflow: hidden; margin-top: 6px; }
-    .track i { display: block; height: 100%; width: 35%; background: var(--accent); }
+    /* Indeterminate: the server does not say how long the export is, so the bar moves to show the run is alive, and claims no share done. */
+    .track i { display: block; height: 100%; width: 35%; background: var(--accent); animation: rdf-run 1.4s ease-in-out infinite; }
+    @keyframes rdf-run { from { transform: translateX(-100%); } to { transform: translateX(285%); } }
+    /* Under reduced motion the bar stands still, full width and dimmed: a running state with no movement and no share. */
+    @media (prefers-reduced-motion: reduce) { .track i { animation: none; width: 100%; opacity: 0.45; } }
     .sep { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
     .result { margin: 0; font-size: 13px; }
     .lo-h { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
@@ -97,8 +106,9 @@ import { rdfRefusalText } from '../../core/rdf-refusal';
     </div>
     @if (run()?.running) {
       <div role="status" data-testid="rdf-export-running">
-        <div class="run-line"><span>{{ 'rdf.export.exporting' | transloco: { file: run()!.file } }}</span><span>{{ 'rdf.export.soFar' | transloco: { mb: mbOf(run()!.bytes) } }}</span></div>
-        <div class="track" role="progressbar" [attr.aria-label]="'rdf.export.exporting' | transloco: { file: run()!.file }" [attr.aria-valuetext]="'rdf.export.soFar' | transloco: { mb: mbOf(run()!.bytes) }"><i></i></div>
+        <div class="run-line"><span>{{ 'rdf.export.exporting' | transloco: { file: run()!.file } }}</span><span>{{ 'rdf.export.soFar' | transloco: { size: sizeOf(run()!.bytes) } }}</span></div>
+        <div class="track" role="progressbar" [attr.aria-label]="'rdf.export.exporting' | transloco: { file: run()!.file }" [attr.aria-valuetext]="'rdf.export.soFar' | transloco: { size: sizeOf(run()!.bytes) }"><i></i></div>
+        @if (run()!.inMemory) { <p class="reason" style="margin:6px 0 0" data-testid="rdf-export-memory">{{ 'rdf.export.memoryNote' | transloco }}</p> }
       </div>
       <div class="go"><button class="btn btn-secondary btn-sm" type="button" data-testid="rdf-export-stop" (click)="runs.stop(subjectId())">{{ 'rdf.export.stop' | transloco }}</button>
         <span class="reason">{{ 'rdf.export.keepsRunning' | transloco }}</span></div>
@@ -106,10 +116,21 @@ import { rdfRefusalText } from '../../core/rdf-refusal';
       <div class="go"><button class="btn btn-primary btn-sm" type="button" data-testid="rdf-export-go" (click)="start()">{{ (run()?.result ? 'rdf.export.again' : 'rdf.export.go') | transloco }}</button>
         <span class="reason">{{ (isView() ? 'rdf.export.savesView' : 'rdf.export.saves') | transloco }}</span></div>
     }
+    @if (leftOutBefore().length && !run()?.running && !run()?.result) {
+      <div data-testid="rdf-export-idle-left">
+        <b style="font-size:13px">{{ 'rdf.export.membersWillLeave' | transloco: { n: leftOutBefore().length } }}</b>
+        <ul class="member-list" style="margin-top:6px">
+          @for (m of leftOutBefore(); track m.id) {
+            <li><span><b>{{ m.label }}</b> <span class="why">{{ 'rdf.export.whyOff' | transloco }}</span></span>
+              <button class="btn btn-secondary btn-sm" type="button" data-testid="rdf-export-open-names" (click)="openNames.emit(m)">{{ 'rdf.export.openNames' | transloco }}</button></li>
+          }
+        </ul>
+      </div>
+    }
     @if (failure()) { <div class="alert alert-error" role="alert" data-testid="rdf-export-refusal">{{ failure() }}</div> }
     @if (run()?.result; as r) {
       <div class="sep">
-        <p class="result" role="status" data-testid="rdf-export-result">{{ 'rdf.export.result' | transloco: { file: r.file, records: r.records, mb: mbOf(r.bytes) } }}</p>
+        <p class="result" role="status" data-testid="rdf-export-result">{{ 'rdf.export.result' | transloco: { file: r.file, records: r.records, size: sizeOf(r.bytes) } }}</p>
         @if (r.withoutRdf.length || r.inConflict.length) {
           <div data-testid="rdf-export-members-left">
             <b style="font-size:13px">{{ 'rdf.export.membersLeft' | transloco: { n: r.withoutRdf.length + r.inConflict.length } }}</b>
@@ -170,13 +191,16 @@ export class RdfExportPanelComponent {
   failure(): string {
     const f = this.run()?.failure;
     if (!f) return '';
-    return f === 'cut' ? this.transloco.translate('rdf.export.cut') : rdfRefusalText(this.transloco, f);
+    return typeof f === 'string' ? this.transloco.translate(RUN_FAILURE_KEY[f]) : rdfRefusalText(this.transloco, f);
   }
 
-  mbOf(bytes: number): string { return megabytes(bytes); }
+  /** The members of a view the export will leave out (RDF names off), named before it starts; a space has none (it is exportable or the panel says why not). */
+  readonly leftOutBefore = computed(() => (this.isView() ? this.members().filter(m => !rdfIsOn(m.meta?.rdf)) : []));
+
+  readonly sizeOf = formatSize;
 
   /** A select's chosen value; the options are this panel's own, so it is one of them. */
-  valueOf<T extends string>(e: Event): T { return (e.target as HTMLSelectElement).value as T; }
+  readonly valueOf = valueOfEvent;
 
   labelOf(id: string): string { return this.members().find(m => m.id === id)?.label ?? id; }
 

@@ -43,7 +43,7 @@ function fakePicker(over: { failWrite?: boolean; reject?: unknown } = {}) {
     abort: async () => { log.aborted = true; },
   };
   const handle: SaveHandle = { name: 'picked.ttl', createWritable: async () => writable, remove: async () => { log.removed = true; } };
-  const picker = vi.fn(() => (over.reject !== undefined ? Promise.reject(over.reject) : Promise.resolve(handle)));
+  const picker = vi.fn((_options: { suggestedName: string }) => (over.reject !== undefined ? Promise.reject(over.reject) : Promise.resolve(handle)));
   return { picker, log };
 }
 
@@ -140,11 +140,16 @@ describe('RdfExportRuns, without a save picker (the Blob path)', () => {
   });
 
   it('a failure to save the file is a save failure, never "the server could not be reached"', async () => {
-    vi.mocked(saveBlob).mockImplementation(() => { throw new Error('Array buffer allocation failed'); });
-    const { runs } = setup(async () => answer([BODY, ENDING]));
-    await runs.start('platform', 'turtle', 'rdf12');
-    expect(runs.runs()['platform']!.failure).toBe('save');
-    expect(runs.runs()['platform']!.result).toBeUndefined();
+    // The browser cannot build the Blob (the export is bigger than it can hold): the save fails, the connection did not.
+    vi.stubGlobal('Blob', class { constructor() { throw new Error('Array buffer allocation failed'); } });
+    try {
+      const { runs } = setup(async () => answer([BODY, ENDING]));
+      await runs.start('platform', 'turtle', 'rdf12');
+      expect(runs.runs()['platform']!.failure).toBe('save');
+      expect(runs.runs()['platform']!.result).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('a lost connection stays a failure with status 0, which the screen words as unreachable', async () => {

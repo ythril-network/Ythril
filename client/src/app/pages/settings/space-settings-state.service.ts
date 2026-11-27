@@ -485,8 +485,18 @@ export class SpaceSettingsState {
   rdfForm = { enabled: false, base: '', vocab: '' };
   /** The RDF setting the space holds, as the dialog read it; undefined when it never had one. */
   rdfStored: RdfSetting | undefined = undefined;
-  /** Raised to bring the RDF names card into view and focus (a link from the Schema tab or the Overview). */
+  /**
+   * Raised by {@link showRdfNames} to bring the RDF names card into view and focus. The card answers it once and sets it back to 0: the
+   * tab bodies are built again each time they are shown, and a signal left raised would take the focus on every later visit. A plain
+   * {@link openSettings} sets it to 0 as well, so a link that never reached the card leaves nothing waiting.
+   */
   rdfFocus = signal(0);
+
+  /** The Settings tab with the RDF names card in view and focused: the one way in, for the Schema tab's link and the Overview's. */
+  showRdfNames(): void {
+    this.settingsTab.set('settings');
+    this.rdfFocus.update(n => n + 1);
+  }
 
   // ── duplicates tab ─────────────────────────────────────────────────────────
   dupeRulesState: DupeActionRule[] = [];
@@ -603,6 +613,7 @@ export class SpaceSettingsState {
     this.settingsSaving.set(false);
     this.settingsConflict.set(false);
     this.ruleRefusal.set(null);
+    this.rdfFocus.set(0);
     this.stForm = { label: s.label, purpose: s.meta?.purpose ?? '', usageNotes: s.meta?.usageNotes ?? '', maxGiB: s.maxGiB ?? null, documentExtraction: s.documentExtraction ?? '',
       imageAnalysis: s.imageAnalysis ?? '', audioAnalysis: s.audioAnalysis ?? '', videoAnalysis: s.videoAnalysis ?? '', textAnalysis: s.textAnalysis ?? '' };
     this.rdfStored = s.meta?.rdf ? { ...s.meta.rdf } : undefined;

@@ -6,7 +6,8 @@ import { ConversionApi } from '../../core/conversion-api.service';
 import { holdsSchemaAdmin } from '../../core/token-capability';
 import type { TokenRights } from '../settings/rights-glyph.component';
 import { SpaceSettingsState } from '../settings/space-settings-state.service';
-import { RdfExportRuns, megabytes } from '../../core/rdf-export-runs.service';
+import { RdfExportRuns } from '../../core/rdf-export-runs.service';
+import { formatSize } from '../files/file-format';
 
 /**
  * What the Brain page does with the schema and the conversion, kept out of the page (bundle-285 slice S6, Q-747; plan sections 3.1, 5 row V1, 14).
@@ -103,14 +104,13 @@ export class BrainSchemaLinks {
   openRdfNames(space: Space | undefined): void {
     if (!space) return;
     this.state.openSettings(space);
-    this.state.settingsTab.set('settings');
-    this.state.rdfFocus.update(n => n + 1);
+    this.state.showRdfNames();
   }
 
-  /** The open space's or view's running RDF export, as megabytes so far, for the Overview tab's count while another tab is open; '' when none runs. */
+  /** The open space's or view's running RDF export, as its size so far, for the Overview tab's count while another tab is open; '' when none runs. */
   readonly rdfRunning = computed(() => {
     const run = this.injector.get(RdfExportRuns).runs()[this.spaceId()];
-    return run?.running ? megabytes(run.bytes) : '';
+    return run?.running ? formatSize(run.bytes) : '';
   });
 
   /** Open the space's settings on the Schema tab with the entity type `type` selected; a type the schema does not declare yet is declared first. */

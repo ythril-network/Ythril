@@ -63,6 +63,7 @@ import { SpaceDuplicatesTabComponent } from './space-duplicates-tab.component';
 import { SpaceDangerTabComponent } from './space-danger-tab.component';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 import { describeRefusal, refusalIssues } from '../../core/refusal-text';
+import { isRdfRefusal, rdfRefusalText } from '../../core/rdf-refusal';
 import { formatList } from '../../core/list-format';
 import { ActiveLanguage } from '../../core/active-language';
 
@@ -514,9 +515,11 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
       error: (err) => {
         this.state.settingsSaving.set(false);
         const view = describeRefusal(this.transloco, '', err, 'spaces.error.saveFailed');
-        this.state.settingsError.set(view.text);
+        // The refusals of the RDF setting (a base another space holds, or nests with) are worded in the RDF family: the networks one has none.
+        const text = isRdfRefusal(err) ? rdfRefusalText(this.transloco, err) : view.text;
+        this.state.settingsError.set(text);
         // 412: somebody changed the schema first - offer to read the current one. Anything else that names a rule opens that rule.
-        const ruleShown = view.reload ? false : this.state.showRuleRefusal(refusalIssues(err), view.text);
+        const ruleShown = view.reload ? false : this.state.showRuleRefusal(refusalIssues(err), text);
         if (view.reload) this.state.settingsConflict.set(true);
         // The dialog keeps a refusal it can word and the user can act on from there (a bad step, the rate limit, the lock, a conversion already
         // running); a stale schema or a rule is answered in the popup, so the dialog goes and the popup says it.

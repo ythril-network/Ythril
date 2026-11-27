@@ -11,7 +11,8 @@
  *   record carries all three.
  * - **A raise the server refuses.** A value past its ceiling, or not a whole number, throws naming the key; the config is
  *   never written with it.
- * - **A raise that drops other config.** `withLimits` returns a copy changing the `sparql` block only.
+ * - **A raise that drops other config.** `withLimits` returns a copy changing three keys of the `sparql` block only; a `sparql` key it does
+ *   not name (`maxIndexRowsRead`, `maxResultBytes`, `maxRecordsChanged`, a later one) survives.
  */
 
 /** The defaults and the bounds of the server's `sparql-limits.ts`; a change there is a change here (the README names it). */
@@ -33,8 +34,11 @@ export function limitsOf(config) {
   return Object.fromEntries(KEYS.map((k) => [k, block[k] === undefined ? DEFAULTS[k] : checked(k, block[k])]));
 }
 
-/** A copy of `config` with the three limits set, nothing else changed. */
+/**
+ * A copy of `config` with the three limits set, nothing else changed: the `sparql` block keeps every key it holds that this module does
+ * not name (the server's other `sparql.*` limits), and only these three are written.
+ */
 export function withLimits(config, limits) {
-  const sparql = Object.fromEntries(KEYS.map((k) => [k, checked(k, limits?.[k])]));
-  return { ...config, sparql };
+  const set = Object.fromEntries(KEYS.map((k) => [k, checked(k, limits?.[k])]));
+  return { ...config, sparql: { ...(config?.sparql ?? {}), ...set } };
 }

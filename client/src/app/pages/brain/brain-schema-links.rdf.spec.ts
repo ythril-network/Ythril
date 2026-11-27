@@ -58,7 +58,7 @@ describe('BrainSchemaLinks.rdfRunning', () => {
     const { l, runs, id } = links();
     runs.runs.set({ other: { running: true, file: 'o.ttl', bytes: 5, inMemory: false } });
     expect(l.rdfRunning()).toBe('');
-    runs.runs.set({ platform: { running: false, file: 'p.ttl', bytes: 5, inMemory: false } });
+    runs.runs.set({ other: { running: true, file: 'o.ttl', bytes: 5, inMemory: false }, platform: { running: false, file: 'p.ttl', bytes: 5, inMemory: false } });
     expect(l.rdfRunning()).toBe('');
     id.set('other');
     expect(l.rdfRunning()).toBe(formatSize(5));

@@ -1,12 +1,21 @@
 /**
  * The one line the Overview's Networks panel says when a network contests the space's RDF base (Q-942, owner's decision on layout D), with
- * the way in: "Open RDF names". It asks `RdfConflicts` for the space shown, again for each space, and draws nothing when none contests it.
- * Its own component, so the Overview (over its size ceiling) carries one element for it.
+ * the way in: "Open RDF names". It reads the networks from the page's `SpacesStore` (the one list every screen reads), asks it to read them
+ * again for each space shown, and draws nothing when none contests it. Its own component, so the Overview (over its size ceiling) carries one
+ * element for it.
+ *
+ * ## What it prevents
+ *
+ * - **A panel that cannot draw without the network.** The store is asked through the injector; a host without one (a test of the Overview
+ *   alone) draws no line, and nothing throws.
+ * - **A second request for the networks.** The card and this line read one list; neither asks the server itself.
+ * - **A conflict drawn on the wrong space.** The question is {@link rdfConflictOf}, asked for the space shown, over the one list.
  */
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, untracked } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
-import { RdfConflicts } from '../../core/rdf-conflicts.service';
+import { SpacesStore } from '../settings/spaces-store.service';
+import { rdfConflictOf, type NetworkWithRdf } from '../../core/rdf-names';
 
 @Component({
   selector: 'app-rdf-conflict-line',
@@ -26,13 +35,13 @@ import { RdfConflicts } from '../../core/rdf-conflicts.service';
   `,
 })
 export class RdfConflictLineComponent {
-  private readonly conflicts = inject(RdfConflicts);
+  private readonly store = inject(SpacesStore, { optional: true });
   readonly spaceId = input.required<string>();
   /** "Open RDF names": the host opens the space's settings on the RDF names card. */
   readonly openNames = output<void>();
-  readonly contested = computed(() => this.conflicts.has(this.spaceId()));
+  readonly contested = computed(() => !!this.store && rdfConflictOf(this.store.networks() as NetworkWithRdf[], this.spaceId()) !== null);
 
   constructor() {
-    effect(() => { const id = this.spaceId(); untracked(() => this.conflicts.load(id)); });
+    effect(() => { this.spaceId(); untracked(() => this.store?.refreshNetworks()); });
   }
 }

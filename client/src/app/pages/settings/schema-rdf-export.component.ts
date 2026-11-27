@@ -17,6 +17,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { SpaceSettingsState } from './space-settings-state.service';
 import { RdfExportRuns } from '../../core/rdf-export-runs.service';
+import { valueOfEvent } from '../../core/event-value';
 import { RDF_SCHEMA_FORMATS, rdfIsOn, type RdfSchemaFormat } from '../../core/rdf-names';
 import { rdfRefusalText } from '../../core/rdf-refusal';
 
@@ -41,7 +42,7 @@ import { rdfRefusalText } from '../../core/rdf-refusal';
     [attr.aria-describedby]="on() ? 'schema-rdf-hint' : 'schema-rdf-off'" (click)="save()">
     <ph-icon name="upload" [size]="13" style="margin-right:5px;"/>{{ 'rdf.schema.export' | transloco }}</button>
   <label class="sr-only" for="schema-rdf-format">{{ 'rdf.schema.formatLabel' | transloco }}</label>
-  <select id="schema-rdf-format" data-testid="schema-rdf-format" [disabled]="!on() || saving()" (change)="format.set($any($event.target).value)">
+  <select id="schema-rdf-format" data-testid="schema-rdf-format" [disabled]="!on() || saving()" (change)="format.set(valueOf($event))">
     @for (f of formats; track f) { <option [value]="f" [selected]="f === format()">{{ 'rdf.format.' + f | transloco }}</option> }
   </select>
 </span>
@@ -82,7 +83,9 @@ export class SchemaRdfExportComponent {
 
   /** The Settings tab, with the RDF names card in view. */
   openNames(): void {
-    this.state.settingsTab.set('settings');
-    this.state.rdfFocus.update(n => n + 1);
+    this.state.showRdfNames();
   }
+
+  /** The chosen format of the select; its options are this component's own. */
+  readonly valueOf = valueOfEvent<RdfSchemaFormat>;
 }

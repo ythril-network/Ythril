@@ -53,6 +53,11 @@ export class SpacesStore {
    * holds this space" is a false claim: the danger tab's confirm forecast says nothing until this is true.
    */
   readonly networksLoaded = signal(false);
+  /**
+   * Whether the last read of the networks failed (a token that may not read them, a lost connection). The list then holds what an earlier
+   * read left, or nothing, and a screen that says what a network does to a space (the RDF names card) must say it cannot know.
+   */
+  readonly networksFailed = signal(false);
   /** Instance document-extraction ceiling — the highest mode a space may pick. Drives the per-space
    *  extraction dropdown so it never offers a level the runtime would cap. 'auto' = no policy limit. */
   readonly docExtractionCeiling = signal<'off' | 'ocr' | 'vlm' | 'repair' | 'auto'>('auto');
@@ -116,9 +121,12 @@ export class SpacesStore {
   }
 
   refreshNetworks(): void {
+    // A host whose network service reads no list (a stand-in in a test of a page around the RDF screens) keeps the list it has.
+    if (typeof this.networksApi.listNetworks !== 'function') return;
     this.networksApi.listNetworks().subscribe({
-      next: ({ networks }) => { this.networks.set(networks); this.networksLoaded.set(true); },
-      error: () => {},
+      next: ({ networks }) => { this.networks.set(networks); this.networksLoaded.set(true); this.networksFailed.set(false); },
+      // The list stays as it was; `networksFailed` says it may be out of date, for the screens that must not guess from it.
+      error: () => this.networksFailed.set(true),
     });
   }
 

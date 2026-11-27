@@ -1,4 +1,4 @@
-import { answerCode, refusalText, type RefusalSource, type RefusalTranslator } from './refusal-text';
+import { answerCode, refusalText, withRequestId, type RefusalSource, type RefusalTranslator } from './refusal-text';
 import { RDF_REFUSAL_CODES } from './rdf-names';
 
 /** The key family the RDF doors' refusals are worded under. */
@@ -30,7 +30,17 @@ export function rdfRefusalText(t: RefusalTranslator, err: unknown): string {
   }
   const status = (err as RefusalSource | null)?.status;
   const byStatus = STATUS_WORDS[status ?? 0];
-  if (byStatus) return t.translate(byStatus);
-  if (status === 0 || status === undefined) return t.translate('rdf.refusal.unreachable');
-  return t.translate('rdf.refusal.failed');
+  // A server fault (a 5xx) and a request that got no answer carry the request id their log line is filed under, as every refusal does.
+  if (byStatus) return withRequestId(t.translate(byStatus), err);
+  if (status === 0 || status === undefined) return withRequestId(t.translate('rdf.refusal.unreachable'), err);
+  return withRequestId(t.translate('rdf.refusal.failed'), err);
+}
+
+/**
+ * Whether the answer is one only this family words: a refusal of the RDF setting (`rdf_base_shared`, `rdf_base_nested`, ...). A screen
+ * that words its refusals under another family (the Settings dialog's Save) asks this first, so these are never the server's English.
+ */
+export function isRdfRefusal(err: unknown): boolean {
+  const code = answerCode(err);
+  return code.startsWith('rdf_') && (RDF_REFUSAL_CODES as readonly string[]).includes(code);
 }

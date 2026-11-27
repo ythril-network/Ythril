@@ -4,11 +4,11 @@
  * Both engines load the same bytes; the state records the variant and its sha256.
  *
  *   node benchmarks/rdf/load.mjs oxigraph-up   --size 1000       bulk `load` into a fresh store, then `serve`
- *   node benchmarks/rdf/load.mjs oxigraph-down --size 1000
+ *   node benchmarks/rdf/load.mjs oxigraph-down --size 1000 --work <dir>    (a -down command needs --work or --name-prefix)
  *   node benchmarks/rdf/load.mjs ythril-up     [--ythril-image <ref>]   a scratch instance (own database)
  *   node benchmarks/rdf/load.mjs ythril        --size 1000       a space with RDF on, then the RDF import door
  *   node benchmarks/rdf/load.mjs ythril-limits --timeout-ms 300000 --max-records-read 10000000 --max-results 100000
- *   node benchmarks/rdf/load.mjs ythril-down
+ *   node benchmarks/rdf/load.mjs ythril-down --work <dir>
  *
  * Each step writes `<work>/state/<engine>[-<size>].json`, which `run.mjs` reads: the endpoint, the token for a
  * scratch instance, the image digest and the load time. When the Ythril import refuses the data, the state
@@ -17,7 +17,7 @@
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chunkFile } from './chunk.mjs';
-import { namePrefixOf, parseArgs, variantOf, workDir } from './env.mjs';
+import { downNeedsItsRun, namePrefixOf, parseArgs, variantOf, workDir } from './env.mjs';
 import { oxigraphDown, oxigraphUp, statePath } from './oxigraph.mjs';
 import { createRdfSpace, deleteSpace, loadChunks, loadInto, setSparqlLimits, spaceCounts, ythrilDown, ythrilNames, ythrilUp } from './ythril.mjs';
 
@@ -27,6 +27,7 @@ const CHUNK_BYTES = 768 * 1024 ** 2;
 
 async function main() {
   const { flags, positional } = parseArgs(process.argv.slice(2));
+  downNeedsItsRun(positional[0], flags);
   const work = workDir(flags);
   // The prefix of this run's container names (--name-prefix, else the work folder): two runs never remove each other's containers.
   const prefix = namePrefixOf(flags, work);
