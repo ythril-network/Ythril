@@ -68,13 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web:** a vote that comes with a conversion shows its steps in words and this instance's own record counts before a member votes.
 - **Web:** Settings → About has a "Third-party software" card, and Settings → Help offers the third-party notices as a document readable inside the instance.
 - **Web:** the namespace field of the Schema Library says an address ending in `/` with no `#`.
-- **Web:** a personal view defined by a SPARQL CONSTRUCT says, in the reader's language, that only the RDF doors read it.
-- **RDF:** SPARQL queries of a space with RDF on, and queries that join many statements in particular, are faster and answer as before; what makes them fast is derived from the records, left out of backups and rebuilt after a restore.
-- **RDF:** while that is not ready (after a restore, a change that names no record, or a rollback), a query reads the records and answers the same, only slower.
-- **RDF:** when it is missing or out of date it is rebuilt in the background; the new tool `space_rdf_rebuild` (knowledge `admin`) rebuilds it for one space now, and `space_rdf_index` reads its state; a rebuild you ask for is audited as `space.rdf.rebuild`.
+- **Web:** a SPARQL CONSTRUCT view says, in your language, that only the RDF doors read it.
+- **RDF:** SPARQL queries of a space with RDF on, joins above all, are faster with the same answers; the speed-up is derived data, left out of backups and rebuilt after a restore or upgrade, while queries read the records, slower.
+- **RDF:** that data is rebuilt in the background without slowing writes, a failing rebuild retried at most hourly; `space_rdf_rebuild` (knowledge `admin`, audited as `space.rdf.rebuild`) rebuilds one space now, `space_rdf_index` reads its state (`unbuilt` until built).
 - **RDF:** config key `sparql.maxIndexRowsRead` (default 20 times `sparql.maxRecordsRead`) bounds the index statements one query reads (`413 sparql_too_much_read`).
-- **RDF:** after the upgrade, writes in a space with RDF on are not slowed while its index is built in the background, and a rebuild that keeps failing is retried after longer waits, at most an hour apart; `space_rdf_index` reports an index no rebuild has built as `unbuilt`.
-- **RDF:** a personal view can be a SPARQL CONSTRUCT (`sparql: { query }`): the export, SPARQL and `/ld/@<name>/` read its statements over what you read, at most 50 000, one code per cause on each door; other doors answer `409 view_is_construct`.
+- **RDF:** a personal view can be a SPARQL CONSTRUCT (`sparql: { query }`): the export, SPARQL and `/ld/@<name>/` read its statements over what you read (at most 50 000); other doors answer `409 view_is_construct`.
 - **RDF:** the statements a SPARQL Update removes and inserts are read into record writes by the import's own rules, or refused with a named reason (`server-owned-removed`, `edge-ends-change`, `not-writable-here`, `field-not-removable`, `subject-not-an-address-here`).
 - **RDF:** SPARQL 1.1 Update on one space: `POST /api/brain/spaces/:spaceId/sparql/update` and MCP `sparql_update` (`knowledge: write`), through the write rules every door keeps, whole or not at all ([SPARQL Update](docs/integration-guide/04j-sparql-api.md#sparql-update)).
 - **RDF:** an Update names a refused statement (`422 sparql_update_refused`), refuses to delete an entity something still names (`409 sparql_update_referenced`), and runs again after a lost race, at most 3 times (`409 sparql_update_conflict`).
@@ -105,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** under `/ld/` the base itself, the ontology, each SHACL shape and a type records use but the schema does not declare resolve too.
 - **RDF:** audit event `ld.read`, a read: the space and the record's id, and the request path as sent; no field holds the absolute address.
 - **RDF:** a base that starts another space's base, or is started by it, is refused at the save with `409 rdf_base_nested`, as an equal one is with `rdf_base_shared`.
-- **Metrics:** `ythril_rdf_index_reads_total{source}` counts the spaces a query read from the index or fell back to the records for, and `ythril_rdf_index_rebuilds_total{reason,outcome}` the index rebuilds.
+- **Metrics:** `ythril_rdf_index_reads_total{source}` (index or records read) and `ythril_rdf_index_rebuilds_total{reason,outcome}`.
 - **MCP:** a tool may declare an `outputSchema` in `tools/list`; `export_rdf`, `space_schema_rdf` and `sparql_query` do.
 - **Server:** a path under `/ld/` that is no address answers `404` with a problem body naming the export, instead of the web app.
 - **Testing:** `node scripts/test-failure-rates.mjs` prints each test's failures over the runs that ran it from the recorded runs, and exits 1 naming each test that failed on a commit that also passed; 2 when the records hold no result per test.
