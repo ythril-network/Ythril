@@ -10,7 +10,7 @@
  * ## When a member is read from its index (contract row 1)
  *
  * All of: the index has a state row and a build id (a rebuild wrote it: the follower reads by position and never reads a record without a
- * `pos`, so an index only the follower started may miss records and is never read, finding G1), its `status` is `ready`, its `formKey` is the key of the member's form now, and the barrier holds: no
+ * `pos`, so an index no rebuild wrote may miss records and is never read, finding G1), its `status` is `ready`, its `formKey` is the key of the member's form now, and the barrier holds: no
  * visible record or tombstone of the space stands above `appliedPos` (R1: a write that committed above a held floor counts, so a query never
  * sees an acknowledged write's old statements) and no journal row is outstanding (`hasOutstandingJournalRows`, every row, done or not).
  * When only the barrier fails and the lag is at most {@link CATCH_UP_MAX_LAG} records, the follower runs once, within
@@ -26,7 +26,9 @@
  * - **An unbounded read.** Every quad row read counts against `sparql.maxIndexRowsRead`; the row after the cap ends the query with
  *   `413 sparql_too_much_read`. Every find carries a server deadline inside the query's.
  * - **A find per binding.** {@link IndexRead.matchMany} answers up to {@link IndexRead.BATCH} patterns with one find of `rdf_quads`, and
- *   the ids of the rows read are turned into terms by one find of `rdf_terms` per batch, through a cache that lives as long as the query.
+ *   the ids of the rows read are turned into terms by one find of `rdf_terms` per page, through a cache that lives as long as the query.
+ * - **A batch that holds millions of rows (P1).** That one find is read in pages of at most {@link ROWS_PER_CALL} rows; a page is fitted to
+ *   the patterns and let go, so a join step holds one page, never the cap. The cap counts every page of every call.
  */
 import { Binary, type Document } from 'mongodb';
 import { DataFactory } from 'n3';
@@ -42,7 +44,7 @@ import { xsd, type Term } from '../literals.js';
 import { toRdfJsTerm, type RdfJsTerm } from '../rdf-js-terms.js';
 import { RDF_KIND_COLLECTIONS } from '../rdf-members.js';
 import { isBound, type PatternSlot, type PatternTerm } from '../quad-candidates.js';
-import { MAX_TERM_ID, storedKeyOf, type TermRow } from './terms.js';
+import { IDS_PER_FIND, MAX_TERM_ID, idsOfStoredKeys, storedKeyOf, type TermRow } from './terms.js';
 import { formKeyOf, packStatement, readTripleIndexState } from './store.js';
 import { hasOutstandingJournalRows } from './journal.js';
 
@@ -52,10 +54,14 @@ export const CATCH_UP_MAX_LAG = 2_000;
 export const CATCH_UP_SHARE = 0.25;
 /** The longest server deadline one find carries, in milliseconds. */
 const FIND_MAX_MS = 10_000;
-/** Ids per term lookup. */
-const IDS_PER_FIND = 1_000;
 /** Quad rows a streamed match turns into terms at once. */
 const ROWS_PER_PAGE = 1_000;
+/**
+ * The most quad rows a batched read holds at once (P1): the one find of a batch is read in pages of this many rows, each fitted to the
+ * patterns and let go, so a join step never holds the millions of rows `sparql.maxIndexRowsRead` allows. Every row of every page counts
+ * against that cap. A reader's `rowsPerCall` option overrides it.
+ */
+export const ROWS_PER_CALL = 100_000;
 /**
  * The rows of a streamed match's first page, each next page this factor larger up to {@link ROWS_PER_PAGE}. The engine opens the large side
  * of a join before the batch join drops it unread, and a first page of the full size read and counted a thousand rows nobody asked for.
@@ -72,7 +78,7 @@ const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
 export type IndexVerdict = { read: 'index'; buildId: string } | { read: 'records'; why: 'absent' | 'unbuilt' | 'stale' | 'other-form' | 'catching-up' | 'lagging' | 'journal' };
 
 /**
- * The build `spaceId`'s index is now (`null`: none, or one the follower started and no rebuild wrote). A query pins it in its verdict and
+ * The build `spaceId`'s index is now (`null`: none, or a state no rebuild wrote). A query pins it in its verdict and
  * asks again at its end (design-r2 R5): another answer means a rebuild swapped the collections it read.
  */
 export async function indexBuildOf(spaceId: string): Promise<string | null> {
@@ -243,6 +249,8 @@ export interface IndexReadOptions {
   tooMuch(): Error;
   /** The most entries each of a space's two term caches holds ({@link CACHE_TERMS_MAX} when absent); a term past it is looked up again. */
   cacheTermsMax?: number;
+  /** The most quad rows a batched read holds at once ({@link ROWS_PER_CALL} when absent). */
+  rowsPerCall?: number;
 }
 
 /** One query's reads of the indexes of its members: the term caches and the row count live as long as the query. */
@@ -252,11 +260,20 @@ export class IndexRead {
   private readonly idCache = new Map<string, Map<string, number | null>>();
   private readonly termCache = new Map<string, Map<number, RdfJsTerm>>();
   private read = 0;
+  private peak = 0;
   private readonly cacheMax: number;
-  constructor(private readonly opts: IndexReadOptions) { this.cacheMax = opts.cacheTermsMax ?? CACHE_TERMS_MAX; }
+  private readonly rowsPerCall: number;
+  constructor(private readonly opts: IndexReadOptions) {
+    this.cacheMax = opts.cacheTermsMax ?? CACHE_TERMS_MAX;
+    this.rowsPerCall = opts.rowsPerCall ?? ROWS_PER_CALL;
+    if (!Number.isInteger(this.rowsPerCall) || this.rowsPerCall < 1) throw new Error(`rowsPerCall must be a positive integer, got ${this.rowsPerCall}`);
+  }
 
   /** Quad rows read so far. */
   rowsRead(): number { return this.read; }
+
+  /** The most quad rows a batched read of this reader held at once (never more than `rowsPerCall`). */
+  peakRowsHeld(): number { return this.peak; }
 
   private ids(space: string): Map<string, number | null> {
     let m = this.idCache.get(space);
@@ -280,12 +297,11 @@ export class IndexRead {
       const hit = cache.get(k);
       if (hit !== undefined) found.set(k, hit); else missing.push(k);
     }
-    for (const chunk of inChunks(missing, IDS_PER_FIND)) {
-      this.opts.check();
-      const rows = await col<TermRow>(spaceCollection(space, 'rdfTerms')).find(asFilter<TermRow>({ k: { $in: chunk } }), { projection: { _id: 1, k: 1 }, maxTimeMS: msLeft(this.opts.deadline) }).toArray();
-      for (const k of chunk) found.set(k, null);
-      for (const row of rows) found.set(row.k, row._id);
-      for (const k of chunk) if (cache.size < this.cacheMax) cache.set(k, found.get(k)!);
+    const ids = await idsOfStoredKeys(spaceCollection(space, 'rdfTerms'), missing, { beforeFind: () => this.opts.check(), maxTimeMS: () => msLeft(this.opts.deadline) });
+    for (const k of missing) {
+      const id = ids.get(k) ?? null;
+      found.set(k, id);
+      if (cache.size < this.cacheMax) cache.set(k, id);
     }
     return found;
   }
@@ -322,26 +338,37 @@ export class IndexRead {
     return result;
   }
 
-  /** The rows of `filters` (one find; an `$or` when several), each counted against the cap. */
-  private async rowsOf(space: string, files: boolean, filters: readonly Document[]): Promise<QuadRow[]> {
-    if (filters.length === 0) return [];
+  /**
+   * The rows of `filters` (one find; an `$or` when several) in pages of at most `rowsPerCall` rows, each row counted against the cap as it is
+   * read. A page is handed to `onPage` and let go before the next one is read, so no more than a page is held (P1). The count is the whole
+   * call's: the cap ends a read whose pages add up past it.
+   */
+  private async rowsInPages(space: string, files: boolean, filters: readonly Document[], onPage: (rows: QuadRow[]) => Promise<void>): Promise<void> {
+    if (filters.length === 0) return;
     this.opts.check();
     const where: Document = filters.length === 1 ? { ...filters[0] } : { $or: filters };
     const filter = files ? where : { $and: [where, { nK: { $gt: 0 } }] };
     const left = this.opts.cap - this.read + 1;
     const cursor = col<QuadRow & Document>(spaceCollection(space, 'rdfQuads')).find(asFilter(filter), { projection: { _id: 0, s: 1, p: 1, o: 1 }, limit: left, maxTimeMS: msLeft(this.opts.deadline), batchSize: ROWS_PER_PAGE });
-    const out: QuadRow[] = [];
+    let page: QuadRow[] = [];
     try {
       for await (const row of cursor) {
         this.read++;
         if (this.read > this.opts.cap) throw this.opts.tooMuch();
-        out.push({ s: row.s, p: row.p, o: row.o });
-        if (out.length % ROWS_PER_PAGE === 0) this.opts.check();
+        page.push({ s: row.s, p: row.p, o: row.o });
+        if (page.length % ROWS_PER_PAGE === 0) this.opts.check();
+        if (page.length < this.rowsPerCall) continue;
+        this.peak = Math.max(this.peak, page.length);
+        await onPage(page);
+        page = [];
+      }
+      if (page.length > 0) {
+        this.peak = Math.max(this.peak, page.length);
+        await onPage(page);
       }
     } finally {
       await cursor.close().catch(() => undefined);
     }
-    return out;
   }
 
   /** The quads of `rows` in `graph`, their ids turned into terms. */
@@ -399,22 +426,22 @@ export class IndexRead {
     const slots = patterns.map(p => this.slotsOf(found, p));
     const live = slots.filter(s => s.every(x => x === null || x.length > 0));
     const filters = live.flatMap(filtersOf);
-    // A free pattern reads every row: no other filter narrows it.
-    const rows = await this.rowsOf(space, files, filters.some(f => Object.keys(f).length === 0) ? [{}] : dedupe(filters));
-    const quads = await this.quadsOf(space, graph, rows);
+    const answers: N3.Quad[][] = slots.map(() => []);
     // Rows times patterns tests: the loop checks for a caller that left, and gives the event loop a turn, as the reads do (finding G6).
-    const answers: N3.Quad[][] = [];
     let tested = 0;
-    for (const s of slots) {
-      const fit: N3.Quad[] = [];
-      if (s.every(x => x === null || x.length > 0)) {
+    const fitPage = async (rows: QuadRow[]): Promise<void> => {
+      const quads = await this.quadsOf(space, graph, rows);
+      for (let k = 0; k < slots.length; k++) {
+        const s = slots[k]!;
+        if (!s.every(x => x === null || x.length > 0)) continue;
         for (let i = 0; i < rows.length; i++) {
-          if (rowFits(rows[i]!, s)) fit.push(quads[i]!);
+          if (rowFits(rows[i]!, s)) answers[k]!.push(quads[i]!);
           if (++tested % FILTER_TESTS_PER_CHECK === 0) { this.opts.check(); await yieldToEventLoop(); }
         }
       }
-      answers.push(fit);
-    }
+    };
+    // A free pattern reads every row: no other filter narrows it.
+    await this.rowsInPages(space, files, filters.some(f => Object.keys(f).length === 0) ? [{}] : dedupe(filters), fitPage);
     return answers;
   }
 

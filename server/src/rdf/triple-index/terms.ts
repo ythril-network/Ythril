@@ -36,6 +36,8 @@ const COUNTER_ID = -1;
 export const MAX_TERM_ID = 0xffff_ffff;
 /** The most keys one `$in` read or one insert sends. */
 const KEYS_PER_COMMAND = 1_000;
+/** The most ids or keys one dictionary lookup (`$in`) sends: the read side's lookups and the verify's use it as the writes do. */
+export const IDS_PER_FIND = KEYS_PER_COMMAND;
 
 /** One dictionary row. */
 export interface TermRow { _id: number; k: string; v?: string }
@@ -57,6 +59,24 @@ export function storedKeyOf(key: string): string {
 }
 
 /**
+ * The id of each stored key of `stored` (as `storedKeyOf` gives them) that `collection` holds, one find per {@link IDS_PER_FIND} keys; a key
+ * the dictionary lacks is not in the answer. THE one lookup of the dictionary by key: the write (inside `session`), the read side and the
+ * drift verify ask it, so no caller reads past the per-find bound or forgets the projection. `beforeFind` runs before each find (the read
+ * side's check for a caller that left); `maxTimeMS` gives each find its server deadline.
+ */
+export async function idsOfStoredKeys(collection: string, stored: readonly string[],
+  opts: { session?: ClientSession; beforeFind?: () => void; maxTimeMS?: () => number } = {}): Promise<Map<string, number>> {
+  const ids = new Map<string, number>();
+  for (const chunk of inChunks(stored, IDS_PER_FIND)) {
+    opts.beforeFind?.();
+    const rows = await col<TermRow>(collection).find(asFilter<TermRow>({ k: { $in: chunk } }),
+      { projection: { _id: 1, k: 1 }, ...(opts.session ? { session: opts.session } : {}), ...(opts.maxTimeMS ? { maxTimeMS: opts.maxTimeMS() } : {}) }).toArray();
+    for (const row of rows) ids.set(row.k, row._id);
+  }
+  return ids;
+}
+
+/**
  * The id of every key in `keys` in `spaceId`'s dictionary (`collection`: the live one, or a rebuild's own before its swap), giving the
  * missing ones the next ids, all inside `session`. Every key comes back with an id, or the call throws (the dictionary is full past
  * {@link MAX_TERM_ID}).
@@ -67,10 +87,7 @@ export async function termIds(spaceId: string, keys: Iterable<string>, session: 
   for (const key of keys) byStored.set(storedKeyOf(key), key);
   const coll = col<TermRow>(collection);
   const ids = new Map<string, number>();
-  for (const chunk of inChunks([...byStored.keys()], KEYS_PER_COMMAND)) {
-    const rows = await coll.find(asFilter<TermRow>({ k: { $in: chunk } }), { session, projection: { _id: 1, k: 1 } }).toArray();
-    for (const row of rows) ids.set(byStored.get(row.k)!, row._id);
-  }
+  for (const [stored, id] of await idsOfStoredKeys(collection, [...byStored.keys()], { session })) ids.set(byStored.get(stored)!, id);
   const missing = [...byStored.values()].filter(key => !ids.has(key));
   if (missing.length === 0) return ids;
   const counter = await col<CounterRow>(collection).findOneAndUpdate(

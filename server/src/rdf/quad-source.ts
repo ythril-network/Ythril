@@ -63,6 +63,7 @@ import {
   timeoutRefusal, tooMuchReadRefusal,
 } from './sparql-refusal.js';
 import { IndexRead, indexVerdict, indexBuildOf } from './triple-index/read.js';
+import { rdfIndexReadsTotal } from '../metrics/rdf-index-metrics.js';
 import type { RdfCaller, FingerprintOf } from './rdf-space-state.js';
 
 /** The longest server deadline one find carries, in milliseconds, whatever time the query has left (as `brain/query.ts`). */
@@ -415,7 +416,8 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
           return v.read;
         })
         : Promise.resolve('records' as const);
-      p = verdict.then((path) => { paths.set(member.space, path); return path; });
+      // A query that may read the index counts where it read the space from: the records are a fallback (or a re-read after a swap).
+      p = verdict.then((path) => { paths.set(member.space, path); if (mayReadIndex) rdfIndexReadsTotal.inc({ source: path }); return path; });
       verdicts.set(member.space, p);
     }
     return p;

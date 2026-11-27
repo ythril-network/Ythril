@@ -68,8 +68,10 @@ describe('a triple index no rebuild wrote is never read', { skip }, () => {
   after(async () => { await d?.close(); });
 
   it('an index only the follower started is read from the records, which state every record', async () => {
-    const state = await followUntilReady(d, S);
-    assert.equal(state.buildId, undefined, 'the follower started this index: no rebuild wrote it');
+    // The state a follower that started its own index left (the follower no longer starts one, so an upgrade from such a build plants it).
+    await d.col(`${S}_rdf_state`).replaceOne({ _id: 'state' }, { status: 'ready', appliedPos: 0, formKey: 'older-build' }, { upsert: true });
+    const state = await d.col(`${S}_rdf_state`).findOne({ _id: 'state' });
+    assert.equal(state.buildId, undefined, 'a follower started this index: no rebuild wrote it');
     const viaDoor = await d.sparqlPost(admin.key, S, NAMES);
     assert.equal(viaDoor.status, 200, viaDoor.text);
     assert.equal(rowTexts(viaDoor.body).length, 80, 'the door answers the 60 positioned records and the 20 without a position');

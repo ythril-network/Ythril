@@ -27,6 +27,7 @@ import path from 'node:path';
 import { mongoSkipReason, testMongoUri } from './_mongo-harness.mjs';
 import { openSparqlDoors, rdfMeta } from './_sparql-doors.mjs';
 import { indexCollections, indexedStatements } from './_triple-index.mjs';
+import { buildIndexes } from './_triple-index-read.mjs';
 
 const skip = await mongoSkipReason();
 const SUITE = 'b273-tix-life';
@@ -36,7 +37,7 @@ const X = 'tix-drop';
 const OFF = 'tix-off';
 const ON = 'tix-on';
 const STAMP = '2026-03-04T05:06:07.000Z';
-// The journal's collection too: its indexes (review finding G5) are built when the follower starts the index, which makes it.
+// The journal's collection too: its indexes (review finding G5) are built when a rebuild swaps the index in, which makes it.
 const INDEX = ['rdf_dirty', 'rdf_quads', 'rdf_records', 'rdf_state', 'rdf_terms'];
 const TMP = process.env.TEMP ?? process.env.TMPDIR ?? '/tmp';
 
@@ -63,13 +64,15 @@ describe('the triple index lives and leaves with its space', { skip }, () => {
     dump = await import('../../server/dist/db/dump.js');
     restore = await import('../../server/dist/db/restore.js');
     tmpDir = fs.mkdtempSync(path.join(TMP, 'b273-tix-life-'));
+    // The follower makes no index of its own (pre-ship finding P2): a rebuild builds each RDF space's, as the upkeep does.
+    await buildIndexes([R, X, ON]);
   });
   after(async () => {
     await d?.close();
     if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('a space with RDF off builds no index, the same write with RDF on does', async () => {
+  it('a space with RDF off builds no index, the same write in a space with RDF on and a built index states in it', async () => {
     await landed(ON, 'on1');
     await landed(OFF, 'off1');
     assert.deepEqual(await indexCollections(d, ON), INDEX.map(s => `${ON}_${s}`), 'no index collection was built for the RDF space');

@@ -116,7 +116,7 @@ query that read an index which a rebuild swapped in while the query ran is answe
 two builds. An admin rebuilds one space at once with `space_rdf_rebuild` (MCP, `POST /api/space_rdf_rebuild` with `{"space": "<id>"}`, or
 `POST /api/brain/spaces/:spaceId/rdf-index/rebuild`; the knowledge `admin` right on the space; `409 rdf_off` for a space with RDF off, `409 rebuild_busy` when
 another instance's rebuild of the space is running; audited as `space.rdf.rebuild`) and reads its state with `space_rdf_index`
-(`POST /api/space_rdf_index`; knowledge `read`): `status` (`ready`, `catching-up`, `stale` or `absent`), `buildId`, `appliedPos` and
+(`POST /api/space_rdf_index`; knowledge `read`): `status` (`ready`: queries read the index; `catching-up`, `stale`, `unbuilt` (a state no rebuild built) or `absent`: they read the records), `buildId`, `appliedPos` and
 `rebuilding`.
 
 Either way the answer is the same: the same statements, the same rights (without `files: read` no file statement is read from either),

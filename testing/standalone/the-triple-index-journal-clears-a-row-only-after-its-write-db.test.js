@@ -25,6 +25,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openSparqlDoors, rdfMeta } from './_sparql-doors.mjs';
+import { buildIndexes } from './_triple-index-read.mjs';
 import { assertIndexedAsStored, indexedStatements, indexState } from './_triple-index.mjs';
 
 const skip = await mongoSkipReason();
@@ -57,6 +58,8 @@ describe('the triple index journal clears a row only after its write', { skip },
     const mongo = await import('../../server/dist/db/mongo.js');
     raw = mongo.getMongo().db(`ythril_harness_${SUITE}`);
     journal = await import('../../server/dist/rdf/triple-index/journal.js').catch(() => ({}));
+    // The follower applies to an index a rebuild built (pre-ship finding P2): build each space's, as the upkeep does.
+    await buildIndexes([J, R6]);
   });
   after(async () => { await d?.close(); });
 

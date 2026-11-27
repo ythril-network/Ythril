@@ -261,15 +261,15 @@ export async function sweepOwnerlessViews(opts: { now?: number } = {}): Promise<
 
 // ── Refusals ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Every refusal the views doors answer, with its status and its code. The client has one sentence per code in each language
- * (`views.refusal.<code>`), so a code spelled anywhere else is a refusal that reaches a user as a raw code.
- */
 /** A view's `sparql` that is not saved (Q-762): the request is wrong. */
 const VIEW_SPARQL_REFUSED_STATUS = 400;
 /** A SPARQL view named at a door that does not read one (Q-762): the view is in a state that door cannot take. */
 const VIEW_IS_CONSTRUCT_STATUS = 409;
 
+/**
+ * Every refusal the views doors answer, with its status and its code. The client has one sentence per code in each language
+ * (`views.refusal.<code>`), so a code spelled anywhere else is a refusal that reaches a user as a raw code.
+ */
 export const VIEW_REFUSALS = Object.freeze({
   nameInvalid: { status: 400, code: 'view_name_invalid' },
   nameTaken: { status: 409, code: 'view_name_taken' },

@@ -38,7 +38,6 @@ import { inBoundedTransaction } from '../../db/bounded-transaction.js';
 import { inChunks } from '../../util/chunks.js';
 import { inOneCommandChunks, operationBytes } from '../../db/one-command.js';
 import { readStoredById } from '../../db/read-by-id.js';
-import { buildSpaceIndex, TRIPLE_INDEX_INDEXES } from '../../spaces/space-indexes.js';
 import type { RdfRecordKind } from '../record-triples.js';
 import { termIds, MAX_TERM_ID } from './terms.js';
 
@@ -219,19 +218,6 @@ export interface RecordChange { kind: RdfRecordKind; id: string; pos: number; st
 /** The state row of `spaceId`'s index, or `null` when it has none (not ready). */
 export async function readTripleIndexState(spaceId: string): Promise<TripleIndexState | null> {
   return await stateCollection(spaceId).findOne(asFilter<TripleIndexState>({ _id: 'state' })) as TripleIndexState | null;
-}
-
-/**
- * Start `spaceId`'s index for the form `formKey`: build its indexes and write its state row (`catching-up`, nothing applied). A state row
- * another follower wrote meanwhile is kept. Answers the state row stored.
- */
-export async function startTripleIndex(spaceId: string, formKey: string): Promise<TripleIndexState> {
-  for (const ix of TRIPLE_INDEX_INDEXES) await buildSpaceIndex(spaceId, ix);
-  await stateCollection(spaceId).updateOne(asFilter<TripleIndexState>({ _id: 'state' }),
-    asUpdate<TripleIndexState>({ $setOnInsert: { appliedPos: 0, formKey, status: 'catching-up' } }), { upsert: true });
-  const state = await readTripleIndexState(spaceId);
-  if (state === null) throw new Error(`the triple index of space '${spaceId}' has no state row after it was started`);
-  return state;
 }
 
 /** Take or renew the follower's lease on `spaceId` for `ms`: false when another owner holds one that has not run out. */

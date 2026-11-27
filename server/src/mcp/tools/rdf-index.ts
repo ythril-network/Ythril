@@ -38,9 +38,10 @@ export const space_rdf_rebuildTool: ToolHandler = {
 
 export const space_rdf_indexTool: ToolHandler = {
   name: 'space_rdf_index',
-  description: 'The status of one space\'s SPARQL triple index: `status` (`ready`: queries read the index; `catching-up` or `stale`: '
-    + 'they read the records; `absent`: none yet), `buildId` (the rebuild it came from, or null), `appliedPos` and `rebuilding` (a rebuild '
-    + 'runs now). One read of the index\'s state; it changes nothing.',
+  description: 'The status of one space\'s SPARQL triple index: `status` (`ready`: queries read the index; `catching-up`, `stale`, '
+    + '`unbuilt` or `absent`: they read the records, slower and with the same answers; `unbuilt` is a state no rebuild built, `absent` none '
+    + 'yet), `buildId` (the rebuild it came from, or null), `appliedPos` and `rebuilding` (a rebuild runs now). One read of the index\'s '
+    + 'state; it changes nothing.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
     type: 'object',

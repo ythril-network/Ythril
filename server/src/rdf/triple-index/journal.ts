@@ -249,7 +249,12 @@ async function writeRows(spaceId: string, keys: readonly string[], session: Sess
   return { spaceId, rows: inTransaction ? [] : rows.map(r => r._id) };
 }
 
-/** A write the journal would have named, made while RDF is off: the index it leaves behind (if any) is marked stale. Answers no ticket. */
+/**
+ * A write the journal would have named, made while RDF is off: the index it leaves behind (if any) is marked stale. Answers no ticket.
+ * The update is its own existence check (`markTripleIndexStale` matches no row and writes nothing for a space with no index), so one round
+ * trip per write is the cheapest answer: a find first would be a second one, and a memory of "no index here" would miss an index a rebuild
+ * built after RDF went on and that RDF off again leaves behind.
+ */
 async function staleWhileOff(spaceId: string): Promise<null> {
   await markTripleIndexStale(spaceId);
   return null;

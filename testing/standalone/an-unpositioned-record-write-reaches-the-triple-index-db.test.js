@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason, testMongoUri } from './_mongo-harness.mjs';
 import { openSparqlDoors, rdfMeta } from './_sparql-doors.mjs';
+import { buildIndexes } from './_triple-index-read.mjs';
 import { assertIndexedAsStored, indexedStatements, indexState } from './_triple-index.mjs';
 
 const skip = await mongoSkipReason();
@@ -65,6 +66,8 @@ describe('an unpositioned record write reaches the triple index', { skip }, () =
     follow = await import('../../server/dist/rdf/triple-index/follow.js');
     mongo = await import('../../server/dist/db/mongo.js');
     tmpDir = fs.mkdtempSync(path.join(TMP, 'b273-tixj-'));
+    // The follower applies to an index a rebuild built (pre-ship finding P2): build each space's, as the upkeep does.
+    await buildIndexes(SPACES);
   });
   after(async () => {
     await d?.close();
@@ -146,7 +149,7 @@ describe('an unpositioned record write reaches the triple index', { skip }, () =
     assert.notEqual((await indexState(d, RB))?.status, 'ready', 'after a rollback the next build writes with no journal, so the index is not ready');
   });
 
-  it('the restore (db/restore.ts), on its own client, leaves an index the follower builds again from the records', async () => {
+  it('the restore (db/restore.ts), on its own client, leaves no index, and a rebuild builds it again from the records', async () => {
     const dump = await import('../../server/dist/db/dump.js');
     const restore = await import('../../server/dist/db/restore.js');
     await landed(RS, 'entities', { ...common(RS, 'rs1'), name: 'Restored', type: 'thing' });
@@ -155,6 +158,8 @@ describe('an unpositioned record write reaches the triple index', { skip }, () =
     await col(RS, 'entities').updateOne({ _id: 'rs1' }, { $set: { name: 'Changed after the backup' } });
     await restore.restoreDatabase(testMongoUri(`ythril_harness_${SUITE}`), dest);
     assert.notEqual((await indexState(d, RS))?.status, 'ready', 'a restore leaves no ready index');
+    // The restore dropped every space's index of this database: the rebuilds the upkeep would run.
+    await buildIndexes(SPACES);
     await followed(RS);
     await assertIndexedAsStored(assert, d, RS, 'entity', 'entities', 'rs1');
   });

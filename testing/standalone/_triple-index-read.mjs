@@ -25,8 +25,28 @@ export async function landAll(d, space, docs) {
   }
 }
 
-/** Run `space`'s follower until its index is `ready` with no journal row left, or throw after `tries` runs. */
+/**
+ * Build the index of each of `spaces` with a rebuild, as the upkeep does: the follower applies nothing to a space until one has (pre-ship
+ * finding P2), so a spec that tests what the follower applies builds its space's index first.
+ */
+export async function buildIndexes(spaces) {
+  const { rebuildTripleIndex } = await import('../../server/dist/rdf/triple-index/rebuild.js');
+  for (const space of spaces) {
+    const built = await rebuildTripleIndex(space);
+    if (built.outcome !== 'built') throw new Error(`the triple index of ${space} could not be built: ${built.outcome}`);
+  }
+}
+
+/**
+ * Run `space`'s follower until its index is `ready` with no journal row left, or throw after `tries` runs. The follower leaves an index no
+ * rebuild built alone (it applies nothing to one, pre-ship finding P2), so a space with none is rebuilt first, as the upkeep does.
+ */
 export async function followUntilReady(d, space, tries = 40) {
+  if (typeof (await d.col(`${space}_rdf_state`).findOne({ _id: 'state' }))?.buildId !== 'string') {
+    const { rebuildTripleIndex } = await import('../../server/dist/rdf/triple-index/rebuild.js');
+    const built = await rebuildTripleIndex(space);
+    if (built.outcome !== 'built') throw new Error(`the triple index of ${space} could not be built for the follower: ${built.outcome}`);
+  }
   const { followTripleIndex } = await import('../../server/dist/rdf/triple-index/follow.js');
   const { settledPositionCap } = await import('../../server/dist/util/position-clock.js');
   const { recordPositions } = await import('../../server/dist/sync/record-position-stream.js');

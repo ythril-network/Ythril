@@ -59,7 +59,7 @@ async function gaps(launches, outcomes) {
     result.catch(() => undefined);
     return { run: { result, claimed: Promise.resolve(true) }, joined: false };
   };
-  for (let guard = 0; at.length < launches && guard < 2_000; guard++) {
+  for (let guard = 0; at.length < launches && guard < 300; guard++) {
     await verify.upkeepTripleIndexes({ now: () => clock, launch });
     // The tick does not wait for the rebuild's end: let its outcome settle before the next one.
     await new Promise(resolve => setTimeout(resolve, 5));

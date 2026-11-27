@@ -43,8 +43,7 @@ describe('the triple index upkeep starts one rebuild per tick', { skip }, () => 
     await (await import('../../server/dist/brain/links-conversion.js')).convertAndMarkSpaces(SPACES.map(id => ({ id })));
     for (const space of SPACES) {
       await landAll(d, space, Array.from({ length: 12 }, (_, i) => ['entities', entityDoc(space, `p${i}`, `Person ${i}`, 'person')]));
-      // The follower starts an index and nobody builds it whole: the state an upgrade leaves, `missing` for the upkeep.
-      await followUntilReady(d, space);
+      // No index and nobody built one: the state an upgrade leaves, `missing` for the upkeep (the follower starts none).
     }
   });
   after(async () => { await d?.close(); });
