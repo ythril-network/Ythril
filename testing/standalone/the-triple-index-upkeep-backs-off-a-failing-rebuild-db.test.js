@@ -49,7 +49,7 @@ async function gaps(launches, outcomes) {
   // The case starts clean: two hours on (past the longest wait), one launch that ends built clears whatever count the cases before left.
   clock += 120 * MINUTE;
   await verify.upkeepTripleIndexes({ now: () => clock, launch: async () => ({ run: { result: Promise.resolve({ outcome: 'built' }), claimed: Promise.resolve(true) }, joined: false }) });
-  await new Promise(resolve => setTimeout(resolve, 5));
+  await new Promise(resolve => setImmediate(resolve));
   clock += MINUTE;
   const at = [];
   const launch = async () => {
@@ -62,7 +62,7 @@ async function gaps(launches, outcomes) {
   for (let guard = 0; at.length < launches && guard < 300; guard++) {
     await verify.upkeepTripleIndexes({ now: () => clock, launch });
     // The tick does not wait for the rebuild's end: let its outcome settle before the next one.
-    await new Promise(resolve => setTimeout(resolve, 5));
+    await new Promise(resolve => setImmediate(resolve));
     clock += MINUTE;
   }
   assert.equal(at.length, launches, 'the tick launched the rebuilds the case asks for');

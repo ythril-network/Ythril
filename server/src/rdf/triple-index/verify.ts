@@ -267,7 +267,6 @@ export interface UpkeepOptions { now?: () => number; launch?: typeof launchTripl
  */
 export async function upkeepTripleIndexes(opts: UpkeepOptions = {}): Promise<void> {
   const clock = opts.now ?? Date.now;
-  const launch = opts.launch ?? launchTripleIndexRebuild;
   let started = false;
   await eachSpace(STEP, configuredSpaces(), async (s) => {
     if (started || anyRebuildRunsHere()) return;
@@ -280,7 +279,9 @@ export async function upkeepTripleIndexes(opts: UpkeepOptions = {}): Promise<voi
     if (reason === null) return;
     started = true;
     log.info(`Triple index of space '${peerText(s.id)}': rebuilding (${reason})`);
-    const { run, joined } = await launch(s.id, 'the upkeep', reason).catch((err: unknown) => { backoff.settled(s.id, null, clock()); throw err; });
+    // The launch is written out here, in the walk's own unit, so the walk gates see the rebuild this tick starts.
+    const launched = opts.launch ? opts.launch(s.id, 'the upkeep', reason) : launchTripleIndexRebuild(s.id, 'the upkeep', reason);
+    const { run, joined } = await launched.catch((err: unknown) => { backoff.settled(s.id, null, clock()); throw err; });
     if (!joined) run.result.then(r => backoff.settled(s.id, r.outcome, clock()), () => backoff.settled(s.id, null, clock()));
   });
 }

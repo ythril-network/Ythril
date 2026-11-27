@@ -62,15 +62,15 @@ export function storedKeyOf(key: string): string {
  * The id of each stored key of `stored` (as `storedKeyOf` gives them) that `collection` holds, one find per {@link IDS_PER_FIND} keys; a key
  * the dictionary lacks is not in the answer. THE one lookup of the dictionary by key: the write (inside `session`), the read side and the
  * drift verify ask it, so no caller reads past the per-find bound or forgets the projection. `beforeFind` runs before each find (the read
- * side's check for a caller that left); `maxTimeMS` gives each find its server deadline.
+ * side's check for a caller that left); `findMs` gives each find its server deadline (as the driver's `maxTimeMS` option).
  */
 export async function idsOfStoredKeys(collection: string, stored: readonly string[],
-  opts: { session?: ClientSession; beforeFind?: () => void; maxTimeMS?: () => number } = {}): Promise<Map<string, number>> {
+  opts: { session?: ClientSession; beforeFind?: () => void; findMs?: () => number } = {}): Promise<Map<string, number>> {
   const ids = new Map<string, number>();
   for (const chunk of inChunks(stored, IDS_PER_FIND)) {
     opts.beforeFind?.();
     const rows = await col<TermRow>(collection).find(asFilter<TermRow>({ k: { $in: chunk } }),
-      { projection: { _id: 1, k: 1 }, ...(opts.session ? { session: opts.session } : {}), ...(opts.maxTimeMS ? { maxTimeMS: opts.maxTimeMS() } : {}) }).toArray();
+      { projection: { _id: 1, k: 1 }, ...(opts.session ? { session: opts.session } : {}), ...(opts.findMs ? { maxTimeMS: opts.findMs() } : {}) }).toArray();
     for (const row of rows) ids.set(row.k, row._id);
   }
   return ids;
