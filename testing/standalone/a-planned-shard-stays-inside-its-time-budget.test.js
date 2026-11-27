@@ -33,6 +33,7 @@ import { planDbShards, loadDbFileSeconds, DB_SHARDS_MAX } from '../_shared/db-sh
 import { shardsOverBudget, plannedShardSeconds, DB_SHARD_BUDGET_S, PURE_SHARD_BUDGET_S } from '../_shared/shard-budget.mjs';
 import { textOnlyFiles } from '../_shared/text-only-test.mjs';
 import { loadCi, jobRunning, stepsOf, shellOf, stepEnv, DB_SHARD_SCRIPT } from '../_shared/ci-workflow.mjs';
+import * as ciWorkflow from '../_shared/ci-workflow.mjs';
 import { REPO_ROOT } from './_sources.mjs';
 
 const split = splitStandalone({ root: REPO_ROOT });
@@ -66,6 +67,22 @@ describe('shardsOverBudget names every shard planned over its budget', () => {
   it('refuses to answer with no budget or no shard', () => {
     assert.throws(() => shardsOverBudget([['a.js']], seconds, { who: 'demo' }), /no budget/);
     assert.throws(() => shardsOverBudget([], seconds, { budget: 5, who: 'demo' }), /no shard/);
+  });
+});
+
+describe('the budget check asks the modules that already answer (Q-977)', () => {
+  const self = readFileSync(new URL(import.meta.url), 'utf8');
+  it('reads the workflow\'s database shard count from ci-workflow.mjs, which the database gate reads too', () => {
+    assert.equal(typeof ciWorkflow.ciDbShardCount, 'function', 'ci-workflow.mjs exports no ciDbShardCount');
+    assert.equal(ciWorkflow.ciDbShardCount(), ciDbShardCount());
+  });
+  it('takes the pure kind from shardTableFiles and the table check from secondsTableProblems, rebuilding neither', () => {
+    assert.doesNotMatch(self, new RegExp('offlinePure' + '\\.map'), 'the pure kind is rebuilt here, not read from shardTableFiles');
+    assert.doesNotMatch(self, new RegExp('table\\.median' + ' > 0'), 'the database table is checked here, not by secondsTableProblems');
+  });
+  it('names the remedy where a table is wrong or missing: the recorder and the snapshot it reads', () => {
+    assert.match(self, new RegExp('\\$\\{REM' + 'EDY\\}(?:[\\s\\S]*?\\$\\{REM' + 'EDY\\}){2}'), 'fewer than three messages name the remedy');
+    assert.throws(() => loadDbFileSeconds('/no/such/db-file-seconds.json'), /record-shard-seconds\.mjs <file-times-all\.json>/);
   });
 });
 
