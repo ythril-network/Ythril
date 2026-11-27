@@ -150,7 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** within each of those, the preflight runs first the stage whose failure is cheapest to find, from the recorded stage times (`test-results/stage-costs.json`), never before a stage it reads; with no snapshot it keeps the listed order.
 - **Testing:** the local preflight runs several standalone batches at once, never more than 8 test files together, parses test files in parallel, and ends a batch that never exits at a time bound.
 - **Testing:** the static preflight and the release gate refuse a changelog entry that names a source path, an internal storage name, an algorithm term or an identifier no caller can meet.
-- **Testing:** the preflight diffs a release-line branch against its line, not main; `PREFLIGHT_CHANGELOG_BASE` sets the base.
+- **Testing:** the preflight diffs a release-line branch with its line, not main; `PREFLIGHT_CHANGELOG_BASE` sets it.
 - **Testing:** a client gate fails a refusal sentence no caller can show, and a page that stores a failed load without wording it in the reader's language.
 - **Testing:** a standalone gate refuses a public or protected member of a client component, service or directive that no template and no non-spec source reads; the dead ones were removed.
 - **Testing:** the schema-layers panel no longer throws NG0950 when an effects pass runs before its `spaceId` is bound, which failed the client suite at random under load.
