@@ -78,6 +78,15 @@ export class AuthenticatedDownload {
     }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return read(r); });
   }
 
+  /**
+   * `fetch` with the session's bearer, answering the response WHATEVER its status, for a caller that reads a refusal's body (a refusal is
+   * words in the reader's language, never `HTTP <status>`) or a long body as it streams (the RDF export, Q-942). `signal` stops it.
+   */
+  open(url: string, signal?: AbortSignal): Promise<Response> {
+    const token = this.auth.token();
+    return fetch(url, { headers: token && tokenMayReach(url) ? { Authorization: `Bearer ${token}` } : {}, ...(signal ? { signal } : {}) });
+  }
+
   /** Fetch `url` with the session and save the response body as `filename`. Rejects as `fetch` does. */
   save(url: string, filename: string, opts?: SaveBlobOptions): Promise<void> {
     return this.fetch(url, r => r.blob()).then(blob => saveBlob(blob, filename, opts));

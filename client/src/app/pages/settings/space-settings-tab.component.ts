@@ -18,11 +18,12 @@ import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 import { SpaceSettingsState } from './space-settings-state.service';
 import { SpacesStore } from './spaces-store.service';
 import { SettingsCardComponent } from '../../shared/settings-card.component';
+import { SpaceRdfCardComponent } from './space-rdf-card.component';
 
 @Component({
   selector: 'app-space-settings-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, SettingsCardComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, SettingsCardComponent, SpaceRdfCardComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SPACE_DIALOG_STYLES, `
     /* A cap you cannot see is one you only learn about by losing work. Muted until it matters, then not. */
@@ -69,6 +70,9 @@ import { SettingsCardComponent } from '../../shared/settings-card.component';
       </div>
     </div>
   </app-settings-card>
+
+  <!-- RDF names (Q-942, layout D): beside the space's other identity settings, before what reads its documents. -->
+  <app-space-rdf-card />
 
   <app-settings-card icon="package" [heading]="'spaces.settings.card.extraction' | transloco" [purpose]="'spaces.settings.card.extractionHint' | transloco">
     <div class="field" style="margin:0;max-width:260px;">

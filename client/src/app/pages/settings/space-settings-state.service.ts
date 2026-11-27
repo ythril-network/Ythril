@@ -9,6 +9,7 @@ import { SpacesApi } from '../../core/spaces-api.service';
 import { isPlainObject } from '../../core/plain-object';
 import type { SchemaLayersView } from '../../core/schema-api.service';
 import { UnsavedEdits } from '../../core/unsaved-edits';
+import { rdfOfForm, type RdfSetting } from '../../core/rdf-names';
 import {
   addProp as addPropTo,
   removeProp as removePropFrom,
@@ -477,6 +478,16 @@ export class SpaceSettingsState {
     videoAnalysis: '' as '' | 'off' | 'audio' | 'full' | 'auto',
     textAnalysis: '' as '' | 'off' | 'embed' | 'chunk' | 'auto' };
 
+  /**
+   * The RDF names card (Q-942): the switch, and the base and vocabulary a space never switched on may still choose. A stored base is
+   * never edited here: it moves only by a deliberate rebase (the card's own acts), so the save sends it back as stored (`rdfOfForm`).
+   */
+  rdfForm = { enabled: false, base: '', vocab: '' };
+  /** The RDF setting the space holds, as the dialog read it; undefined when it never had one. */
+  rdfStored: RdfSetting | undefined = undefined;
+  /** Raised to bring the RDF names card into view and focus (a link from the Schema tab or the Overview). */
+  rdfFocus = signal(0);
+
   // ── duplicates tab ─────────────────────────────────────────────────────────
   dupeRulesState: DupeActionRule[] = [];
   dupeSurvivor: 'older' | 'newer' = 'older';
@@ -594,6 +605,8 @@ export class SpaceSettingsState {
     this.ruleRefusal.set(null);
     this.stForm = { label: s.label, purpose: s.meta?.purpose ?? '', usageNotes: s.meta?.usageNotes ?? '', maxGiB: s.maxGiB ?? null, documentExtraction: s.documentExtraction ?? '',
       imageAnalysis: s.imageAnalysis ?? '', audioAnalysis: s.audioAnalysis ?? '', videoAnalysis: s.videoAnalysis ?? '', textAnalysis: s.textAnalysis ?? '' };
+    this.rdfStored = s.meta?.rdf ? { ...s.meta.rdf } : undefined;
+    this.rdfForm = { enabled: s.meta?.rdf?.enabled === true, base: s.meta?.rdf?.base ?? '', vocab: s.meta?.rdf?.vocab ?? '' };
     this.dupeRulesState = (s.dupeRules ?? []).map(r => ({ ...r }));
     this.dupeSurvivor = s.dupeMergeSurvivor ?? 'older';
     this.dupeOnInsert = s.dupeRulesOnInsert ?? false;
@@ -828,6 +841,8 @@ export class SpaceSettingsState {
       for (const r of rules) map[r.name.trim()] = { rule: r.rule, message: r.message, ...(r.kinds.length ? { kinds: [...r.kinds] } : {}) };
       meta.rules = map;
     }
+    const rdf = rdfOfForm(this.rdfStored, this.rdfForm);
+    if (rdf) meta.rdf = rdf;
     return meta;
   }
 

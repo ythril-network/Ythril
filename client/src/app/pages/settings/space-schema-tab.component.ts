@@ -51,6 +51,7 @@ import { refusalText } from '../../core/refusal-text';
 import { PluralText } from '../../core/plural-text.service';
 import { escapeHtml } from '../../shared/escape-html';
 import { holdUnsavedEdits } from '../../core/unsaved-edits';
+import { SchemaRdfExportComponent } from './schema-rdf-export.component';
 
 /** A kind's rows as the tab holds them: answered, answered by a server that cannot (no echo), or failed. */
 type KindRows = { s: 'ready'; answer: TypeListAnswer } | { s: 'unsupported' } | { s: 'failed' };
@@ -61,7 +62,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
 @Component({
   selector: 'app-space-schema-tab',
   standalone: true,
-  imports: [SchemaTypeEditorComponent, RuleRowsComponent, SchemaTypeNameComponent, TypeConvertBarComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent, StatusPillComponent, SchemaTypeHistoryComponent, HelpToggleComponent],
+  imports: [SchemaRdfExportComponent, SchemaTypeEditorComponent, RuleRowsComponent, SchemaTypeNameComponent, TypeConvertBarComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent, StatusPillComponent, SchemaTypeHistoryComponent, HelpToggleComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SPACE_DIALOG_STYLES, SCHEMA_MD_STYLES, TYPE_HEAD_STYLES],
   template: `
@@ -186,6 +187,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
 <!-- export / import toolbar -->
 <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
   <button class="btn btn-secondary btn-sm" type="button" (click)="exportSchema()" [attr.title]="'spaces.schema.exportTitle' | transloco"><ph-icon name="upload" [size]="13" style="margin-right:5px;"/>{{ 'spaces.schema.exportJsonButton' | transloco }}</button>
+  <app-schema-rdf-export />
   <button class="btn btn-secondary btn-sm" type="button" (click)="triggerImportSchema()" [attr.title]="'spaces.schema.importTitle' | transloco"><ph-icon name="download-simple" [size]="13" style="margin-right:5px;"/>{{ 'spaces.schema.importJsonButton' | transloco }}</button>
   <button class="btn btn-secondary btn-sm" type="button" (click)="openExportToLibrary()" [attr.title]="'spaces.schema.exportToLibraryTitle' | transloco"><ph-icon name="bookmarks" [size]="13" style="margin-right:5px;"/>{{ 'spaces.schema.exportToLibraryButton' | transloco }}</button>
   <button class="btn btn-secondary btn-sm" type="button" (click)="triggerImportFromLibraryAny()" [attr.title]="'spaces.schema.importFromLibraryTitle' | transloco"><ph-icon name="bookmarks" [size]="13" style="margin-right:5px;"/>{{ 'spaces.schema.importLibraryButton' | transloco }}</button>
