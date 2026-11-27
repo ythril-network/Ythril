@@ -9,7 +9,7 @@
  * caller hands them in) and reads no table (the caller hands in the seconds).
  *
  * Its callers: the stack-suite runner (`_init/run-suite.mjs`), which packs Integration and Sync into the shards CI runs as
- * separate jobs, the pure standalone plan (`pureShardFiles` in `standalone-split.mjs`, the two jobs of the standalone files that need
+ * separate jobs, the pure standalone plan (`pureShardFiles` in `standalone-split.mjs`, the shard jobs of the standalone files that need
  * no service), and the database plan (`db-shard-plan.mjs`), which keeps its own name-hash placement (a file must stay on one
  * Mongo whatever else is added) and checks its cut here.
  *

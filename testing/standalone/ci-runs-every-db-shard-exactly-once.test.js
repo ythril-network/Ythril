@@ -33,7 +33,7 @@ import { splitStandalone } from '../_shared/standalone-split.mjs';
 import * as shardPlan from '../_shared/db-shard-plan.mjs';
 import {
   loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, usesOf, expressionOf, mergeGateEntries, isTrue, skipsWhenRunIsReused, REUSE_EMPTY,
-  DB_SHARD_SCRIPT as DB_SCRIPT, jobRunning, stepEnv,
+  DB_SHARD_SCRIPT as DB_SCRIPT, jobRunning, dbStepEnv,
 } from '../_shared/ci-workflow.mjs';
 import { REPO_ROOT } from './_sources.mjs';
 
@@ -46,8 +46,7 @@ const { offlineDb } = splitStandalone({ root: REPO_ROOT });
 /** The job that runs the `-db` third: the one whose steps run `npm run test:standalone:db`. Exactly one, or the rule has no subject. */
 const dbJobOf = (doc) => jobRunning(doc, DB_SCRIPT);
 
-/** The value an env var has where the test step runs. */
-const envOf = (job, name) => stepEnv(job, stepsOf(job).find(s => shellOf(s).includes(DB_SCRIPT)), name);
+const envOf = dbStepEnv;
 
 /** What a job's matrix says: the axis the index env reads, and that axis's values. `null` when there is no matrix. */
 function matrixAxisOf(job, indexExpr) {

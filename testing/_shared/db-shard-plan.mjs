@@ -99,7 +99,10 @@ export const DB_FILE_SECONDS_PATH = join(dirname(fileURLToPath(import.meta.url))
 
 /** The recorded crowded seconds of the `-db` files by file name, and `median`, the weight of a file the table does not name. */
 export function loadDbFileSeconds(path = DB_FILE_SECONDS_PATH) {
-  const table = JSON.parse(readFileSync(path, 'utf8'));
+  let table;
+  try { table = JSON.parse(readFileSync(path, 'utf8')); } catch (err) {
+    throw new Error(`the database seconds table ${path} cannot be read (${err.message}): regenerate it from a recorded run with \`node testing/_init/record-shard-seconds.mjs <file-times-all.json>\``);
+  }
   return { seconds: table.seconds ?? {}, median: table.median };
 }
 
