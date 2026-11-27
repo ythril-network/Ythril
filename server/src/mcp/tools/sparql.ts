@@ -105,7 +105,7 @@ function statementLine(q: Quad): string {
 
 export const sparql_queryTool: ToolHandler = {
   name: 'sparql_query',
-  description: 'Ask a SPARQL 1.1 query (SELECT, ASK, CONSTRUCT, DESCRIBE) of the records of a space, read at query time. Name a personal view '
+  description: 'Ask a SPARQL 1.1 query (SELECT, ASK, CONSTRUCT, DESCRIBE) of the records of a space. Name a personal view '
     + 'as `space` to query several spaces at once: the default graph is the union of the member spaces you read, and each member is its own '
     + 'named graph (`GRAPH ?g`). Same as GET/POST /api/brain/spaces/:spaceId/sparql.\n\n'
     + 'ANSWER: the first text block is the answer body, sent once: SPARQL results JSON for SELECT and ASK (`head`, and `results` or '

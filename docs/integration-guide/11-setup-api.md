@@ -358,21 +358,20 @@ A job whose previous tick is still running **skips** the next one rather than st
 
 #### The SPARQL triple index and its read bound
 
-A space with RDF on keeps a triple index of its statements (collections `<space>_rdf_*`, left out of backups and rebuilt from the records).
-A SPARQL query reads a space from its index when the index is ready and caught up, and from its records otherwise, with the same answer
-([SPARQL API](04j-sparql-api.md#the-triple-index-and-when-a-query-reads-the-records)). The config key `sparql.maxIndexRowsRead` bounds the
-statements one query may read from the indexes, every pattern together: default 20 times `sparql.maxRecordsRead` (4 000 000 with that key's
-default), a whole number from 1 000 to 200 000 000, read live; a value outside the range refuses the config load or reload, naming the key.
-Past it the query is refused `413 sparql_too_much_read`.
+A space with RDF on keeps a derived triple index of its statements, which makes SPARQL queries faster. A query reads a space from its
+index when the index is ready and current, and from its records otherwise, with the same answer
+([SPARQL API](04j-sparql-api.md#the-triple-index-and-when-a-query-reads-the-records)). The index takes extra storage in the
+instance's database, in proportion to the statements the space's records make, and is not part of a backup. The config key
+`sparql.maxIndexRowsRead` bounds the statements one query may read from the indexes, every pattern together: default 20 times
+`sparql.maxRecordsRead` (4 000 000 with that key's default), a whole number from 1 000 to 200 000 000, read live; a value outside the
+range refuses the config load or reload, naming the key. Past it the query is refused `413 sparql_too_much_read`.
 
-The `Triple index upkeep` job runs every minute over the spaces: it rebuilds an index that is missing, stale, built for another schema or
-asked for by a write no record row could name, and at most every ten minutes per space verifies a sample of 200 records and 200 dictionary
-terms; a record that differs from the index is logged (`the drift verify found`) and starts a rebuild, as does a dictionary more than half
-unused. A rebuild is logged as `Triple index of space '<id>': rebuilt (<reason>)`, its reason one of `missing`, `stale`, `journal`, `form`,
-`verify` or `unused-terms`. It writes into collections named `<space>_rdf_b<build id>_*`, fenced by a lease in `<space>_rdf_state`, and
-renames them onto the live names when it is done; a rebuild that stops leaves no such collection behind. To rebuild one space now, call
+Ythril builds and repairs the indexes itself, in the background (the `Triple index upkeep` job, every minute): for a new space, after an upgrade from a release that kept no index
+(every RDF space is built once, so the first start after such an upgrade does extra work and storage grows), after a restore or a
+change of a space's schema, and when a periodic comparison with the records finds a difference. Until a space's index is built, queries
+read its records. Each rebuild is logged as `Triple index of space '<id>': rebuilt (<reason>)`. To rebuild one space now, call
 `space_rdf_rebuild` (MCP or `POST /api/space_rdf_rebuild`, the knowledge `admin` right) and read `space_rdf_index` until its `status` is
-`ready` on a new `buildId` ([SPARQL API](04j-sparql-api.md#the-triple-index-and-when-a-query-reads-the-records)).
+`ready` ([SPARQL API](04j-sparql-api.md#the-triple-index-and-when-a-query-reads-the-records)).
 
 ---
 
