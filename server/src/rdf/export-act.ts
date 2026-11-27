@@ -45,7 +45,7 @@ import {
 import { blank, iri, plain, quad, stdIri, typed, xsd, type Quad, type EdgeDetails, type LeftOutReason } from './literals.js';
 import { RDF_READ_FIELDS, SKIPPED_VALUES_NAMED_MAX, recordTriples, createSkippedLog, type RdfRecordKind, type SkippedValue } from './record-triples.js';
 import { graphIri, prefixesFor, recordAddressable, recordIri, versionIri } from './term-iri.js';
-import { createRdfWriter, rdfVersionOf, RdfWriteError, type RdfFormat } from './serialize.js';
+import { createRdfWriter, rdfVersionOf, RdfWriteError, type RdfFormat, type RdfWriter } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
 import {
   RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
@@ -313,7 +313,7 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
   // good).
   let handedOver = false;
   try {
-    const answer = input.viewConstruct !== undefined ? await constructPage(p, input.viewConstruct)
+    const answer = input.viewConstruct !== undefined ? await constructPage(p, input.viewConstruct, constructEnding(p))
       : input.whole === true ? streamWhole(p) : await buildPage(p);
     if ('error' in answer) return answer;
     handedOver = true;
@@ -448,6 +448,20 @@ async function anyAfter(p: PageInput, from: Cursor): Promise<boolean> {
 const filterOf = rdfRowFilter;
 const projectionOf = (kind: RdfRecordKind): Record<string, 1> => Object.fromEntries(RDF_READ_FIELDS[kind].map(f => [f, 1 as const]));
 
+/**
+ * The ending of a SPARQL view's document, written by the walk's own ending (never a second copy of it): the document is whole, holds the
+ * `records` its CONSTRUCT read, leaves no value out, and describes every member graph it was made over. The writer is the one that wrote the
+ * document, so a JSON-LD report item joins its `@graph`.
+ */
+function constructEnding(p: PageInput): (writer: RdfWriter, records: number) => string {
+  return (writer, records) => {
+    const w = new ExportWalk(p);
+    w.records = records;
+    w.graphs.push(...p.exported);
+    return w.ending({ complete: true, whole: true }, writer);
+  };
+}
+
 /** One member of the scope, with the names its records are built from. */
 type Member = { space: string; meta: SpaceMeta; fingerprint: string };
 
@@ -576,7 +590,7 @@ class ExportWalk {
    * `ythril:nextAfter` (drive, finding 12: `complete false` on such a page read as a broken file). `o.complete` here only words the
    * closing comment (nothing left, or more after this page); the summary's and the audit row's `complete` are the document's, as this.
    */
-  ending(o: { complete: boolean; whole: boolean; nextAfter?: string | undefined; incomplete?: string; namedLimit?: number }): string {
+  ending(o: { complete: boolean; whole: boolean; nextAfter?: string | undefined; incomplete?: string; namedLimit?: number }, writer: RdfWriter = this.writer): string {
     const { p } = this;
     const left = this.leftOut(o.namedLimit);
     if (o.incomplete !== undefined && p.format === 'jsonld') return '';
@@ -605,7 +619,7 @@ class ExportWalk {
     // A view with no member the caller reads holds nothing, and says why, in standard terms (bundle-269 drive, finding 11).
     const empty = p.view && p.exported.length === 0 ? EMPTY_VIEW_WORDS : undefined;
     if (empty) quads.push(quad(report, stdIri('rdfs', 'comment'), plain(empty)));
-    const tail = p.format === 'turtle' ? '' : this.writer.write({ graph: reportId, quads });
+    const tail = p.format === 'turtle' ? '' : writer.write({ graph: reportId, quads });
     const how = o.incomplete !== undefined ? `INCOMPLETE, the export could not finish: ${o.incomplete}`
       : o.complete ? 'complete, nothing is left' : `more after this page (after=${o.nextAfter})`;
     const comment = [
@@ -619,7 +633,7 @@ class ExportWalk {
       ...(shapes.length > 0 ? [`shapes: ${shapes.map(s => `<${s}>`).join(' ')}`] : []),
     ].join('; ');
     if (o.incomplete !== undefined) return `${tail}# ${comment.replace(/[\r\n]/g, ' ')}\n${INCOMPLETE_LINE}`;
-    return tail + this.writer.close(comment);
+    return tail + writer.close(comment);
   }
 
   /** The audit row's changes as the answer stands. */

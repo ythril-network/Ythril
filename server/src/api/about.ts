@@ -12,6 +12,7 @@ import { getLogLines, subscribeLogLines } from '../util/log.js';
 import { computeSecurityPosture, securityStrict } from '../config/security-posture.js';
 import { dirSizeBytes } from '../quota/quota.js';
 import { SERVER_VERSION } from '../util/server-version.js';
+import { getPublicBaseUrl, publicBaseUrlIsFallback } from '../config/public-url.js';
 import { openEventStream } from '../util/sse-stream.js';
 
 // One reader for the version, in `util/server-version.ts`. This file and `app.ts` each resolved their own
@@ -89,7 +90,8 @@ aboutRouter.get('/', async (_req, res) => {
     mongoVersion: mongoVer,
     diskInfo,
   };
-  if (cfg.publicUrl) response.publicUrl = cfg.publicUrl;
+  // The address the server itself builds from (PUBLIC_BASE_URL over config.publicUrl): the RDF card's default base is built from this one.
+  if (!publicBaseUrlIsFallback()) response.publicUrl = getPublicBaseUrl();
   res.json(response);
 });
 
