@@ -16,10 +16,13 @@
  * ## What it prevents
  *
  * - **A retry loop with no bound.** The wait grows with each failure and has a ceiling, so a failing space costs at most one scan an hour.
+ *   The schedule is `util/backoff.ts` `nominalBackoffMs` (unscattered: the question is asked of a stored count at every tick, and one
+ *   process starts the rebuilds, so there is no herd to break up).
  * - **A count that outlives the failure.** `settled` takes the outcome itself, so a caller cannot clear the count for an outcome that is no
  *   success, nor count one that is no failure. The count lives in memory: a restart is a new start, which the first tick retries.
  */
 import { LruMap } from '../../util/lru-map.js';
+import { nominalBackoffMs } from '../../util/backoff.js';
 import type { RebuildResult } from './rebuild.js';
 
 /** The longest wait between two rebuilds of a space whose rebuilds keep failing. */
@@ -40,7 +43,7 @@ export function rebuildBackoff(intervalMs: number): RebuildBackoff {
   return {
     mayStart(spaceId, now) {
       const f = failures.peek(spaceId);
-      return f === undefined || now >= f.at + Math.min(2 ** (f.count - 1) * intervalMs, REBUILD_BACKOFF_MAX_MS);
+      return f === undefined || now >= f.at + nominalBackoffMs(f.count - 1, intervalMs, REBUILD_BACKOFF_MAX_MS);
     },
     settled(spaceId, outcome, now) {
       if (outcome === 'built') failures.delete(spaceId);
