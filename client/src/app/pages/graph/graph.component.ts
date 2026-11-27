@@ -29,7 +29,7 @@ import { linkedToNode, linkedToEdge, type LinkedRecords } from './graph-linked-f
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { FocusHandoffDirective } from '../../shared/focus-handoff.directive';
-import { httpErrorReason } from '../../core/http-error';
+import { loadFailureText } from '../../core/load-failure-text';
 import {
   Space,
   Entity,
@@ -662,7 +662,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
         this.loadWatch.end();
         this.loadError.set(e instanceof TimeoutError
           ? this.loadWatch.gaveUpMessage()
-          : httpErrorReason(e));
+          : loadFailureText(this.transloco, e));
       },
       next: (result) => {
         this.loadWatch.end();

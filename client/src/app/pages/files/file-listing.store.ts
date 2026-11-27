@@ -1,7 +1,8 @@
 import { DestroyRef, Injectable, inject, signal } from '@angular/core';
+import { TranslocoService } from '@jsverse/transloco';
 import { Subject } from 'rxjs';
 import { FilesApi } from '../../core/files-api.service';
-import { httpErrorReason } from '../../core/http-error';
+import { loadFailureText } from '../../core/load-failure-text';
 import { retryAfterSecondsOf } from '../../core/retry-after';
 import type { FileEntry } from '../../core/api.types';
 import type { refusalText } from '../../core/refusal-text';
@@ -161,6 +162,7 @@ export function listingFailureKey(failure: Pick<ListingMutationFailure, 'kind' |
 @Injectable()
 export class FileListingStore {
   private readonly filesApi = inject(FilesApi);
+  private readonly transloco = inject(TranslocoService);
 
   /** The rows for the directory `loadedPath` describes. Empty after a failed navigation, never stale. */
   readonly entries = signal<FileEntry[]>([]);
@@ -260,7 +262,7 @@ export class FileListingStore {
         this.listed.next({ path, entries });
       },
       error: (e) => {
-        const reason = httpErrorReason(e);
+        const reason = loadFailureText(this.transloco, e);
         this.listingFailed.next({ path, reason });
         if (isRefresh) {
           // A failed POLL must not throw away good rows — that is the same defect in another dress, and a

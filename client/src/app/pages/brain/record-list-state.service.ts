@@ -1,5 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { TranslocoService } from '@jsverse/transloco';
+import { loadFailureText } from '../../core/load-failure-text';
 import { httpErrorReason, refusalText, type RefusalSource } from '../../core/refusal-text';
 
 /**
@@ -20,6 +21,9 @@ export class RecordListState {
   loading = signal(false);
   /** Failure reason for the active tab's last load; null when it succeeded (or hasn't run). */
   loadError = signal<string | null>(null);
+
+  /** The tab's list load failed: say it in the reader's language when the client has words for the refusal's code. */
+  failLoad(failure: unknown): void { this.loadError.set(loadFailureText(this.transloco, failure)); }
 
   /** The `_id` of the row being inline-edited (empty = none). */
   editingId = signal('');
