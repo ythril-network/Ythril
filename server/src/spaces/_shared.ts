@@ -107,6 +107,11 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
  */
 export async function repairStaleSpaceIdsReporting(
   spaceId: string, inCollectionsOf: string = spaceId, only?: readonly string[],
+  /**
+   * `quiet`: the count is returned and not warned of. The move back of a refused rename puts the old id on documents the rename itself had given the new
+   * one; nothing was left stale by anything else, so a "repaired a stale spaceId" line there would tell the operator of damage that is not there (Q-978).
+   */
+  opts: { quiet?: boolean } = {},
 ): Promise<{ repaired: number; failures: Array<{ what: string; err: unknown }> }> {
   const db = getDb();
   const failures: Array<{ what: string; err: unknown }> = [];
@@ -152,7 +157,7 @@ export async function repairStaleSpaceIdsReporting(
     }
   }
 
-  if (repaired > 0) {
+  if (repaired > 0 && !opts.quiet) {
     log.warn(
       `Space '${peerText(spaceId)}': repaired ${repaired} document(s) carrying a stale spaceId ` +
       `(left behind by a space rename, a cross-space import, or an aliased sync). They were ` +

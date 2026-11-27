@@ -15,11 +15,18 @@
  * never ran, one that ran half-way and one that finished are all put right by the same call. A key with no document at `from` is not a pair
  * to undo: that move takes nothing, so nothing at `to` is touched.
  */
+import { isDeepStrictEqual } from 'node:util';
 import type { Collection, Document } from 'mongodb';
 import { asFilter, asDoc } from './mongo.js';
 
 export async function snapshotKeyedMove<T extends Document>(
   coll: Collection<T>, pairs: ReadonlyArray<readonly [from: string, to: string]>, afterRestore?: () => void,
+  /**
+   * For a document something else keeps writing to (a counter that is incremented, a usage bucket): what to put back at `from` when a document stands
+   * there at the put-back that is not the one read before the move, given that document and the one read before. Without it the document read before
+   * the move is put back as it was, and what was written to `from` meanwhile is lost (Q-978). A document that stands there unchanged is put back as it was.
+   */
+  merge?: (current: T, before: T) => T,
 ): Promise<() => Promise<void>> {
   const rows: Array<{ from: string; to: string; fromDoc: T; toDoc: T | null }> = [];
   for (const [from, to] of pairs) {
@@ -29,7 +36,11 @@ export async function snapshotKeyedMove<T extends Document>(
   }
   return async () => {
     // The documents at `from` first: a failure between the two loops leaves the space whole at `from` and a copy at `to`, which the retry moves again.
-    for (const r of rows) await coll.replaceOne(asFilter<T>({ _id: r.from }), asDoc<T>(r.fromDoc), { upsert: true });
+    for (const r of rows) {
+      const current = merge ? await coll.findOne(asFilter<T>({ _id: r.from })) as T | null : null;
+      const put = current && merge && !isDeepStrictEqual(current, r.fromDoc) ? merge(current, r.fromDoc) : r.fromDoc;
+      await coll.replaceOne(asFilter<T>({ _id: r.from }), asDoc<T>(put), { upsert: true });
+    }
     for (const r of rows) {
       if (r.toDoc) await coll.replaceOne(asFilter<T>({ _id: r.to }), asDoc<T>(r.toDoc), { upsert: true });
       else await coll.deleteOne(asFilter<T>({ _id: r.to }));

@@ -19,6 +19,7 @@ import { moveEveryMark } from '../sync/receive-marks.js';
 import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
 import { repairStaleSpaceIds, repairStaleSpaceIdsReporting } from './_shared.js';
 import { RenameLedger } from './rename-ledger.js';
+import { isIdBeingCreated } from './space-id-claim.js';
 import { forgetHeld } from './schema-stamp.js';
 import {
   runSpaceAct, registerSpaceAct, releaseSpaceActWaiter, defineSpaceActBody, spaceActStands, SpaceActsClosedError,
@@ -62,10 +63,14 @@ class RenameRefusedError extends Error {
    * `left` is what the refused rename could not move back, named (empty: everything is back under the old name, nothing is split).
    * Either way the answer says which, and how to finish, so a space never stands split across two names with no word of it (Q-978).
    */
-  constructor(spaceId: string, newId: string, errors: string[], left: string[]) {
+  constructor(spaceId: string, newId: string, errors: string[], left: string[], markerKept: boolean = false) {
     super(
-      left.length === 0
+      left.length === 0 && !markerKept
         ? `Space '${spaceId}' was not renamed (${errors.length} error(s)): what had moved was moved back, and the space stands whole under '${spaceId}'. ` +
+          `Errors: ${errors.join('; ')}`
+        : left.length === 0
+        ? `Space '${spaceId}' was not renamed: what had moved was moved back, but the rename's mark in config.json could not be cleared. ` +
+          `The space stays closed to writes until the rename is finished: repeat the same rename to finish it; it is also resumed at the next restart. ` +
           `Errors: ${errors.join('; ')}`
         : `Space '${spaceId}' was not renamed, and what moved could not all be moved back. Still under '${newId}': ${left.join('; ')}. ` +
           `The space stays closed to writes until the rename is finished: repeat the same rename to finish it; it is also resumed at the next restart. ` +
@@ -160,7 +165,7 @@ export async function moveSpaceData(
   // documents of its own, and a first attempt does not rewrite those either (`earlierAttempt`).
   let rewrite: Awaited<ReturnType<typeof repairStaleSpaceIdsReporting>> | undefined;
   ledger.did(`spaceId of the documents of ${newId}`, async () => {
-    const back = await repairStaleSpaceIdsReporting(oldId, newId, movedNames);
+    const back = await repairStaleSpaceIdsReporting(oldId, newId, movedNames, { quiet: true });
     if (back.failures[0]) throw back.failures[0].err;
   });
   try {
@@ -502,6 +507,9 @@ function renameRefusal(cfg: Config, oldId: string, newId: string, except?: strin
   const builtIn = builtInRefusal(space, 'rename');
   if (builtIn) return builtIn;
   if (cfg.spaces.some(s => s.id === newId)) return new Error(`Space '${newId}' already exists`);
+  // A create building a space under `newId` holds it (`space-id-claim.ts`): it is not configured yet, and a rename moving collections under it now would
+  // give the create the renamed space's collections and counter. A conflict in our words; the id is free again when the create ends.
+  if (isIdBeingCreated(newId)) return new Error(`Space '${newId}' already exists: it is being created right now`);
   // A retired proxy id stays reserved until an instance admin purges what it still holds.
   try { assertNotRetiredSpaceId(newId, cfg); } catch (err) { return err as Error; }
   // A network may still call ANOTHER space by `newId` — its name before a rename (Q-133). Taking it would make this
@@ -673,28 +681,38 @@ async function refusedRenameEnd(
   // The schema snapshots moved with the collections: what is known held under either id is asked of the store again.
   forgetHeld(oldId);
   forgetHeld(newId);
-  if (left.length === 0) {
-    clearRenameMarker(oldId, newId);
+  // The act ends only when the data is whole AND the marker is gone: a marker that stands closes the space to writes and is rolled forward by the
+  // next space operation, so an act that ended over it would leave the space closed with nothing owed, and the answer would say "not renamed".
+  const markerCleared = left.length === 0 && clearRenameMarker(oldId, newId);
+  if (markerCleared) {
     log.info(`Rename of space '${peerText(oldId)}' to '${peerText(newId)}' was refused; what had moved was moved back and '${peerText(oldId)}' stands whole`);
+  } else if (left.length === 0) {
+    log.error(`Rename of space '${peerText(oldId)}' to '${peerText(newId)}' was refused and moved back, but its marker could not be cleared. The marker is kept: repeating the same rename finishes it.`);
   } else {
     log.error(`Rename of space '${peerText(oldId)}' to '${peerText(newId)}' was refused and could not all be moved back; ${peerText(left.join('; '))} stay under '${peerText(newId)}'. The marker is kept: repeating the same rename finishes it.`);
   }
-  const error = !failure ? new RenameRefusedError(oldId, newId, errors, left)
-    : left.length > 0 && !isStoreSide(failure.err) ? new RenameRefusedError(oldId, newId, [refusalText(failure.err)], left)
+  const owed = !markerCleared;
+  const error = !failure ? new RenameRefusedError(oldId, newId, errors, left, owed)
+    : owed && !isStoreSide(failure.err) ? new RenameRefusedError(oldId, newId, [refusalText(failure.err)], left, owed)
     : failure.err;
-  return left.length === 0 ? new RenameMovedBack(error instanceof Error ? error : new Error(String(error))) : error;
+  return markerCleared ? new RenameMovedBack(error instanceof Error ? error : new Error(String(error))) : error;
 }
 
-/** Clear the marker of a rename whose data is whole under the old name. A save that fails leaves it, which a retry or the next start resumes. */
-function clearRenameMarker(oldId: string, newId: string): void {
+/**
+ * Clear the marker of a rename whose data is whole under the old name. Says whether it is gone: a save that fails leaves it, and the rename stays owed
+ * (a retry or the next start resumes it).
+ */
+function clearRenameMarker(oldId: string, newId: string): boolean {
   try {
     mutateConfig(cfg => {
       const op = cfg.pendingSpaceOp;
       if (op?.type === 'rename' && op.spaceId === oldId && op.newId === newId) delete cfg.pendingSpaceOp;
     });
+    return true;
   } catch (err) {
     log.warn(`Could not clear the marker of the refused rename of '${peerText(oldId)}' to '${peerText(newId)}'; a retry or the next start resumes it: ${peerText(err)}`);
     try { reloadConfig(); } catch { /* the next write reloads it */ }
+    return false;
   }
 }
 
@@ -710,13 +728,18 @@ async function commitRename(oldId: string, newId: string): Promise<SpaceConfig> 
   // returned 200, the collections had moved, and config still carried the OLD id — so the rename
   // silently did not happen and every lookup under the new id 404'd.
   let renamed: SpaceConfig | undefined;
+  let taken = false;
   mutateConfig(fresh => {
     const live = fresh.spaces.find(s => s.id === oldId);
     if (!live) return; // already committed by a concurrent resume — nothing left to do
+    // The new id was free when the rename registered; something configured it since (Q-978). Committing would hold it twice, so the
+    // commit is refused here and the rename moves back what it moved.
+    if (fresh.spaces.some(s => s.id === newId)) { taken = true; return; }
     applySpaceRenameToConfig(fresh, live, oldId, newId);
     delete fresh.pendingSpaceOp;
     renamed = live;
   });
+  if (taken) throw new Error(`Space '${newId}' already exists`);
   if (!renamed) {
     // The physical move succeeded, so treat an already-committed config as success rather than
     // failing a rename that has, in fact, happened.
