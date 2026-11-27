@@ -113,12 +113,16 @@ before(async () => {
   // The code a triple index rebuild refuses with (`space_rdf_rebuild` names it, Q-764), from the act's own list.
   const { TRIPLE_INDEX_REBUILD_REFUSAL_CODES } = await import('../../server/dist/rdf/triple-index/rebuild.js');
   assert.ok(TRIPLE_INDEX_REBUILD_REFUSAL_CODES?.length >= 1, 'the triple index rebuild refusal codes were not read');
+  // The codes the personal-view doors refuse with (`view_create` and `view_update` name `view_is_construct`, Q-762), from the one table of them.
+  const { VIEW_REFUSALS } = await import('../../server/dist/config/views.js');
+  const viewCodes = Object.values(VIEW_REFUSALS).map((r) => r.code);
+  assert.ok(viewCodes.length >= 10, 'the view refusal codes were not read');
   const { UNCONVERTED_REASONS } = await import('../../server/dist/brain/schema-convert-items.js');
   assert.ok(SCHEMA_CONVERT_REFUSAL_CODES?.length >= 5 && UNCONVERTED_REFUSAL_CODES?.length >= 5 && UNCONVERTED_REASONS?.length >= 5, 'the conversion refusal codes and reason classes were not read');
   ANSWER_VALUES = [SCHEMA_CONVERT_VIEW_STATE, ...SCHEMA_CONVERT_REFUSAL_CODES,...UNCONVERTED_REFUSAL_CODES, ...UNCONVERTED_REASONS, ...DEGRADED_REASONS, ...FILE_CHANGES_REFUSAL_CODES, ...SCHEMA_VERSION_REFUSAL_CODES,...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
     ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED, ...SYNC_ANSWER_CODES,
     ...RDF_EXPORT_REFUSAL_CODES, ...RDF_SCHEMA_REFUSAL_CODES, ...SPARQL_ENDPOINT_CODES, ...SPARQL_WARNING_CODES,
-    ...SPARQL_UPDATE_ACT_CODES, ...SPARQL_UPDATE_REFUSAL_CODES, ...TRIPLE_INDEX_REBUILD_REFUSAL_CODES];
+    ...SPARQL_UPDATE_ACT_CODES, ...SPARQL_UPDATE_REFUSAL_CODES, ...TRIPLE_INDEX_REBUILD_REFUSAL_CODES, ...viewCodes];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
 
