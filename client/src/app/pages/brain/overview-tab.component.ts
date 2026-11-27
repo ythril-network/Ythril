@@ -16,7 +16,9 @@
  * fetches nothing itself' until 2026-08-08; it is corrected rather than left to be discovered.
  * The token-access panel is a later slice (admin-gating).
  */
-import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, untracked } from '@angular/core';
+import { RdfConflicts } from '../../core/rdf-conflicts.service';
+import { RdfExportPanelComponent } from './rdf-export-panel.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { StatusPillComponent, StatusVariant } from '../../shared/status-pill.component';
@@ -41,7 +43,7 @@ import { PluralText } from '../../core/plural-text.service';
   selector: 'app-overview-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ErModelPanelComponent, ReindexNotesComponent, TranslocoPipe, PhIconComponent, StatusPillComponent, SkeletonLinesComponent, RouterLink, InstantComponent, InstantPipe],
+  imports: [RdfExportPanelComponent, ErModelPanelComponent, ReindexNotesComponent, TranslocoPipe, PhIconComponent, StatusPillComponent, SkeletonLinesComponent, RouterLink, InstantComponent, InstantPipe],
   styles: [`
     :host { display: block; }
 
@@ -55,6 +57,7 @@ import { PluralText } from '../../core/plural-text.service';
     /* The summary spans the full row — it is the heaviest card (six tiles + the storage bar) and
        reads as the page's headline rather than one tile among equals. */
     .panel.span-all { grid-column: 1 / -1; }
+    .rdf-conflict { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; font-size: 12.5px; color: var(--warning); }
 
     /* A card is a column: header, then a body that FILLS the stretched height. Without the filling
        body a short card's content floats against a tall border box. */
@@ -543,11 +546,19 @@ import { PluralText } from '../../core/plural-text.service';
                 <li><ph-icon name="link" [size]="13"/><span class="nl">{{ n.label }}</span><span class="nt">{{ n.type }}</span></li>
               }
             </ul>
+            <!-- Q-942: a network contests this space's RDF base; said in one line, the way in is the RDF names card. -->
+            @if (rdfConflict()) {
+              <p class="rdf-conflict" data-testid="overview-rdf-conflict"><ph-icon name="warning" [size]="13"/>{{ 'rdf.overview.conflict' | transloco }}
+                <button type="button" class="comp-go" data-testid="overview-rdf-open" (click)="openRdfNames.emit()">{{ 'rdf.export.openNames' | transloco }}</button></p>
+            }
           } @else {
             <span class="muted">{{ 'brain.overview.noNetworks' | transloco }}</span>
           }
         </div>
       </section>
+
+      <!-- ── RDF export (Q-942): the records as one RDF file, in the panel grid beside Indexing and Networks ── -->
+      <app-rdf-export-panel [subjectId]="space().id" [label]="space().label" [members]="[space()]" (openNames)="openRdfNames.emit()" />
 
       <!-- The Instance card is gone (owner, 2026-08-08): instance label, version, id, uptime and Mongo
            version are properties of the INSTANCE, not of the space being looked at, and every one of them
@@ -646,6 +657,15 @@ export class OverviewTabComponent {
   /** Emitted (after a confirm) so the shell's existing reindex flow runs — no duplicate API path. */
   /** A collection tile was clicked — the shell switches to that tab. */
   openTab = output<CollectionTab>();
+  /** "Open RDF names": the shell opens the space's settings on the RDF names card (Q-942). */
+  openRdfNames = output<void>();
+  private readonly rdfConflicts = inject(RdfConflicts);
+  /** A network contests this space's RDF base: the Networks panel says so in one line (Q-942). */
+  readonly rdfConflict = computed(() => this.rdfConflicts.has(this.space().id));
+  constructor() {
+    // The networks are asked again for each space shown: whether one contests its base.
+    effect(() => { const id = this.space().id; untracked(() => this.rdfConflicts.load(id)); });
+  }
 
   reindex = output<void>();
   /** Emitted so the shell re-queues every failed embedding job and reloads the queue (fetch-free tab). */

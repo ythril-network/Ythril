@@ -41,6 +41,9 @@ const HOLDER_FLOOR = 20;
  */
 const NOT_A_DRAFT: Readonly<Record<string, string>> = {
   // Filters, queries and controls that act at once.
+  'src/app/pages/brain/rdf-export-panel.component.ts': 'the RDF export\'s format and edge choice only shape a download its button starts; nothing is stored',
+  'src/app/pages/settings/schema-rdf-export.component.ts': 'the schema export\'s format only shapes a download its button starts; nothing is stored',
+  'src/app/pages/settings/space-rdf-card.component.ts': 'the switch, base and vocabulary are fields of the settings dialog\'s draft, which SpaceSettingsState holds; the new base of a base change is sent by its own confirmed act at once',
   'src/app/pages/brain/query-tab.component.ts': 'a query builder: the recall form and the advanced query form only parameterise a read that a Run button sends, and nothing is written',
   'src/app/pages/brain/recall-form.component.ts': 'the recall (search) parameters: every field only shapes a read that Run sends, nothing is stored',
   'src/app/pages/brain/record-search-bar.component.ts': 'a record search box that emits its query at once to filter the list; it is a filter, not an edit',

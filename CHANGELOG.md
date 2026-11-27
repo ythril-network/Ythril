@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Web app:** RDF from the screens: an **RDF names** card on a space's Settings tab (switch, base and vocabulary addresses, offered bases to accept, base-change votes), **Export RDF** with its format beside Export JSON on the Schema tab, and an **RDF export** panel on a space's and a personal view's Overview that shows the running export and the values it left out.
 - **Operations:** every answer carries `Server-Timing` per phase, one refused before routing (a body that is not JSON, one over the size limit) too; MCP tool results carry it in `_meta` under `ythril/server-timing`.
 - **Operations:** new metrics `ythril_cache_lookups_total{cache,result}` and `ythril_cache_entries{cache}` count the lookups and entries of the recall query-vector, SPARQL planning-count and RDF schema caches.
 - **Operations:** `ythril_write_group_aborts_total{reason}` counts SPARQL Update write groups that landed nothing; a delete still referenced is refused whole (`referenced`).
