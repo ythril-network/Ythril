@@ -17,6 +17,7 @@
  * - **A size that is a copy.** A cache registers a function that answers its size ({@link reportCacheSize}); the gauge reads it at scrape time,
  *   so it can never disagree with what the cache holds.
  */
+import { Counter, Gauge, type Registry } from 'prom-client';
 import { countSink } from './count-sink.js';
 
 /** The caches that report: a recall's query vector (`brain/recall.ts`), the planner's pattern counts, the RDF schema verdict. */
@@ -27,9 +28,6 @@ export type CacheName = typeof CACHES[number];
 export type CacheResult = 'hit' | 'miss';
 
 const lookups = countSink<[cache: CacheName, result: CacheResult]>();
-
-/** Called once by the registry, at load. */
-export const setCacheLookupSink = lookups.set;
 
 /** One lookup of `cache`, answered from it or computed. */
 export const noteCacheLookup = lookups.add;
@@ -42,6 +40,29 @@ export function reportCacheSize(cache: CacheName, size: () => number): void {
 }
 
 /** The entries each cache holds now; a cache that has not reported (its module is not loaded) holds none. */
-export function cacheEntries(): Array<[CacheName, number]> {
+function cacheEntries(): Array<[CacheName, number]> {
   return CACHES.map(c => [c, sizes.get(c)?.() ?? 0]);
+}
+
+/**
+ * Declares `ythril_cache_lookups_total{cache,result}` and `ythril_cache_entries{cache}` on `register`, gives the lookups their sink and
+ * pre-declares every series at zero (a cache nothing has asked yet reads 0 for both results, so absent never means "not counted"). Called once,
+ * by the registry, which cannot be imported here (see the module docblock); a second call on the same registry would register the names twice.
+ */
+export function declareCacheMetrics(register: Registry): void {
+  const lookupsCounter = new Counter({
+    name: 'ythril_cache_lookups_total',
+    help: 'Lookups of the in-memory caches (recall query vectors, planning counts, RDF schema verdicts), by cache and result',
+    labelNames: ['cache', 'result'] as const,
+    registers: [register],
+  });
+  lookups.set((cache, result) => lookupsCounter.labels({ cache, result }).inc());
+  for (const cache of CACHES) for (const result of ['hit', 'miss'] as const) lookupsCounter.labels({ cache, result }).inc(0);
+  new Gauge({
+    name: 'ythril_cache_entries',
+    help: 'Entries held by the in-memory caches, by cache',
+    labelNames: ['cache'] as const,
+    registers: [register],
+    collect() { for (const [cache, n] of cacheEntries()) this.set({ cache }, n); },
+  });
 }
