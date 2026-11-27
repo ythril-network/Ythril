@@ -45,6 +45,12 @@ export interface RdfExportRun {
 
 /** The last bytes of a document kept to read its ending: the server names at most 100 left-out values. */
 const TAIL_CHARS = 256 * 1024;
+/** How long a saved file's object URL is kept after the click: a large file may take the browser a moment to hand over. */
+const SAVED_URL_HOLD_MS = 10_000;
+const BYTES_PER_MB = 1024 * 1024;
+
+/** Megabytes with one decimal, as the RDF screens say a size. */
+export const megabytes = (bytes: number): string => (bytes / BYTES_PER_MB).toFixed(1);
 
 /** A refused answer as a refusal source: its status, its JSON body when it has one, its headers. */
 async function refusalOf(r: Response): Promise<RefusalSource> {
@@ -103,7 +109,7 @@ export class RdfExportRuns {
       }
       const ending = rdfExportEnding(tail, format);
       if (!ending || !ending.complete) { end({ failure: 'cut', bytes }); return; }
-      saveBlob(new Blob(parts, { type: r.headers.get('Content-Type') ?? 'application/octet-stream' }), file, { revokeAfterMs: 10_000 });
+      saveBlob(new Blob(parts, { type: r.headers.get('Content-Type') ?? 'application/octet-stream' }), file, { revokeAfterMs: SAVED_URL_HOLD_MS });
       const result: RdfExportResult = {
         ...ending, file, bytes,
         withoutRdf: headerList(r.headers.get('Ythril-View-Members-Without-Rdf')),
@@ -129,7 +135,7 @@ export class RdfExportRuns {
     try {
       const r = await this.download.open(`/api/spaces/${encodeURIComponent(id)}/schema-rdf?format=${format}`);
       if (!r.ok) return await refusalOf(r);
-      saveBlob(await r.blob(), fileNameOf(r, `${id}-schema.${format === 'jsonld' ? 'jsonld' : 'ttl'}`), { revokeAfterMs: 10_000 });
+      saveBlob(await r.blob(), fileNameOf(r, `${id}-schema.${format === 'jsonld' ? 'jsonld' : 'ttl'}`), { revokeAfterMs: SAVED_URL_HOLD_MS });
       return null;
     } catch (err) {
       return { status: 0, message: String(err) };

@@ -4,6 +4,14 @@ import { RDF_REFUSAL_CODES } from './rdf-names';
 /** The key family the RDF doors' refusals are worded under. */
 export const RDF_REFUSAL_PREFIX = 'rdf.refusal';
 
+/** The words of an answer with no code this family words, by its HTTP status: a refused body, the rights guard, an unknown space. */
+const BAD_REQUEST = 400;
+const FORBIDDEN = 403;
+const NOT_FOUND = 404;
+const STATUS_WORDS: Readonly<Record<number, string>> = {
+  [BAD_REQUEST]: 'rdf.refusal.badRequest', [FORBIDDEN]: 'rdf.refusal.forbidden', [NOT_FOUND]: 'rdf.refusal.notFound',
+};
+
 /**
  * The words for a refusal of an RDF door on the RDF screens (Q-942): the settings save, the accept of an offered base, a base change, the
  * schema export and the records export.
@@ -21,9 +29,8 @@ export function rdfRefusalText(t: RefusalTranslator, err: unknown): string {
     return refusalText(t, err as RefusalSource, 'rdf.refusal.failed', RDF_REFUSAL_PREFIX);
   }
   const status = (err as RefusalSource | null)?.status;
-  if (status === 400) return t.translate('rdf.refusal.badRequest');
-  if (status === 403) return t.translate('rdf.refusal.forbidden');
-  if (status === 404) return t.translate('rdf.refusal.notFound');
+  const byStatus = STATUS_WORDS[status ?? 0];
+  if (byStatus) return t.translate(byStatus);
   if (status === 0 || status === undefined) return t.translate('rdf.refusal.unreachable');
   return t.translate('rdf.refusal.failed');
 }
