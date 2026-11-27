@@ -31,6 +31,7 @@ import { substitute } from './params.mjs';
 import { loadTemplates } from './queries.mjs';
 import { lookupQueries, mapParameters, parameterAddresses, tableFromBindings } from './ythril-params.mjs';
 import { median, percentile } from './stats.mjs';
+import { mcpPhasesOf, phasesOf } from './server-timing.mjs';
 
 /** The 95th percentile, nearest rank (`stats.mjs`). */
 const PERCENTILE = 95;
@@ -40,20 +41,6 @@ const p95 = (xs) => percentile(xs, PERCENTILE);
 const PHASES = ['total', 'auth', 'rate', 'scope', 'door', 'parse', 'members', 'schema', 'verdict', 'plan', 'run', 'render',
   'embed', 'search', 'fresh', 'lexical', 'text', 'introduce', 'rerank', 'hydrate',
   'links', 'read', 'decide', 'version', 'write', 'index', 'after'];
-/** The `_meta` key an MCP tool result carries its figures under. */
-const MCP_TIMING_META = 'ythril/server-timing';
-
-/** The entries of a `Server-Timing` value: `{ name: dur }` (durations of a phase that ran more than once are its sum). */
-export function phasesOf(header) {
-  const out = {};
-  if (!header) return out;
-  for (const raw of String(header).split(',')) {
-    const [name, ...params] = raw.trim().split(';').map(s => s.trim());
-    const dur = params.find(p => p.startsWith('dur='));
-    if (name && dur) out[name] = Number(dur.slice(4));
-  }
-  return out;
-}
 
 async function main() {
   const { flags } = parseArgs(process.argv.slice(2));
@@ -119,8 +106,8 @@ async function main() {
         const data = /^(?:event|data):/m.test(text) ? text.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5)) : [text];
         for (const d of data) {
           let msg = null; try { msg = JSON.parse(d); } catch { /* not JSON */ }
-          const held = msg?.result?._meta?.[MCP_TIMING_META];
-          if (held) phases = Object.fromEntries(Object.entries(held).map(([p, f]) => [p, Number(f.dur)]));
+          const held = mcpPhasesOf(msg?.result);
+          if (Object.keys(held).length > 0) phases = held;
           if (msg?.result?.isError) status = 'refused';
         }
       }

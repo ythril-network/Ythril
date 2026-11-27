@@ -16,6 +16,10 @@
  * ones the BSBM test driver chose (`params.json`, from `generate.mjs`): run k of every query uses parameter set k,
  * so both engines are asked the same 23 questions per query, three of them as warm-up.
  *
+ * A Ythril run also reads each answer's `Server-Timing` header (server-timing.mjs) and records, per query and per run, the door's total
+ * (`total`) and the engine's own time (`plan` plus `run`) beside the client's wall time; its table shows the median and p95 of each, so
+ * the engine is compared with Oxigraph's like for like. An answer without the header is that query's error, never a zero.
+ *
  * Writes `<UTC stamp>-<engine>-<size>.json` to the results folder (default `<work>/results/`) and prints a
  * markdown table. An engine that answers an error for a query is recorded as that query's error and the run goes
  * on to the next query: a missing endpoint is eleven rows saying 404, not a crash.
@@ -32,6 +36,7 @@ import { substitute } from './params.mjs';
 import { acceptFor, loadTemplates } from './queries.mjs';
 import { buildRecord, writeRecord } from './result-record.mjs';
 import { summarize } from './stats.mjs';
+import { phasesOf, summarizeTimed, timingOfAnswer } from './server-timing.mjs';
 import { judgeComparability } from './comparability.mjs';
 import { waitForDrain } from './embed-wait.mjs';
 import { countPredicatesOfFile, countQuery, notTakenOf } from './not-taken.mjs';
@@ -47,7 +52,11 @@ const REQUEST_TIMEOUT_MS = CEILINGS.timeoutMs + 30_000;
 /** How long a Ythril run waits for the embed queue to drain before it measures anyway (minutes, `--embed-wait-minutes`). */
 const EMBED_WAIT_MINUTES = 30;
 
-async function ask(endpoint, token, query, accept) {
+/**
+ * One query. With `timed` (a Ythril run) the answer's `Server-Timing` header is read too: the door's total and the engine's own time
+ * ride in `doorMs` and `engineMs`, and a successful answer without them is that query's error (`no-server-timing`), never a zero.
+ */
+async function ask(endpoint, token, query, accept, timed = false) {
   const t0 = performance.now();
   try {
     const res = await fetch(endpoint, {
@@ -59,8 +68,14 @@ async function ask(endpoint, token, query, accept) {
     const text = await res.text();
     const ms = performance.now() - t0;
     if (res.status >= 200 && res.status < 300) {
+      let server = {};
+      if (timed) {
+        try { server = timingOfAnswer(phasesOf(res.headers.get('server-timing'))); } catch (err) {
+          return { ok: false, error: { code: 'no-server-timing', status: res.status, message: err.message.slice(0, 300) } };
+        }
+      }
       // A graph answer is counted by parsing it, on both engines; an answer that does not parse is that query's error.
-      try { return { ok: true, ms, rows: countRows(text, accept), bytes: Buffer.byteLength(text) }; } catch (err) {
+      try { return { ok: true, ms, ...server, rows: countRows(text, accept), bytes: Buffer.byteLength(text) }; } catch (err) {
         return { ok: false, error: { code: 'unparsable-answer', status: res.status, message: err.message.slice(0, 300) } };
       }
     }
@@ -81,19 +96,22 @@ async function runQueries({ engine, endpoint, token, templates, paramsFile, warm
     if (!sets || sets.length < warmups + runs) throw new Error(`${name}: params.json holds ${sets?.length ?? 0} sets, ${warmups + runs} are needed`);
     const accept = acceptFor(t.form, engine);
     const times = [];
+    const timedRuns = [];
     let firstError = null;
     let errors = 0;
     let rows = null;
     let bytes = null;
     const rowsPerRun = [];
     for (let k = 0; k < warmups + runs; k++) {
-      const r = await ask(endpoint, token, substitute(t.text, sets[k]), accept);
+      const r = await ask(endpoint, token, substitute(t.text, sets[k]), accept, engine === 'ythril');
       rowsPerRun.push(r.ok ? r.rows : null);
       if (!r.ok) { errors++; firstError ??= r.error; continue; }
-      if (k >= warmups) { times.push(r.ms); rows ??= r.rows; bytes ??= r.bytes; }
+      if (k >= warmups) { times.push(r.ms); timedRuns.push({ wall: r.ms, doorMs: r.doorMs, engineMs: r.engineMs }); rows ??= r.rows; bytes ??= r.bytes; }
     }
+    // A Ythril query keeps the door's total and the engine's own time of every measured run beside the client's wall time.
+    const summary = () => (engine === 'ythril' ? summarizeTimed(timedRuns) : summarize(times));
     queries[name] = times.length
-      ? { ...summarize(times), rows, rowsPerRun, bytes, errors, ...(firstError ? { error: firstError } : {}) }
+      ? { ...summary(), rows, rowsPerRun, bytes, errors, ...(firstError ? { error: firstError } : {}) }
       : { n: 0, errors, error: firstError ?? { code: 'no-measured-run', status: 0, message: 'every request failed' } };
   }
   return queries;
@@ -149,13 +167,17 @@ function table(record) {
     ...(record.sparqlLimits ? [`SPARQL limits: ${Object.entries(record.sparqlLimits).map(([k, v]) => `${k} ${v}`).join(', ')}`] : []),
     ...(record.embedQueue ? [`embed queue: waited ${record.embedQueue.waitedMs} ms, ${record.embedQueue.pending} pending, ${record.embedQueue.drained ? 'drained' : 'not drained'}`] : []),
     '',
-    '| query | median ms | p95 ms | rows | errors | comparable |',
-    '|---|---:|---:|---:|---|---|',
+    // A Ythril record adds the door's total and the engine's own time (median / p95) beside the client's wall time.
+    ...(record.engine === 'ythril'
+      ? ['| query | wall median ms | wall p95 ms | door median / p95 ms | engine median / p95 ms | rows | errors | comparable |', '|---|---:|---:|---:|---:|---:|---|---|']
+      : ['| query | median ms | p95 ms | rows | errors | comparable |', '|---|---:|---:|---:|---|---|']),
   ];
+  const pair = (v) => (v ? `${v.median.toFixed(2)} / ${v.p95.toFixed(2)}` : '-');
   for (const [name, q] of Object.entries(record.queries)) {
     const verdict = q.comparable === undefined ? '' : q.comparable ? 'yes' : q.reason;
-    if (typeof q.median !== 'number') lines.push(`| ${name} | - | - | - | error ${q.error.code}: ${q.error.message.slice(0, 60)} (${q.errors}) | ${verdict} |`);
-    else lines.push(`| ${name} | ${q.median.toFixed(2)} | ${q.p95.toFixed(2)} | ${q.rows ?? '-'} | ${q.errors ? `${q.errors} (first: ${q.error.code})` : '0'} | ${verdict} |`);
+    const server = record.engine === 'ythril' ? [pair(q.door), pair(q.engine)] : [];
+    if (typeof q.median !== 'number') lines.push(`| ${[name, '-', '-', ...server, '-', `error ${q.error.code}: ${q.error.message.slice(0, 60)} (${q.errors})`, verdict].join(' | ')} |`);
+    else lines.push(`| ${[name, q.median.toFixed(2), q.p95.toFixed(2), ...server, q.rows ?? '-', q.errors ? `${q.errors} (first: ${q.error.code})` : '0', verdict].join(' | ')} |`);
   }
   return lines.join('\n');
 }
