@@ -12,7 +12,7 @@
  * All of: the index has a state row and a build id (a rebuild wrote it: the follower reads by position and never reads a record without a
  * `pos`, so an index no rebuild wrote may miss records and is never read, finding G1), its `status` is `ready`, its `formKey` is the key of the member's form now, and the barrier holds: no
  * visible record or tombstone of the space stands above `appliedPos` (R1: a write that committed above a held floor counts, so a query never
- * sees an acknowledged write's old statements) and no journal row is outstanding (`hasOutstandingJournalRows`, every row, done or not).
+ * sees an acknowledged write's old statements) and no journal row is outstanding (every row, done or not; read with the barrier by {@link barrierRead}).
  * When only the barrier fails and the lag is at most {@link CATCH_UP_MAX_LAG} records, the follower runs once, within
  * {@link CATCH_UP_SHARE} of the time the query has left, and the barrier is asked again. Otherwise the member is read from its records and
  * a follower run is started that the query does not wait for.
@@ -54,7 +54,7 @@ import { spaceCollection } from '../../db/space-collection.js';
 import { log, peerText } from '../../util/log.js';
 import { warnOnce, SAY_ONCE_WINDOW_MS } from '../../util/warn-once.js';
 import { inChunks } from '../../util/chunks.js';
-import { LruMap } from '../../util/lru-map.js';
+import { keptCountKey, keptCount, keepCount } from './kept-counts.js';
 import { yieldToEventLoop } from '../../util/yield-to-event-loop.js';
 import { xsd, type Term } from '../literals.js';
 import { toRdfJsTerm, type RdfJsTerm } from '../rdf-js-terms.js';
@@ -502,7 +502,7 @@ export class IndexRead {
    * count of the index at a counter at or after `at`; the quad source never answers the engine 0 for a pattern a find can answer.
    */
   async estimate(space: string, files: boolean, terms: readonly [PatternSlot, PatternSlot, PatternSlot], at: IndexStamp): Promise<number> {
-    const key = JSON.stringify([space, at.buildId, at.writes, files, terms.map(t => (!isBound(t) || (t.termType === 'Quad' && !isGround(t)) ? null : keysOfTerm(t)))]);
+    const key = keptCountKey(space, [at.buildId, at.writes, files, terms.map(t => (!isBound(t) || (t.termType === 'Quad' && !isGround(t)) ? null : keysOfTerm(t)))]);
     const kept = keptCount(key);
     if (kept !== undefined) return kept;
     const n = await this.countNow(space, files, terms);
@@ -523,18 +523,6 @@ export class IndexRead {
     return coll.countDocuments(asFilter(files ? where : { $and: [where, { nK: { $gt: 0 } }] }), { limit: this.opts.cap, maxTimeMS: msLeft(this.opts.deadline) });
   }
 }
-
-/** The most planning counts this process keeps; past it the least recently used goes. */
-export const KEPT_COUNTS_MAX = 10_000;
-/**
- * The planning counts of every query in this process, by space, build, write counter, files right and the pattern's bound keys (bundle-378,
- * Q-976 S2, contract row 3). The write counter rises in every write that changes the index (`store.ts`), so a count is never reused for
- * an index that changed after it; a rebuild has another build id. A space deleted and made again starts another build. What it prevents:
- * a term lookup and a count of `rdf_quads` per free pattern per query, most of a small query's planning.
- */
-const keptCounts = new LruMap<string, number>(KEPT_COUNTS_MAX);
-const keptCount = (key: string): number | undefined => keptCounts.get(key);
-const keepCount = (key: string, n: number): void => keptCounts.set(key, n);
 
 /** Filters once each (two bindings of one join may ask the same lookup). */
 function dedupe(filters: readonly Document[]): Document[] {

@@ -222,8 +222,9 @@ to correct. The information is identical; only the envelope differs.
 
 Every answer carries a `Server-Timing` header (W3C Server Timing) with the milliseconds the request spent in each phase it met:
 `total;dur=12.34, auth;dur=0.31, rate;dur=0.04, door;dur=11.90, ...`. A phase that ran more than once adds `desc="n=<count>"`.
-`total` runs from the request's arrival at the routes to its headers; `door` is `total` less `auth` and `rate`, and the phases below lie
-inside it and may overlap. The phases a door names:
+`total` runs from the request's arrival to its headers, so an answer the body parser refuses (a JSON body that does not parse, one over the
+size limit) carries it too; `door` is `total` less `auth` and `rate`, and the phases below lie inside it and may overlap. The phases a
+door names:
 
 | Door family | Phases beyond `total`, `auth`, `rate` and `door` |
 |---|---|
@@ -236,7 +237,9 @@ inside it and may overlap. The phases a door names:
 
 On MCP the same figures ride in each tool result's `_meta` under `ythril/server-timing`, as `{ "<phase>": { "dur": <ms>, "count": <n> } }`:
 an MCP answer is a stream whose HTTP headers leave before the tool runs, so its header names only `auth` and `rate`. A JSON-RPC error
-(a call the protocol refuses before any tool runs) has no `_meta`. The figures are diagnostics: a client never branches on them.
+(a call the protocol refuses before any tool runs) has no `_meta`. The figures are diagnostics: a client never branches on them. A recall's
+`embed` is cheap for a text the same token sent in the last ten minutes (its query vector is kept for that token alone); a text another token
+sent costs the model call, so no token learns what another searched.
 
 ---
 

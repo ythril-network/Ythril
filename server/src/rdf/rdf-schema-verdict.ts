@@ -31,6 +31,7 @@ import type { SpaceMeta } from '@ythril-network/schema';
 import { LruMap } from '../util/lru-map.js';
 import { sha256Hex } from '../util/sha256-hex.js';
 import { timePhase } from '../http/phase-timer.js';
+import { noteCacheLookup, reportCacheSize } from '../metrics/cache-metrics.js';
 
 /** The most spaces whose verdict is held. A verdict is a few small objects; an instance with more RDF spaces than this recomputes the rest. */
 export const RDF_SCHEMA_VERDICT_CAP = 256;
@@ -41,6 +42,7 @@ export interface VerdictNamespace { prefix: string; iri: string }
 interface Held { key: string; verdict: unknown }
 
 const held = new LruMap<string, Held>(RDF_SCHEMA_VERDICT_CAP);
+reportCacheSize('schema_verdict', () => held.size);
 let hits = 0;
 let misses = 0;
 
@@ -57,15 +59,22 @@ export function cachedSchemaVerdict<V>(
   const entry = held.get(spaceId);
   if (entry?.key === key) {
     hits++;
+    noteCacheLookup('schema_verdict', 'hit');
     return entry.verdict as V;
   }
   misses++;
+  noteCacheLookup('schema_verdict', 'miss');
   const verdict = timePhase('schema', () => compute(resolved, namespaces));
   held.set(spaceId, { key, verdict });
   return verdict;
 }
 
-/** How the cache has answered since the process started, and how many spaces it holds: for an operator's question and a spec's. */
+/** Drop what is held for `spaceId`: when the space is deleted, so its verdict does not take a slot of the bound. */
+export function forgetSchemaVerdict(spaceId: string): void {
+  held.delete(spaceId);
+}
+
+/** How the cache has answered since the process started, and how many spaces it holds: a spec's. The same counts are the metrics `ythril_cache_lookups_total` and `ythril_cache_entries` (`cache="schema_verdict"`). */
 export function rdfSchemaVerdictStats(): { hits: number; misses: number; size: number; cap: number } {
   return { hits, misses, size: held.size, cap: RDF_SCHEMA_VERDICT_CAP };
 }

@@ -5,8 +5,9 @@
  * ## The question it answers
  *
  * "Where did this request's time go?", asked by an operator reading one answer and by the door-floor benchmark reading many
- * (`benchmarks/rdf/door-floor.mjs`). The timer is set up once, above every route (`phaseTimingMiddleware`, mounted beside the request id in
- * `app.ts`), so no door can forget it; a door only names its phases, through {@link timePhase} or {@link beginPhase}.
+ * (`benchmarks/rdf/door-floor.mjs`). The timer is set up once, above every route (`phaseTimingMiddleware`, mounted in
+ * `app.ts` above the body parsers, so an answer a parser refuses carries the header too, and entered again below them by `rejoinPhaseTimer`), so no door
+ * can forget it; a door only names its phases, through {@link timePhase} or {@link beginPhase}.
  *
  * ## What it prevents
  *
@@ -153,6 +154,19 @@ export function timePhase<T>(phase: RecordedPhase, fn: () => T): T {
   return result;
 }
 
+/** The timer each response was given by {@link phaseTimingMiddleware}, for {@link rejoinPhaseTimer}. */
+const TIMER_OF = new WeakMap<Response, PhaseTimer>();
+
+/**
+ * Put the request's timer back into the async context, for the middleware that runs after a step that loses it. The body parsers read the
+ * request off the socket and call `next` from the socket's events, which run in the socket's context and not the request's, so the timer
+ * (mounted above them, so their refusals carry the header) is entered again below them (`app.ts`).
+ */
+export function rejoinPhaseTimer(_req: Request, res: Response, next: NextFunction): void {
+  const timer = TIMER_OF.get(res);
+  if (timer) runWithPhaseTimer(timer, next); else next();
+}
+
 /** A middleware timed as one run of `phase`: from its call until it hands on (`next`) or the response's headers go out. */
 export function timedMiddleware(phase: RecordedPhase, mw: RequestHandler): RequestHandler {
   return function timed(req: Request, res: Response, next: NextFunction): void {
@@ -189,6 +203,7 @@ export function mcpTimingMeta(): Record<string, Record<string, PhaseFigure>> {
  */
 export function phaseTimingMiddleware(_req: Request, res: Response, next: NextFunction): void {
   const timer = new PhaseTimer();
+  TIMER_OF.set(res, timer);
   const writeHead = res.writeHead;
   res.writeHead = function withTiming(this: Response, ...args: Parameters<Response['writeHead']>): Response {
     if (!res.headersSent) res.setHeader(SERVER_TIMING, serverTimingValue(timer.snapshot()));

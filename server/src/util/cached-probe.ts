@@ -32,7 +32,7 @@
  * must not grow it for ever. The clock is injectable for a test. A caller that already KNOWS the answer (a pass that has just
  * built the thing) says so with {@link ProbeCache.prime}, instead of leaving the next ask to find it out.
  */
-import { LruMap } from './lru-map.js';
+import { WalkableLru } from './walkable-lru.js';
 
 const MAX_KEYS = 1_000;
 
@@ -74,9 +74,8 @@ export interface ProbeCache {
 export function createProbeCache(
   { now = Date.now, maxKeys = MAX_KEYS }: { now?: () => number; maxKeys?: number } = {},
 ): ProbeCache {
-  // `LruMap` cannot be walked, and a prefix forget has to: the keys are kept beside it, and leave it when the bound drops them.
-  const keys = new Set<string>();
-  const entries = new LruMap<string, Entry>(maxKeys, (key) => { keys.delete(key); });
+  // Walkable, because a prefix forget has to walk the keys (`walkable-lru.ts`).
+  const entries = new WalkableLru<Entry>(maxKeys);
   const cache: ProbeCache = {
     probe(key, ttl, fn) {
       const hit = entries.get(key);
@@ -89,19 +88,13 @@ export function createProbeCache(
         })().then((outcome) => { entry.outcome = outcome; entry.at = now(); return outcome === 'yes'; }),
       };
       entries.set(key, entry);
-      keys.add(key);
       return entry.answer;
     },
     prime(key, answer) {
       entries.set(key, { answer: Promise.resolve(answer), at: now(), outcome: answer ? 'yes' : 'no' });
-      keys.add(key);
     },
     forget(keyPrefix) {
-      for (const key of [...keys]) {
-        if (keyPrefix !== undefined && !key.startsWith(keyPrefix)) continue;
-        entries.delete(key);
-        keys.delete(key);
-      }
+      entries.forgetWhere(key => keyPrefix === undefined || key.startsWith(keyPrefix));
     },
     get size() { return entries.size; },
   };

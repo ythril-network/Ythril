@@ -34,6 +34,8 @@ import { removeTree } from '../files/remove-tree.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { forgetMerkleLeaves } from '../brain/merkle.js';
 import { forgetSpaceShape } from '../brain/space-shape.js';
+import { forgetKeptCounts } from '../rdf/triple-index/kept-counts.js';
+import { forgetSchemaVerdict } from '../rdf/rdf-schema-verdict.js';
 import { forgetHeld } from './schema-stamp.js';
 import { keepVariationSnapshots } from './schema-snapshot-store.js';
 import { cancelEveryJobOfSpace } from '../files/media/job-queue.js';
@@ -866,6 +868,9 @@ function commitSpaceDeletion(spaceId: string, write: (apply: (cfg: Config) => vo
   forgetSpaceShape(spaceId);
   forgetSpaceIndexWarnings(spaceId);
   forgetHeld(spaceId);
+  // The planner's counts and the RDF schema verdict of the space, kept in this process: bounded, but a deleted space's would only take slots.
+  forgetKeptCounts(spaceId);
+  forgetSchemaVerdict(spaceId);
 }
 
 /** What a wipe clears: every knowledge collection, so a new one cannot be left behind by one. */
