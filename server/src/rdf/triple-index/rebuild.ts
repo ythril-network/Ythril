@@ -52,7 +52,7 @@ import { warnOnce, SAY_ONCE_WINDOW_MS } from '../../util/warn-once.js';
 import { detachedWrite } from '../../db/write-bound.js';
 import { rdfIndexRebuildsTotal } from '../../metrics/rdf-index-metrics.js';
 import { isShuttingDown } from '../../lifecycle.js';
-import { assertSpaceTakesWrites, spaceWriteClosedAnswer, spaceWriteRefusal, type SpaceWriteClosedCode } from '../../spaces/space-write-gate.js';
+import { admitSpaceWrite, isActRefusal, spaceWriteClosedNow, spaceWriteRefusal, type SpaceWriteClosedCode } from '../../spaces/space-write-gate.js';
 import { RDF_KIND_COLLECTIONS } from '../rdf-members.js';
 import type { RdfRecordKind } from '../record-triples.js';
 import {
@@ -293,8 +293,14 @@ async function buildTripleIndex(spaceId: string, opts: { leaseMs?: number; onCla
   opts.onClaimed?.(true);
   try {
     const records = await fillTripleIndexBuild(build);
-    if (spaceWriteRefusal(spaceId) !== null) throw new RebuildHeld();
-    await swapTripleIndexBuild(build);
+    // The swap is the rebuild's one write a space act must not race: it runs as a counted write unit, so an act registering meanwhile
+    // drains it, and an act already standing refuses it (the build is then given up, and the next upkeep rebuilds from what the act left).
+    try {
+      await admitSpaceWrite(spaceId, undefined, () => swapTripleIndexBuild(build));
+    } catch (err) {
+      if (isActRefusal(err)) throw new RebuildHeld();
+      throw err;
+    }
     log.info(`Triple index of space '${peerText(spaceId)}': rebuilt from ${records} record(s) (build ${peerText(build.buildId)})`);
     return { outcome: 'built', buildId: build.buildId, records };
   } catch (err) {
@@ -418,13 +424,8 @@ export type RebuildStart = { ok: true; status: 'started' | 'running'; spaceId: s
  */
 export async function startTripleIndexRebuild(spaceId: string): Promise<RebuildStart> {
   // A space act (a restore, a wipe) holds the space: answer its own 409 and code, as every record write door does.
-  try {
-    assertSpaceTakesWrites(spaceId);
-  } catch (err) {
-    const held = spaceWriteClosedAnswer(err);
-    if (held === null) throw err;
-    return { ok: false, status: held.status, code: held.body.code, error: held.body.error };
-  }
+  const held = spaceWriteClosedNow(spaceId);
+  if (held !== null) return { ok: false, status: held.status, code: held.body.code, error: held.body.error };
   if (formMetaOf(spaceId) === null) {
     return { ok: false, status: REBUILD_REFUSED_STATUS, code: 'rdf_off', error: `Space '${peerText(spaceId)}' has RDF off or names that are not settled, so it has no triple index to rebuild` };
   }
