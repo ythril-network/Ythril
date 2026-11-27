@@ -190,7 +190,7 @@ Both doors need `knowledge: write`, for a dry run and the status too: they answe
 | 409 | `schema_rdf_networked` | With `schema`: the space is in a network (the proposed types as `proposed`) |
 | 409 | `schema_rdf_not_empty` | With `schema=generate`: the space has types |
 | 412 | `schema_rdf_changed` | With `schema`: the space's schema changed before the act wrote it, or the schema stored after the write is not the one the data was judged by |
-| 422 | `schema_rdf_refused` | With `schema`: the file's schema contradicts itself, two names collide, a type is invalid or past its cap, or the planner refuses it |
+| 422 | `schema_rdf_refused` | With `schema`: the file's schema contradicts itself, two names collide, a type is invalid, or the planner or the space's checks refuse it (a reason `storage_exceeded` or `schema_too_large`: the schema's storage, as in the row below); every reason in `reasons` |
 | 400 | `rdf_malformed` (and the reader's other codes) | The file is not well-formed: the answer names the line and column (`place`) |
 | 400 | `rdf_jsonld_not_streamable` | A JSON-LD document longer than the reader holds unparsed whose top level is not an `@context`, an `@id` and a `@graph` array in that order, or one whose `@context`, `@id` or `@type` comes after the data it governs |
 | 408 | `rdf_import_upload_stalled` | The upload sent nothing for a minute (REST only); nothing was imported, the connection is closed, and the next import is taken |

@@ -1,8 +1,8 @@
 /**
- * The product count a Ythril import can take, found from the generator's output and not by loading.
+ * The product count a Ythril import could take under its old type cap, found from the generator's output and not by loading.
  *
- * The import refuses a kind with more than 200 types (`schema_rdf_refused`, "Max 200 type definitions per knowledge
- * type"). Every class the data states for a subject becomes one type, so the largest size the import accepts is the
+ * The import once refused a kind with more than 200 types (`schema_rdf_refused`); Q-981 removed that limit, so nothing needs this for a
+ * new run and it is kept as the record of how the pinned size was chosen. Every class the data states for a subject becomes one type, so the largest size the import accepted was the
  * largest product count whose generated data keeps its distinct `rdf:type` classes under the cap. The count rises
  * with the product count (more product types are used), so a binary search finds it.
  *

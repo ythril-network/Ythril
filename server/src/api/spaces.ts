@@ -279,7 +279,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
 // The createSpaces right, not instance admin (Q-134): the one predicate every creating door asks. MFA stays — it is a
 // per-token policy, not an admin property.
 spacesRouter.post('/', globalRateLimit, requireCreateSpacesMfa, async (req, res) => {
-  const decision = planSpaceCreate(req.body, req.authToken as WriteCaller | undefined);
+  const decision = await planSpaceCreate(req.body, req.authToken as WriteCaller | undefined);
   if (!decision.ok) {
     res.status(decision.refusal.status).json(decision.refusal.body);
     return;
