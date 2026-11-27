@@ -68,13 +68,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web:** a vote that comes with a conversion shows its steps in words and this instance's own record counts before a member votes.
 - **Web:** Settings → About has a "Third-party software" card, and Settings → Help offers the third-party notices as a document readable inside the instance.
 - **Web:** the namespace field of the Schema Library says an address ending in `/` with no `#`.
+- **Web:** a personal view defined by a SPARQL CONSTRUCT says, in the reader's language, that only the RDF doors read it.
 - **RDF:** SPARQL queries of a space with RDF on, and queries that join many statements in particular, are faster and answer as before; what makes them fast is derived from the records, left out of backups and rebuilt after a restore.
 - **RDF:** while that is not ready (after a restore, a change that names no record, or a rollback), a query reads the records and answers the same, only slower.
 - **RDF:** when it is missing or out of date it is rebuilt in the background; the new tool `space_rdf_rebuild` (knowledge `admin`) rebuilds it for one space now, and `space_rdf_index` reads its state; a rebuild you ask for is audited as `space.rdf.rebuild`.
 - **RDF:** config key `sparql.maxIndexRowsRead` (default 20 times `sparql.maxRecordsRead`) bounds the index statements one query reads (`413 sparql_too_much_read`).
 - **RDF:** after the upgrade, writes in a space with RDF on are not slowed while its index is built in the background, and a rebuild that keeps failing is retried after longer waits, at most an hour apart; `space_rdf_index` reports an index no rebuild has built as `unbuilt`.
 - **RDF:** a personal view can be a SPARQL CONSTRUCT (`sparql: { query }`): the export, SPARQL and `/ld/@<name>/` read its statements over what you read, at most 50 000, one code per cause on each door; other doors answer `409 view_is_construct`.
-- **Web:** a personal view defined by a SPARQL CONSTRUCT, opened on a Brain tab, the Files page or the Graph, says in the reader's language that only the RDF export, the SPARQL endpoint and its Linked Data address read it.
 - **RDF:** the statements a SPARQL Update removes and inserts are read into record writes by the import's own rules, or refused with a named reason (`server-owned-removed`, `edge-ends-change`, `not-writable-here`, `field-not-removable`, `subject-not-an-address-here`).
 - **RDF:** SPARQL 1.1 Update on one space: `POST /api/brain/spaces/:spaceId/sparql/update` and MCP `sparql_update` (`knowledge: write`), through the write rules every door keeps, whole or not at all ([SPARQL Update](docs/integration-guide/04j-sparql-api.md#sparql-update)).
 - **RDF:** an Update names a refused statement (`422 sparql_update_refused`), refuses to delete an entity something still names (`409 sparql_update_referenced`), and runs again after a lost race, at most 3 times (`409 sparql_update_conflict`).
@@ -147,8 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** the local preflight runs its source gates first, then the builds, then the test suites, and stops at the first failing stage, naming the stages it did not run.
 - **Testing:** within each of those, the preflight runs first the stage whose failure is cheapest to find, from the recorded stage times (`test-results/stage-costs.json`, refreshed after each recorded run), never before a stage it reads; with no snapshot it keeps the listed order.
 - **Testing:** the local preflight runs several standalone batches at once, never more than 8 test files together, parses test files in parallel, and ends a batch that never exits at a time bound.
-- **Testing:** the static preflight and the release gate refuse a changelog entry under `[Unreleased]`, or in a release after 6.5.6, that names a source path, an internal storage name, an algorithm or data-structure term, or an identifier no caller can meet.
-- **Testing:** a client gate fails a refusal sentence of the dictionaries that no caller can show, and a page that stores a failed load without wording it in the reader's language.
+- **Testing:** the static preflight and the release gate refuse a changelog entry that names a source path, an internal storage name, an algorithm term or an identifier no caller can meet.
+- **Testing:** a client gate fails a refusal sentence no caller can show, and a page that stores a failed load without wording it in the reader's language.
 - **Testing:** a standalone gate refuses a public or protected member of a client component, service or directive that no template and no non-spec source reads; the dead ones were removed and the spec-only ones are listed with reasons.
 - **Testing:** the schema-layers panel no longer throws NG0950 when an effects pass runs before its `spaceId` is bound, which failed the client suite at random under load.
 - **Testing:** the local preflight starts the pure test files that took 15 s or more in recent CI runs first, each alone (times in `test-results/file-times.json`, kept beside the stage costs); with no snapshot it cuts by path length as before.
