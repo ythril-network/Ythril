@@ -40,6 +40,8 @@ const reasonOf = (text: string): LeftOutReason => REASONS[text.trim()] ?? 'other
 /** The line an export that could not finish ends with. */
 const INCOMPLETE_MARK = '!ythril-export-incomplete';
 const COMMENT = '# ythril-export: ';
+/** A JSON-LD export's last lines: the report item, the `@graph` list's `]`, the document's `}`. */
+const JSONLD_ENDING_LINES = 3;
 
 /** The ending of a Turtle, TriG or N-Quads document, from its last lines. */
 function endingOfText(tail: string): RdfExportEnding | null {
@@ -54,8 +56,9 @@ function endingOfText(tail: string): RdfExportEnding | null {
   const words = left.includes(': ') ? left.slice(left.indexOf(': ') + 2) : '';
   const leftOut: LeftOutValue[] = [];
   // Each value is `<record> (<key>: <reason>)`, the list closed by `and N more` when more were left out than named.
-  for (const m of words.matchAll(/(?:^|, )(.+?) \(([^():]*): ([^()]*)\)(?=, |$)/g)) {
-    leftOut.push({ record: m[1]!, key: m[2]!, reason: reasonOf(m[3]!), reasonText: m[3]! });
+  for (const m of words.matchAll(/(?:^|, )(?<record>.+?) \((?<key>[^():]*): (?<why>[^()]*)\)(?=, |$)/g)) {
+    const { record = '', key = '', why = '' } = m.groups ?? {};
+    leftOut.push({ record, key, reason: reasonOf(why), reasonText: why });
   }
   return { complete: Number.isFinite(records) && !parts.some(p => p.startsWith('INCOMPLETE')), records: Number.isFinite(records) ? records : 0, leftOutCount, leftOut };
 }
@@ -73,9 +76,9 @@ const listOf = (v: unknown): unknown[] => (Array.isArray(v) ? v : v === undefine
 /** The ending of a JSON-LD document: its report node, the last item of its `@graph`. */
 function endingOfJsonLd(tail: string): RdfExportEnding | null {
   const lines = tail.split('\n').map(l => l.trim()).filter(Boolean);
-  if (lines.at(-1) !== '}' || lines.at(-2) !== ']') return null;
-  const last = lines.at(-3);
-  if (!last?.startsWith('{')) return null;
+  // The writer closes with `]` and `}` on lines of their own, after the report item's one line.
+  const [last, closeList, closeDoc] = lines.slice(-JSONLD_ENDING_LINES);
+  if (closeDoc !== '}' || closeList !== ']' || !last?.startsWith('{')) return null;
   let item: { '@graph'?: Record<string, unknown>[] };
   try { item = JSON.parse(last.replace(/,$/, '')) as typeof item; } catch { return null; }
   const nodes = item['@graph'] ?? [];

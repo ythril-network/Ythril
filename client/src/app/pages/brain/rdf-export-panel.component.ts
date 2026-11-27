@@ -22,12 +22,10 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import type { Space } from '../../core/api.types';
-import { RdfExportRuns, type RdfExportRun } from '../../core/rdf-export-runs.service';
+import { RdfExportRuns, megabytes, type RdfExportRun } from '../../core/rdf-export-runs.service';
 import { RDF_SPACE_FORMATS, RDF_VIEW_FORMATS, rdfIsOn, type RdfEdgeDetails, type RdfRecordFormat } from '../../core/rdf-names';
 import { rdfRefusalText } from '../../core/rdf-refusal';
 
-/** Megabytes with one decimal, as the panel says a size. */
-const mb = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(1);
 
 @Component({
   selector: 'app-rdf-export-panel',
@@ -176,7 +174,7 @@ export class RdfExportPanelComponent {
     return f === 'cut' ? this.transloco.translate('rdf.export.cut') : rdfRefusalText(this.transloco, f);
   }
 
-  mbOf(bytes: number): string { return mb(bytes); }
+  mbOf(bytes: number): string { return megabytes(bytes); }
 
   /** A select's chosen value; the options are this panel's own, so it is one of them. */
   valueOf<T extends string>(e: Event): T { return (e.target as HTMLSelectElement).value as T; }
