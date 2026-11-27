@@ -19,6 +19,7 @@
  *
  * Red on a075fa803: the error box held the server's English sentence in German instead of the dictionary's words for the code.
  */
+import type { Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { TranslocoService } from '@jsverse/transloco';
@@ -59,7 +60,7 @@ function errorBoxText(tab: (typeof TABS)[number], lang: 'en' | 'de', body: Recor
     providers: [provideRouter([]), RecordListState, BrainStore, EntityRefPicker, RecordDrawerState, { provide: BrainApi, useValue: api }],
   });
   TestBed.inject(TranslocoService).setActiveLang(lang);
-  const fixture = TestBed.createComponent(tab.component);
+  const fixture = TestBed.createComponent(tab.component as Type<object>);
   fixture.componentRef.setInput('spaceId', '@people');
   fixture.detectChanges();
   fixture.detectChanges();
