@@ -34,6 +34,13 @@ test('raising the limits changes the sparql block and nothing else in the config
   assert.deepEqual(limitsOf(next), { timeoutMs: 300000, maxRecordsRead: 10000000, maxResults: 100000 });
 });
 
+test('raising the limits keeps every other key of the sparql block (Q-942 fix round, H1)', () => {
+  const cfg = { sparql: { timeoutMs: 30000, maxRecordsRead: 200000, maxResults: 10000, someFutureKey: 'kept', nested: { a: 1 } } };
+  const next = withLimits(cfg, { timeoutMs: 60000, maxRecordsRead: 300000, maxResults: 20000 });
+  assert.deepEqual(next.sparql, { timeoutMs: 60000, maxRecordsRead: 300000, maxResults: 20000, someFutureKey: 'kept', nested: { a: 1 } });
+  assert.equal(cfg.sparql.timeoutMs, 30000, 'the input is not changed');
+});
+
 test('a config with no sparql block gets one with all three keys', () => {
   assert.deepEqual(withLimits({ a: 1 }, { timeoutMs: 1000, maxRecordsRead: 1000, maxResults: 1 }), { a: 1, sparql: { timeoutMs: 1000, maxRecordsRead: 1000, maxResults: 1 } });
 });

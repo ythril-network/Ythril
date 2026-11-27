@@ -14,6 +14,8 @@ import { getTranslocoModule } from '../../testing/transloco-testing';
 import { OverviewTabComponent } from './overview-tab.component';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { NetworksApi } from '../../core/networks-api.service';
+import { SpacesApi } from '../../core/spaces-api.service';
+import { SpacesStore } from '../settings/spaces-store.service';
 import { ViewOverviewComponent } from './view-overview.component';
 import { ViewsStore } from '../../core/views.store';
 import type { Space } from '../../core/api.types';
@@ -27,7 +29,8 @@ function setup(conflict: boolean) {
     ...(conflict ? { rdfBaseConflicts: { platform: { held: { base: 'https://a/', epoch: 0 }, offered: [{ networkId: 'acme', memberId: 'i-k', base: 'https://b/', epoch: 0 }] } } } : {}) }];
   TestBed.configureTestingModule({
     imports: [OverviewTabComponent, getTranslocoModule({ translation: { en } })],
-    providers: [provideRouter([]), { provide: ConfirmDialogService, useValue: { confirm: async () => true } },
+    // The Brain page provides one SpacesStore, which the conflict line reads the networks from (and asks to read them again).
+    providers: [provideRouter([]), SpacesStore, { provide: SpacesApi, useValue: {} }, { provide: ConfirmDialogService, useValue: { confirm: async () => true } },
       { provide: NetworksApi, useValue: { listNetworks: () => of({ networks }) } },
       { provide: BrainApi, useValue: { getErModel: () => of({ spaceId: 's', entityTypes: [], relationships: [], danglingEdges: 0, truncated: null, totals: { entities: 0, edges: 0 } }) } }],
   });
@@ -62,6 +65,12 @@ describe('the Overview carries the RDF ways in', () => {
   it('no conflict, no line', () => {
     const { q } = setup(false);
     expect(q('overview-rdf-conflict')).toBeNull();
+  });
+
+  it('reads the networks from the page\'s store, not by a request of its own (L1.1)', () => {
+    const src = readFileSync(join(process.cwd(), 'src', 'app', 'pages', 'brain', 'rdf-conflict-line.component.ts'), 'utf8');
+    expect(src).toMatch(/inject\(SpacesStore/);
+    expect(src).not.toMatch(/listNetworks/);
   });
 });
 

@@ -19,7 +19,7 @@ const ON = (id: string, label = id): Space => ({ id, label, meta: { rdf: { enabl
 const OFF = (id: string, label = id): Space => ({ id, label } as Space);
 
 const DONE: RdfExportRun = {
-  running: false, format: 'turtle', file: 'platform.ttl', bytes: 61_760_000,
+  running: false, file: 'platform.ttl', bytes: 61_760_000, inMemory: false,
   result: { file: 'platform.ttl', bytes: 61_760_000, complete: true, records: 131442, leftOutCount: 3, withoutRdf: [], inConflict: [], leftOut: [
     { record: 'svc-billing', key: 'owners', reason: 'notPlain', reasonText: 'not a plain value' },
     { record: 'f-2291', key: 'observedAt', reason: 'notFit', reasonText: 'does not fit its declared type' },
@@ -78,7 +78,7 @@ describe('RDF export panel', () => {
   });
 
   it('running: the fields are locked, the run is a status with its file and size, and Stop stops it', () => {
-    const { q, stop } = setup({ run: { running: true, format: 'turtle', file: 'platform.ttl', bytes: 22_439_526 } });
+    const { q, stop } = setup({ run: { running: true, file: 'platform.ttl', bytes: 22_439_526, inMemory: false } });
     expect((q('rdf-export-format') as HTMLSelectElement).disabled).toBe(true);
     expect((q('rdf-export-edges') as HTMLSelectElement).disabled).toBe(true);
     expect(q('rdf-export-running')?.getAttribute('role')).toBe('status');
@@ -117,6 +117,50 @@ describe('RDF export panel', () => {
     expect(left).toContain(en['rdf.export.whyOff']);
     expect(left).toContain('Lab notebook');
     expect(left).toContain(en['rdf.export.whyConflict']);
+  });
+
+  it('running: the bar is indeterminate (no value to claim), and still, not moving, under reduced motion (L4.2)', () => {
+    const { q } = setup({ run: { running: true, file: 'platform.ttl', bytes: 22_439_526, inMemory: false } });
+    const bar = q('rdf-export-running')!.querySelector('[role="progressbar"]')!;
+    expect(bar.hasAttribute('aria-valuenow')).toBe(false);
+    const css = [...document.head.querySelectorAll('style')].map(s => s.textContent ?? '').join('\n');
+    // Angular scopes a component's selectors (and its keyframes names), so the rules are read through their shape.
+    expect(css).toMatch(/@keyframes\s+[\w-]*rdf-run/);
+    expect(css).toMatch(/\.track[^{]*\bi\b[^{]*\{[^}]*animation:\s*[\w-]*rdf-run/);
+    const reduced = css.slice(css.indexOf('prefers-reduced-motion'));
+    expect(css.includes('prefers-reduced-motion')).toBe(true);
+    expect(reduced).toMatch(/\.track[^{]*\bi\b[^{]*\{[^}]*animation:\s*none/);
+  });
+
+  it('running in a browser that holds the export in memory says so (L2.2)', () => {
+    const { q } = setup({ run: { running: true, file: 'platform.ttl', bytes: 1_000, inMemory: true } });
+    expect(q('rdf-export-running')?.textContent).toContain(en['rdf.export.memoryNote']);
+    const streamed = setup({ run: { running: true, file: 'platform.ttl', bytes: 1_000, inMemory: false } });
+    expect(streamed.q('rdf-export-running')?.textContent).not.toContain(en['rdf.export.memoryNote']);
+  });
+
+  it('a failed save and a silent stream are worded, not left as the unreachable server (L2.2)', () => {
+    const save = setup({ run: { running: false, file: 'platform.ttl', bytes: 5, inMemory: true, failure: 'save' } });
+    expect(save.q('rdf-export-refusal')?.textContent).toContain(en['rdf.export.saveFailed']);
+    const idle = setup({ run: { running: false, file: 'platform.ttl', bytes: 5, inMemory: true, failure: 'idle' } });
+    expect(idle.q('rdf-export-refusal')?.textContent).toContain(en['rdf.export.idle']);
+  });
+
+  it('a view names the member it will leave out before the export starts, with the way to switch it on (D4)', () => {
+    const { q, fixture } = setup({ id: '@research', isView: true, members: [ON('platform'), OFF('scratch', 'Scratch')] });
+    const left = q('rdf-export-idle-left');
+    expect(left?.textContent).toContain('Scratch');
+    expect(left?.textContent).toContain(en['rdf.export.whyOff']);
+    expect(q('rdf-export-go')).not.toBeNull();
+    let opened: Space | undefined;
+    fixture.componentInstance.openNames.subscribe(s => (opened = s));
+    (left!.querySelector('[data-testid="rdf-export-open-names"]') as HTMLButtonElement).click();
+    expect(opened?.id).toBe('scratch');
+  });
+
+  it('a view whose members all have RDF names, and a space, name nobody before the export', () => {
+    expect(setup({ id: '@research', isView: true, members: [ON('a'), ON('b')] }).q('rdf-export-idle-left')).toBeNull();
+    expect(setup({}).q('rdf-export-idle-left')).toBeNull();
   });
 
   it('a view with no member that has RDF names lists each space with "Open RDF names"', () => {
