@@ -33,6 +33,13 @@
  * Every flood row measures its own elapsed time: the window is 60 s, and a flood slow enough to straddle it would pass on the old
  * rule for the wrong reason.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 26 s (measured 2026-11-27). Two runs on an idle booking took 26.3 s and 25.9 s. A recorded CI run reads 66 s: a pure
+ * job runs its files at node's default width on a runner of four CPUs, and a flood row is requests sent as fast as the process can send them, so the
+ * crowd of the other pure files slows each row. A cheaper flood would weaken what a row measures (the elapsed time inside the window), so the
+ * file is kept as it is and the pure plan spreads the crowd over more shards (`shard-budget.mjs`).
+ *
  * Run: `npm run test:up` first, then node --test testing/standalone/the-ip-flood-backstop-counts-what-no-token-meters.test.js
  * (requires a prior `npm run build -w server`)
  */

@@ -45,8 +45,12 @@
  *
  * ## Its time alone
  *
- * Alone it takes 38 s (measured 2026-11-20). In a database job it runs beside the other files of its shard on one Mongo, and a
- * recorded run reads several times that: the time of the crowd, not of this file. Cutting it would add fixtures and shorten no run.
+ * Alone it takes 27 s (measured 2026-11-27). Two runs on an idle booking took 27.3 s and 25.1 s. In a database job a recorded run reads
+ * 99 to 136 s, the slowest crowded file of the `-db` third. The cause is the database, not this file: the shard's Mongo is held to one CPU
+ * (`YTHRIL_TEST_MONGO_CPUS`, 1.0 in `docker-compose.test.yml`) and `DB_TEST_CONCURRENCY` runs four files at once against it, so a file
+ * whose time is Mongo work (this one writes through both doors for every family and verdict) waits for the CPU beside three others.
+ * No cut of this file shortens a run: the sum of the shard's file times is what the plan's budget (`shard-budget.mjs`) holds, and the crowd
+ * is spread over more shards instead. Raising the Mongo's CPUs on the runner is a change of the job's resources, not of this file.
  *
  * Run: node --test testing/standalone/push-and-pull-decide-alike-db.test.js
  */

@@ -170,7 +170,7 @@ export function splitStandalone({ root = process.cwd() } = {}) {
  * classifier is asked only when `kinds` (the kinds the caller wants, default all three) holds `text` or `pure`, never by `splitStandalone`, so the database
  * and instance runs (`kinds: ['db']`, `kinds: []`) are not paid for it and are not broken by it.
  *
- * `pureShard` (`{ index, count }`, 1-based) narrows the PURE kind to that shard's files (`pureShardFiles`), the way CI runs it as two jobs; the text and
+ * `pureShard` (`{ index, count }`, 1-based) narrows the PURE kind to that shard's files (`pureShardFiles`), the way CI runs it as `PURE_SHARDS` jobs; the text and
  * database kinds are the same with or without it. Without it every pure file runs, as it always did.
  *
  * @returns {Array<{ kind: 'text' | 'pure' | 'db', args: string[], files: string[] }>} `args` go after `--test`
@@ -206,7 +206,7 @@ export function offlineRuns(split = splitStandalone(), { ciOnly = true, kinds = 
  *  - **Overwrite the other shard's results.** CI merges every job's `test-results/` into one folder; a shard's batches are named by
  *   `pureShardKind` (`pure-<k>of<n>`), never the whole run's `pure`.
  */
-export const PURE_SHARDS = 2;
+export const PURE_SHARDS = 3;
 
 /** `pure-file-seconds.json`: the seconds each pure file took in one recorded CI run of main, by repository path. */
 export const PURE_FILE_SECONDS_PATH = join(dirname(fileURLToPath(import.meta.url)), 'pure-file-seconds.json');

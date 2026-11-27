@@ -47,8 +47,8 @@ concurrency:
 #
 #   client-tests        the client's unit tests and its production build (its own `npm ci`)
 #   standalone-pure     the standalone files that need nothing but `server/dist` (and `client/dist`); first, before the install, the
-#                       files that read only tracked text (`run-standalone.mjs --only=text`). A MATRIX of two shards of the pure
-#                       kind (`--shard=<k>/2`, packed by recorded seconds); the text step runs in shard 1 only. Held by
+#                       files that read only tracked text (`run-standalone.mjs --only=text`). A MATRIX of three shards of the pure
+#                       kind (`--shard=<k>/3`, packed by recorded seconds); the text step runs in shard 1 only. Held by
 #                       `ci-runs-every-standalone-pure-shard-exactly-once`.
 #   standalone-db       the standalone files that open the harness MongoDB: ythril-mongo-a and nothing else. A MATRIX, one
 #                       job per shard of the `-db` plan (`testing/_shared/db-shard-plan.mjs`), each with its own fresh Mongo:
@@ -231,13 +231,14 @@ jobs:
           retention-days: 30
 
   standalone-pure:
-    name: Standalone (no services, shard ${{ matrix.shard }} of 2)
+    name: Standalone (no services, shard ${{ matrix.shard }} of 3)
     needs: reuse
     # One condition for the whole matrix: a skipped matrix is a single skipped job, so no shard stands down alone.
     if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' }}
     runs-on: ubuntu-latest
     # The offline files that need no database. As one job it was the job a run waited for once Integration and Sync were split
-    # (nine batches one after another, 545 s of tests, Q-947), so the pure kind runs as two shard jobs, the files packed by their
+    # (nine batches one after another, 545 s of tests, Q-947), so the pure kind runs as three shard jobs (two left the first at 990 s against a budget of 725 s once bundles 270 to 272 added
+    # 535 s of files, Q-977), the files packed by their
     # recorded seconds (`run-standalone.mjs --shard`, `testing/_shared/pure-file-seconds.json`). `fail-fast` is off so one red shard
     # does not hide the other's verdict; `Build & Test` fails when either failed (a matrix job's result is the worst of its jobs).
     # The matrix must be exactly 1 to the count the runner plans, and the text-only step runs in shard 1 only (held by
@@ -246,7 +247,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -290,7 +291,7 @@ jobs:
         # This job's shard of the pure kind; the runner refuses (non-zero) a shard outside 1 to the count it plans.
         run: npm run test:standalone:pure -- --shard="$PURE_SHARD"
         env:
-          PURE_SHARD: ${{ matrix.shard }}/2
+          PURE_SHARD: ${{ matrix.shard }}/3
 
       - name: Upload test results
         if: always()
@@ -315,7 +316,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5]
     # Each job carries one shard, so the old bound for the whole third is far more than a shard needs; 30 minutes is what
     # bounds a wedged Mongo.
     timeout-minutes: 30
@@ -368,7 +369,7 @@ jobs:
         # refuses (non-zero) an index outside 0 to the count minus one rather than running everything or nothing.
         run: npm run test:standalone:db
         env:
-          YTHRIL_TEST_DB_SHARDS: 4
+          YTHRIL_TEST_DB_SHARDS: 6
           YTHRIL_TEST_DB_SHARD_INDEX: ${{ matrix.shard }}
 
       - name: Report the database's peak memory
