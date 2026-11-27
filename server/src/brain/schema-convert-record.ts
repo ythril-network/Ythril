@@ -56,7 +56,7 @@ import { updateEdgeById } from './edges.js';
 import { EdgeIdentityTaken } from './edge-rekey.js';
 import { WriteConflict } from './write-plan/types.js';
 import { RecordVersionAtCeiling } from './write-precondition.js';
-import { ForkRowReadOnly } from '../util/errors.js';
+import { ForkRowReadOnly, RecordWriteRaceLost } from '../util/errors.js';
 import { TYPE_FIELD } from './ttl.js';
 import type { UnconvertedReason } from './schema-convert-items.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
@@ -320,6 +320,9 @@ export async function convertRecordsPage(
       const retyped = kind === 'entity' && change.type !== undefined;
       out[i] = { outcome: 'rewritten', edgesRestamped: retyped ? await restampEdgesAt(spaceId, record._id, pair) : 0 };
     } catch (err) {
+      // A record with no numeric `seq` has no version to name, so its rewrite retries and, on its last miss, throws the lost race instead of answering
+      // null: nothing was written, which is what `moved` says, and a later run passes the record again (bundle-378, Q-976 review R6).
+      if (err instanceof RecordWriteRaceLost) { out[i] = { outcome: 'moved' }; continue; }
       const refusal = refusalOf(err);
       if (refusal) { out[i] = unconverted(refusal.reason, refusal.violations, change); continue; }
       // The store's or the write gate's condition fails the page, which the run retries; it says nothing about this record.

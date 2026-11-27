@@ -200,6 +200,7 @@ export const update_edgeTool: ToolHandler = {
     + 'RESPONSE: one line with the edge\'s id and its new `seq` — the edge\'s version, which a peer compares to know '
     + 'whether this copy is newer. An edge whose next version would pass the ceiling is refused (`409` `record_version_at_ceiling`, nothing '
     + 'written). A patch that sets an end\'s kind to entity is refused (`409` `endpoint_removed`) when that entity was deleted meanwhile, and the edge is taken back. '
+    + 'An edit that other writes keep moving ahead of, on every one of its tries, is refused (`409` `write_race_lost`, nothing written; send it again). '
     + 'An id that does not exist is an error, not a silent no-op.\n\n'
     + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,

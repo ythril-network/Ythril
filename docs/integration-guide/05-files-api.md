@@ -50,6 +50,10 @@ except those. A file with an extension the pipeline does not recognise is stored
 **An upload to a path that runs through a regular file (`a.txt/x`) answers `409` with `code: "path_blocked"`**, a
 chunked upload at its first range, and nothing is stored or left staged ([the reasons](#move--rename)).
 
+**An overwrite whose file record other writes kept changing, on every one of its tries, answers `409` with `code: "write_race_lost"`**, as the single and
+the chunked upload and MCP `write_file` alike (`{ "error", "code", "id" }`, `id` the path). Its new bytes are stored and the file's record (size, hash,
+description, tags) is as it was, and the `error` sentence says so: upload the file again to finish it ([Write & Read Semantics](04f-write-semantics.md#optimistic-concurrency-if-match)).
+
 **An upload whose record cannot be written answers `5xx` and leaves nothing behind for a new path:** the bytes it
 stored are removed, so nothing is listed or offered to a peer; send it again. For a path that already has a record, the
 bytes are kept and the next upload rewrites the record. When the database itself did not answer (`503`, retryable), the

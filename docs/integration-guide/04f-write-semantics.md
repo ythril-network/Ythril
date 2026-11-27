@@ -356,7 +356,9 @@ Notes:
 - **A write without `If-Match` is conditional all the same, on the version it read.** If the stored version moved between its
   read and its store (a peer's copy arrived), it reads the record again and writes above what it now finds, up to three
   times; after the third miss on a record that is still there it answers `409` `write_race_lost` on REST and MCP alike, with nothing
-  written: `{ "error": "…", "code": "write_race_lost", "id": "<the record>" }`. Retry it. With `If-Match` there is one try: the version
+  written: `{ "error": "…", "code": "write_race_lost", "id": "<the record>" }`. Retry it. A file upload (one request, chunked, or MCP `write_file`)
+  that loses the race has already stored its new bytes, and the file's record is as it was; its answer says so in its `error` sentence, and uploading the
+  file again finishes it. The file-metadata `PATCH` writes no bytes, so for it nothing was written. With `If-Match` there is one try: the version
   you named, and a miss is the `412` above.
 - **A version above the ceiling is refused, never wrapped.** A record whose next version would pass
   2^50 minus 2^40 is `409` `record_version_at_ceiling` on REST and MCP alike, with nothing written:

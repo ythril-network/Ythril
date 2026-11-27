@@ -43,6 +43,7 @@ import { inOneCommandChunks, operationBytes } from '../../db/one-command.js';
 import { readStoredById } from '../../db/read-by-id.js';
 import type { RdfRecordKind } from '../record-triples.js';
 import { termIds, MAX_TERM_ID } from './terms.js';
+import { RAISE_WRITES } from './write-counter.js';
 
 /** The space collections the index is: a backup leaves them out, since they are derived from the records and a restore drops them. */
 export const TRIPLE_INDEX_PARTS: readonly SpacePart[] = Object.freeze(['rdfTerms', 'rdfQuads', 'rdfRecords', 'rdfState', 'rdfDirty'] satisfies SpacePart[]);
@@ -113,8 +114,6 @@ export type TripleIndexStatus = 'catching-up' | 'ready' | 'stale';
  */
 export interface TripleIndexState { _id: 'state'; appliedPos: number; formKey: string; status: TripleIndexStatus; buildId?: string; writes?: number }
 
-/** The update part that raises the write counter: one spelling, beside every write of the state row that changes the index. */
-const RAISE_WRITES = Object.freeze({ $inc: Object.freeze({ writes: 1 }) });
 interface LeaseRow { _id: 'lease'; owner: string; until: number }
 /**
  * The rebuild's fence (design-r2 R5): the build that may write, until when. Every batch of a build writes this row in its transaction on the

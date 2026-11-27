@@ -32,7 +32,7 @@ import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { spaceActAnswer } from '../spaces/space-act-answer.js';
 import { writeRefusalAnswer } from '../brain/write-validation.js';
 import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
-import { PositionClockUnusable, PositionsSeedUnavailable, PositionsBuilding, EdgeIdentityBuilding, schemaReadUnavailableAnswer } from '../util/errors.js';
+import { PositionClockUnusable, PositionsSeedUnavailable, PositionsBuilding, EdgeIdentityBuilding, RecordWriteRaceLost, schemaReadUnavailableAnswer } from '../util/errors.js';
 
 /**
  * Put a store failure's answer on the wire: status, `Retry-After` when the answer is retryable, and the body —
@@ -123,7 +123,9 @@ export function sendCaughtFailure(res: express.Response, where: string, err: unk
   const building = schemaReadUnavailableAnswer(err);
   if (building) { res.status(building.status).json(building.body); return; }
   const stamp = writeRefusalAnswer(err, 'update');
-  if (stamp && (err instanceof RecordVersionAtCeiling || err instanceof PositionClockUnusable || err instanceof PositionsSeedUnavailable)) {
+  // And an edit, a file's included (the upload doors and the file-meta PATCH), that missed the row's version on every attempt: the 409 `write_race_lost`
+  // the record routes and MCP answer (bundle-378, Q-976), never the 500 below.
+  if (stamp && (err instanceof RecordVersionAtCeiling || err instanceof PositionClockUnusable || err instanceof PositionsSeedUnavailable || err instanceof RecordWriteRaceLost)) {
     res.status(stamp.status).json(stamp.body);
     return;
   }

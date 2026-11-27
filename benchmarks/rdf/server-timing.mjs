@@ -1,7 +1,8 @@
 /**
  * What Ythril says about its own time per request, read by the harness (Q-976): the `Server-Timing` header on REST, the result's `_meta`
- * (`ythril/server-timing`) on an MCP tool call. `door-floor.mjs` (every door family) and `run.mjs` (the BSBM queries) read it here, so the
- * two tools parse one header alike. The phase names are the server's (`server/src/http/phase-timer.ts`).
+ * (`ythril/server-timing`) on an MCP tool call. `door-floor.mjs` (every door family) and `run.mjs` (the BSBM queries) read it here, and so do
+ * the server's specs (`testing/standalone/_server-timing.mjs` re-exports {@link serverTimingOf}, {@link mcpTimingOf} and {@link mcpCallResult}), so every reader
+ * parses one header alike. The phase names are the server's (`server/src/http/phase-timer.ts`).
  *
  * ## What it prevents
  *
@@ -20,23 +21,76 @@ export const DOOR_PHASE = 'total';
 /** The phases that are the SPARQL engine's own work, summed (`sparql-answer.ts`: `plan`, then `run`). */
 export const ENGINE_PHASES = ['plan', 'run'];
 
-/** The entries of a `Server-Timing` value: `{ name: dur }` (durations of a phase that ran more than once are its sum). */
-export function phasesOf(header) {
-  const out = {};
-  if (!header) return out;
-  for (const raw of String(header).split(',')) {
-    const [name, ...params] = raw.trim().split(';').map(s => s.trim());
-    const dur = params.find(p => p.startsWith('dur='));
-    if (name && dur) out[name] = Number(dur.slice(4));
+/**
+ * The entries of a `Server-Timing` header value, by name: `{ dur, count }`, `count` read from `desc="n=<count>"` (1 when the entry has none).
+ * THE parser of the header: the harness and the specs (`testing/standalone/_server-timing.mjs` re-exports it) read one header one way. An entry is
+ * split off by name, so a phase name inside another entry's description is never read as a phase.
+ * @param {string | string[] | undefined | null} value the header as `node:http` hands it (a string, or a list when sent twice) or as `fetch` does
+ * @returns {Map<string, { dur: number, count: number }> | null} `null` when there is no header, never an empty map: a spec cannot read "no phases" as "no header"
+ */
+export function serverTimingOf(value) {
+  if (value === undefined || value === null) return null;
+  const text = Array.isArray(value) ? value.join(', ') : String(value);
+  const out = new Map();
+  for (const raw of text.split(',')) {
+    const parts = raw.trim().split(';').map(p => p.trim());
+    const name = parts[0];
+    if (!name) continue;
+    let dur = NaN;
+    let count = 1;
+    for (const p of parts.slice(1)) {
+      const eq = p.indexOf('=');
+      if (eq < 0) continue;
+      const key = p.slice(0, eq).trim();
+      const v = p.slice(eq + 1).trim().replace(/^"|"$/g, '');
+      if (key === 'dur') dur = Number(v);
+      if (key === 'desc') {
+        const m = /^n=(\d+)$/.exec(v);
+        if (m) count = Number(m[1]);
+      }
+    }
+    out.set(name, { dur, count });
   }
   return out;
 }
 
+/** The phases an MCP tool result carries in its `_meta`, as {@link serverTimingOf} answers a header; `null` when absent. */
+export function mcpTimingOf(result) {
+  const held = result?._meta?.[MCP_TIMING_META];
+  if (!held || typeof held !== 'object') return null;
+  return new Map(Object.entries(held).map(([name, v]) => [name, { dur: Number(v?.dur), count: Number(v?.count ?? 1) }]));
+}
+
+/** `{ name: dur }` of a timing map; entries with no duration are left out, and no timing is `{}`. */
+const durationsOf = (timing) => Object.fromEntries([...(timing ?? [])].filter(([, v]) => !Number.isNaN(v.dur)).map(([name, v]) => [name, v.dur]));
+
+/** The entries of a `Server-Timing` value: `{ name: dur }` (an entry with no `dur` is left out; `{}` for no header). */
+export function phasesOf(header) {
+  return durationsOf(serverTimingOf(header));
+}
+
 /** The entries of an MCP tool result's `_meta` figures, as {@link phasesOf} answers a header (`{}` when the result carries none). */
 export function mcpPhasesOf(result) {
-  const held = result?._meta?.[MCP_TIMING_META];
-  if (!held || typeof held !== 'object') return {};
-  return Object.fromEntries(Object.entries(held).map(([phase, figure]) => [phase, Number(figure?.dur)]));
+  return durationsOf(mcpTimingOf(result));
+}
+
+/**
+ * One tool call on `POST /mcp` answered as its whole JSON-RPC result (its `_meta` included); `{ error }` for a JSON-RPC error, `null` when the answer
+ * carries no message for the call. The event-stream reading lives here and nowhere else: a server that answers `text/event-stream` and one that answers JSON are read alike.
+ */
+export async function mcpCallResult(url, key, tool, args) {
+  const r = await fetch(`${url}/mcp`, {
+    method: 'POST', signal: AbortSignal.timeout(120_000),
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } }),
+  });
+  const raw = await r.text();
+  const data = /^(?:event|data):/m.test(raw) ? raw.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5)) : [raw];
+  for (const d of data) {
+    let msg = null; try { msg = JSON.parse(d); } catch { /* not JSON */ }
+    if (msg?.id === 1) return msg.result ?? { error: msg.error };
+  }
+  return null;
 }
 
 /**

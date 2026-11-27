@@ -31,7 +31,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { refuseForkEdit } from './forks.js';
 import { RecordWriteRaceLost } from '../util/errors.js';
 
-/** How many times an edit without `If-Match` tries before it answers the precondition refusal. */
+/** How many times an edit without `If-Match` tries before its last miss on a record that is still there throws `RecordWriteRaceLost` (`409 write_race_lost`). */
 export const MAX_ATTEMPTS = 3;
 
 /** What one attempt writes with: the version it read (the write's filter names it) and the landing patch to set. */
