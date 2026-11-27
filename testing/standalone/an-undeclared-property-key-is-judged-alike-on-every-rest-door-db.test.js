@@ -21,7 +21,7 @@
  *
  * Every REST route that stores a record from a body is read out of the router source (`mountedRoutesWithSource`):
  * `POST`/`PATCH` on `/spaces/:spaceId/<kind>[/:id]` for each of the four kinds, and the bulk route. A table written by hand
- * is the door added next year simply not in it, so `the doors under test are the doors the router mounts` holds the table
+ * is the door added next year simply not in it, so `the doors under test are the doors the router mounts` (a case that needs no database, so it runs in the pure file beside this one, Q-969) holds the table
  * to what the source registers and floors the count. The per-kind REQUEST BUILDERS are fixtures and stay literal.
  *
  * ## What each answer is read as
@@ -38,7 +38,7 @@ import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { build } from './_push-door.mjs';
-import { mountedRoutesWithSource } from './_routes.mjs';
+import { KINDS, SEGMENT, routesOf } from './_undeclared-key-door-routes.mjs';
 import {
   openUndeclaredKeyDoors, MODES, spaceOf, UNDECLARED, DECLARED, DECLARING, OPEN, EMPTY_DECLARED_ENTITY,
   COLLECTION, storedWithKey,
@@ -81,8 +81,6 @@ const IDS = Object.freeze({
 });
 const SEED = 'as seeded';
 const EDITED = 'as edited by the door';
-const KINDS = ['entity', 'fact', 'chrono', 'edge'];
-const SEGMENT = { entity: 'entities', fact: 'facts', chrono: 'chrono', edge: 'edges' };
 const BULK_KEY = SEGMENT;
 const TYPE_OF = { entity: 'service', fact: 'note', chrono: 'release', edge: 'depends_on' };
 const bodyPath = (space, tail) => `/api/brain/spaces/${space}/${tail}`;
@@ -142,7 +140,7 @@ const isWarningRow = (row) => typeof row?.reason === 'string' && row.reason.star
 function doorsOf(kind) {
   const seg = SEGMENT[kind];
   const create = {
-    name: `POST ${seg}`, route: ['POST', `/api/brain/spaces/:spaceId/${seg}`], kind, verb: 'create',
+    name: `POST ${seg}`, route: routesOf(kind).create, kind, verb: 'create',
     send: (space, props, marker, extra = {}, over = {}) => rest('POST', bodyPath(space, seg), { ...CREATE[kind](marker, props, over), ...extra }),
     refused: (a) => a.status >= 400,
     flagged: (a) => flagsKey(a),
@@ -152,7 +150,7 @@ function doorsOf(kind) {
     landed: (space, marker) => byMarker(space, kind, marker),
   };
   const patch = {
-    name: `PATCH ${seg}/:id`, route: ['PATCH', `/api/brain/spaces/:spaceId/${seg}/:id`], kind, verb: 'patch',
+    name: `PATCH ${seg}/:id`, route: routesOf(kind).patch, kind, verb: 'patch',
     send: (space, props, marker, extra = {}) => rest('PATCH', bodyPath(space, `${seg}/${SEEDED_ID[kind]}`), { description: EDITED, properties: props, ...extra }),
     refused: create.refused, flagged: create.flagged, flaggedAnyProperty: create.flaggedAnyProperty, named: create.named,
     /** The seeded record, when the patch landed (its description is the edit); an empty list when it did not. */
@@ -162,7 +160,7 @@ function doorsOf(kind) {
     },
   };
   const bulk = {
-    name: `POST bulk (${BULK_KEY[kind]})`, route: ['POST', '/api/brain/spaces/:spaceId/bulk'], kind, verb: 'bulk',
+    name: `POST bulk (${BULK_KEY[kind]})`, route: routesOf(kind).bulk, kind, verb: 'bulk',
     /** Item 0 carries `props`; item 1 is a clean sibling, to show "other items written". */
     send: (space, props, marker, extra = {}) => rest('POST', bodyPath(space, 'bulk'), {
       [BULK_KEY[kind]]: [
@@ -182,20 +180,6 @@ function doorsOf(kind) {
 const DOORS = KINDS.flatMap(doorsOf);
 
 describe('an undeclared property key is judged alike on every REST door', { skip }, () => {
-  it('the doors under test are the doors the router mounts', () => {
-    // Derived from the router source: every POST/PATCH that stores a record from a body, under the brain API.
-    const mounted = mountedRoutesWithSource().filter(r => r.path.startsWith('/api/brain/') && (r.method === 'POST' || r.method === 'PATCH'));
-    const storing = mounted.filter(r => /\b(upsert(Entity|Edge|Fact|Chrono)|update(Entity|Edge|Fact|Chrono)ById|bulkWrite)\s*\(/.test(r.source)
-      || new RegExp(`^/api/brain/spaces/:spaceId/(${Object.values(SEGMENT).join('|')})(/:id)?$`).test(r.path));
-    const derived = new Set(storing.map(r => `${r.method} ${r.path}`));
-    assert.ok(derived.size >= 9, `only ${derived.size} storing REST doors derived — the derivation stopped matching: ${[...derived]}`);
-    const mine = new Set(DOORS.map(d => `${d.route[0]} ${d.route[1]}`));
-    const missing = [...derived].filter(k => !mine.has(k));
-    assert.deepEqual(missing, [], `a REST door stores a record from a body and this file holds no case for it: ${missing}`);
-    const gone = [...mine].filter(k => !derived.has(k));
-    assert.deepEqual(gone, [], `this file drives a door the router no longer mounts: ${gone}`);
-  });
-
   for (const d of DOORS) {
     describe(`${d.name} (${d.kind})`, () => {
       it('control: a declared key is accepted and flagged in no mode', async () => {

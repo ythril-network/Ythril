@@ -20,7 +20,7 @@
  *
  * ## The two halves
  *
- *  - **static**: no handler of those doors reaches `raiseVersionTo` (closures followed, the walk the old gate used to find the doors that DID). The
+ *  - **static** (needs no database, so it runs in the pure file beside this one, `no-push-door-moves-the-counter.test.js`, Q-969): no handler of those doors reaches `raiseVersionTo` (closures followed, the walk the old gate used to find the doors that DID). The
  *    function is checked to exist, so a rename cannot turn the walk into one over nothing.
  *  - **behavioural**: with the counter collection refusing every seq above a ceiling for the space (`_write-faults.mjs withCounterCeiling`), a page whose
  *    highest seq is above it, on a record the planner never hands to the writer (a TOMBSTONED one — where the old door's own bump used to be the only thing
@@ -34,31 +34,14 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
-import { moduleIndex, routeHandlerRoots, walkFrom } from './_call-graph.mjs';
-import { mountedRoutes } from './_routes.mjs';
+import { DOORS, CASE_PATHS } from './_push-door-counter-doors.mjs';
 import { withCounterCeiling } from './_write-faults.mjs';
-import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
 
 const S = 'ctrdoors';
 const CEILING = 100;
 const TOP = 500;
-/** The counter's one raiser: the function no push door may reach. */
-const RAISE = 'server/src/util/version-stamp.ts:raiseVersionTo';
-
-const INDEX = moduleIndex(SERVER_CODE_ROOTS);
-/** The two writers of what a peer delivers: a page of records (`sync/arrivals.ts`) and a page of tombstones (`sync/tombstone-apply.ts`). */
-const ARRIVAL_WRITERS = ['server/src/sync/arrivals.ts:writeArrivals', 'server/src/sync/tombstone-apply.ts:applyPeerTombstones'];
-/** The push doors: the POST routes of the sync surface whose handler reaches an arrival writer (closures followed). */
-function pushDoors() {
-  return mountedRoutes()
-    .filter(r => r.method === 'POST' && r.file.startsWith('server/src/api/sync/'))
-    .map(r => ({ path: r.path, routePath: r.routePath, file: r.file, roots: routeHandlerRoots(INDEX, r) }))
-    .filter(d => ARRIVAL_WRITERS.some(w => walkFrom(INDEX, d.roots, { closures: true }).seen.has(w)));
-}
-const DOORS = pushDoors();
-
 /**
  * Per door: what to bury (a tombstone at TOP + 100 for a record the page carries at TOP, so the planner never hands
  * it to the writer) and the body. Literal on purpose — the derivation decides a case is owed.
@@ -76,6 +59,9 @@ const CASES = {
   '/tombstones': { bury: async () => {}, body: () => ({ tombstones: [build.tombstone(S, 'never-stored', 'fact', TOP)] }) },
 };
 
+// The doors the pure file asks about are the doors this table has a case for: a difference fails the file as it loads (Q-969).
+assert.deepEqual(Object.keys(CASES).sort(), [...CASE_PATHS].sort(), 'CASES and CASE_PATHS (_push-door-counter-doors.mjs) name different doors');
+
 let door;
 
 describe('no push door moves the counter, so none answers 500 over one that would not move', { skip }, () => {
@@ -85,26 +71,6 @@ describe('no push door moves the counter, so none answers 500 over one that woul
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => { await door.wipe(S); await door.setCounter(S, 1); });
-
-  it('the derivation finds the push doors, and the counter raiser exists, so an empty walk cannot pass', () => {
-    assert.ok(DOORS.length >= 6, `only ${DOORS.length} push door(s) derived — re-anchor: ${JSON.stringify(DOORS.map(d => d.path))}`);
-    assert.ok(DOORS.some(d => d.routePath === '/batch-upsert') && DOORS.some(d => d.routePath === '/tombstones'),
-      `the batch or tombstone door was not derived: ${JSON.stringify(DOORS.map(d => d.path))}`);
-    for (const w of ARRIVAL_WRITERS) assert.ok(INDEX.bodies.has(w), `${w} is not a function of the source index — the doors are derived from what reaches it; re-anchor`);
-    assert.ok(INDEX.bodies.has(RAISE), `${RAISE} is not a function of the source index — the walk below would look for a name nothing has; re-anchor`);
-    assert.ok(DOORS.every(d => d.roots.length > 0), 'a door has no handler root: the walk would pass over it');
-  });
-
-  it('every derived door has a case', () => {
-    const missing = DOORS.filter(d => !CASES[d.routePath]).map(d => `${d.file} POST ${d.path}`);
-    assert.deepEqual(missing, [], 'a push door with no case here is one nobody checked for a counter that follows a peer');
-  });
-
-  it('no push door reaches the counter raiser', () => {
-    const reaching = DOORS.filter(d => walkFrom(INDEX, d.roots, { closures: true }).seen.has(RAISE)).map(d => `${d.file} POST ${d.path}`);
-    assert.deepEqual(reaching, [], 'a push door raises the counter over what it received: an arrival lifts every later stamp of the space to a peer\'s clock, '
-      + 'and a counter that will not move fails the page again');
-  });
 
   for (const d of DOORS) {
     const c = CASES[d.routePath];

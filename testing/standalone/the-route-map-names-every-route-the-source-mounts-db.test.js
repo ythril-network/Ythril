@@ -9,7 +9,7 @@
  * (a router mounted inside a router that is mounted with a path) would drop out of all three without a single failing request.
  *
  * The routes the source mounts are `mountedRoutes()` (`_routes.mjs`, the mount graph read from the source, not from the running app). Every one
- * of them must be in the map, and the map's literal mounts must include each mount string of `app.ts` (lowercased). The map may hold MORE
+ * of them must be in the map (a case that needs no database, so it runs in the pure file beside this one, Q-969), and the map's literal mounts must include each mount string of `app.ts` (lowercased). The map may hold MORE
  * (the OAuth library's own routes are mounted from `node_modules`, not from source); it may not hold fewer.
  *
  * Run: a Mongo the harness accepts, then node --test testing/standalone/the-route-map-names-every-route-the-source-mounts-db.test.js
@@ -20,7 +20,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { mountedRoutes } from './_routes.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { appRouter } from '../_shared/in-process-app.mjs';
 
@@ -36,16 +35,6 @@ describe('the route map names every route the source mounts', { skip }, () => {
   after(async () => {
     await app?.close();
     await door?.close();
-  });
-
-  it('every route mountedRoutes() lists is in the map under its full pattern', async () => {
-    const { routeMapContents } = await import('../../server/dist/http/route-map.js');
-    const { patterns } = routeMapContents();
-    const have = new Set(patterns);
-    const want = [...new Set(mountedRoutes().map(r => r.path))];
-    assert.ok(want.length >= 100, `the source mounts ${want.length} distinct route paths: the derivation lost most of them`);
-    const missing = want.filter(p => !have.has(p));
-    assert.deepEqual(missing, [], `these mounted routes are not in the route map (a router nested deeper than the walk reads?): ${missing.join(', ')}`);
   });
 
   it('the map holds every literal mount string of app.ts, lowercased', async () => {
