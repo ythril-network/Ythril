@@ -55,6 +55,7 @@ import { join } from 'node:path';
 import { splitStandalone, offlineRuns } from '../testing/_shared/standalone-split.mjs';
 import { timingReporterFlags, clearTimingResults } from '../testing/_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
+import { boundedTestArgs, batchTimeoutMs } from '../testing/_shared/test-file-bound.mjs';
 import { poolEach } from '../testing/_shared/pool.mjs';
 import { runTestUnits } from '../testing/_shared/run-test-units.mjs';
 import { workersPerUnit } from '../testing/_shared/offline-test-width.mjs';
@@ -187,7 +188,7 @@ function gate(name, why, file) {
   stage(name, async () => {
     process.stdout.write(`\n── ${name} ──\n`);
     try {
-      run(`node --test testing/standalone/${file}.test.js`);
+      execFileSync('node', boundedTestArgs(`testing/standalone/${file}.test.js`), { stdio: 'inherit', env: testChildEnv(), timeout: batchTimeoutMs(1) });
     } catch {
       failures.push({ name, why });
     }
@@ -231,8 +232,14 @@ stage('check-changelog', async () => {
   // A branch on a release line is compared with that line, never main (scripts/_shared/changelog-base.mjs).
   let trackedUpstream = '';
   try { trackedUpstream = execFileSync('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { /* no upstream: main */ }
-  const changelogAgainst = changelogBase({ upstream: trackedUpstream, override: process.env.PREFLIGHT_CHANGELOG_BASE ?? '' });
-  try { run(`node ./scripts/check-changelog.mjs ${changelogAgainst}`); } catch {
+  let changelogAgainst;
+  try { changelogAgainst = changelogBase({ upstream: trackedUpstream, override: process.env.PREFLIGHT_CHANGELOG_BASE ?? '' }); } catch (err) {
+    console.error(err.message);
+    failures.push({ name: 'check-changelog', why: err.message });
+    return;
+  }
+  // The base is an argument of the child, never part of a shell string: a ref name may hold `;` or `$(`.
+  try { execFileSync('node', ['./scripts/check-changelog.mjs', changelogAgainst], { stdio: 'inherit', env: testChildEnv() }); } catch {
     failures.push({ name: 'check-changelog', why: 'a file that changes what ships, with no [Unreleased] line' });
   }
 });
