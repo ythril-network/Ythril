@@ -33,17 +33,15 @@ import { recordOfAddress, termOfIri, type AddressNames } from './term-reverse.js
 import { digestOfKey } from './import-count.js';
 import type { QuadGroup } from './import-spool.js';
 import { classOfType, edgeLabelOf, groupSubjectOf, leaveOutClassKey, leaveOutKey, literalCategory, predicateRole, readSubject, type OpKind } from './quads-to-ops.js';
-import { MAX_TYPES_PER_KIND } from '../spaces/types-added-past-cap.js';
 import { localPart, nameKey, readTerm, validPropertyKey, validTypeName, type TermReading } from './schema-from-rdf-drafts.js';
 import type { BuiltType, TypeSchemasByKind } from './schema-from-rdf-modes.js';
 
 /** The most distinct predicates a file's subjects may use for a schema to be inferred from it: wider is a dump to type by hand. */
 export const SCHEMA_INFER_MAX_PREDICATES = 1000;
 /**
- * The most distinct classes a file's subjects may be typed with for a schema to be inferred from it. A space holds at most
- * {@link MAX_TYPES_PER_KIND} types of a kind and the inference builds the kinds `entity` and `fact`, so a schema takes at most twice that many
- * classes; the rest of the bound is room for the classes a threshold prunes (named, never built). Wider is a dump to type by hand, and the
- * refusal comes while the first pass reads, before a map or a step file holds an entry per class.
+ * The most distinct classes a file's subjects may be typed with for a schema to be inferred from it, by default (the instance's
+ * `schemaInferMaxClasses` sets it). It bounds the first pass's memory, not the schema: no count of types refuses a schema (Q-981), whose size
+ * the space's storage bounds. The refusal comes while the first pass reads, before a map or a step file holds an entry per class.
  */
 export const SCHEMA_INFER_MAX_CLASSES = 1000;
 /**
@@ -224,8 +222,6 @@ export interface InferFirst { typeSchemas: TypeSchemasByKind; names: AddressName
 /** What the inference hands the proposal: the types to meet the declared answer with, the answer's block, the pairs left out, the label groups. */
 export interface InferResult {
   built: BuiltType[]; inferred: InferredBlock; leaveOut: string[]; labelKeys: string[];
-  /** The kind whose types the inference had taken past the cap on type definitions when it stopped (what it had built is not a schema): the proposal refuses. */
-  overCap?: KnowledgeType;
   /** The second pass met more distinct pairs than `maxPairs` and stopped: the proposal refuses 413 and nothing it holds is a schema. */
   over?: { bound: 'pairs'; limit: number };
 }
@@ -246,30 +242,19 @@ class NameSet {
   private readonly next = new Map<string, number>();
   /** The held names whose address is not the derived one: a stored name with an explicit `iri`, a reserved name, a name claimed for a foreign address. */
   private readonly foreign = new Set<string>();
-  private readonly reserved: number;
-  /** The names this run added to the scope (held or claimed that the scope did not hold before, and not released since). */
-  private added = 0;
-  /** `defs`: the stored definitions by name; `reserved`: names held that no schema holds (they do not count toward the type cap). */
+  /** `defs`: the stored definitions by name; `reserved`: names held that no schema holds. */
   constructor(defs: Record<string, unknown> | undefined, reserved: readonly string[], private readonly onClaim?: (probes: number) => void) {
     this.held = new Set(Object.keys(defs ?? {}));
     for (const name of this.held) if (hasExplicitIri(defs?.[name])) this.foreign.add(name);
-    this.reserved = reserved.filter(name => !this.held.has(name)).length;
     for (const name of reserved) { this.held.add(name); this.foreign.add(name); }
   }
-  /** How many names the scope holds that a schema holds. */
-  get taken(): number { return this.held.size - this.reserved; }
-  /**
-   * Does the scope hold more names than `cap` through names this run added? A scope an earlier release filled past the cap is not over for a run
-   * that adds nothing to it, as a write is refused only for the types it adds (`typesAddedPastCap`).
-   */
-  addedPast(cap: number): boolean { return this.added > 0 && this.taken > cap; }
   /**
    * A derived name: held as it is, never numbered (the vocabulary gives it, and a number would name another address). A name a stored or declared
    * term already holds under its derived address is the same term; `false` when another address took it.
    */
   hold(name: string): boolean {
     if (this.foreign.has(name)) return false;
-    if (!this.held.has(name)) { this.held.add(name); this.added += 1; }
+    this.held.add(name);
     return true;
   }
   /** `wanted` or its first free numbered spelling, held now; `null` when that spelling is not valid. */
@@ -287,28 +272,22 @@ class NameSet {
     if (!valid(name)) return null;
     this.held.add(name);
     this.foreign.add(name);
-    this.added += 1;
     if (n > 0) this.next.set(wanted, n + 1);
     return name;
   }
   /**
-   * Give back a name `claim` returned that no type was built under (its definition turned out invalid), so the scope counts only built names
-   * toward the type cap. A numbered name's number stays used: the next claim of its base goes on from there.
+   * Give back a name `claim` returned that no type was built under (its definition turned out invalid), so a later claim may take it. A numbered
+   * name's number stays used: the next claim of its base goes on from there.
    */
   release(name: string): void {
-    if (this.held.delete(name)) this.added -= 1;
+    this.held.delete(name);
     this.foreign.delete(name);
   }
 }
 
-/** The names held per kind (stored, declared, inferred so far), and the first kind that holds more types than a kind may. */
+/** The names held per kind (stored, declared, inferred so far). */
 class NameBook {
   private readonly sets = new Map<string, NameSet>();
-  /** The first kind this run added names to whose held names now pass the type cap, or `undefined` (a released name no longer counts; a kind already past it is over only through what is added). */
-  get over(): KnowledgeType | undefined {
-    for (const [kind, set] of this.sets) if (set.addedPast(MAX_TYPES_PER_KIND)) return kind as KnowledgeType;
-    return undefined;
-  }
   constructor(typeSchemas: TypeSchemasByKind, private readonly onClaim?: (probes: number) => void) {
     for (const kind of Object.keys(typeSchemas) as KnowledgeType[]) {
       this.sets.set(kind, new NameSet(typeSchemas[kind] as Record<string, unknown> | undefined, kind === 'entity' ? [UNTYPED_MEMBER] : [], onClaim));
@@ -418,9 +397,6 @@ function builtOf(st: InferState): BuiltType[] {
   return [...st.builtTypes.values()].filter(b => b.kind === 'edge' || Object.keys(b.def).length > 0 || typed.has(nameKey(b.kind, b.name)));
 }
 
-/** The inference stopped: a kind holds more types than the cap allows, whatever else the file says, so the proposal refuses and reads nothing more. */
-const stoppedAt = (st: InferState, kind: KnowledgeType): InferResult => ({ built: builtOf(st), inferred: countedBlock(st.block), leaveOut: [], labelKeys: [], overCap: kind });
-
 /** The type a subject settles on, as the translation's kind reader settles it: the schema's before the vocabulary's, then the first address. */
 function pickOf(st: InferState, digest: string): TypeOf | null {
   const mine = (st.classes.subjects.get(digest) ?? []).map(n => st.typeOfClass.get(n)).filter((t): t is TypeOf => t !== undefined);
@@ -430,9 +406,9 @@ function pickOf(st: InferState, digest: string): TypeOf | null {
 
 /**
  * Step 1, the types: decide each class of pass 1 against the names after the declared answer, then count the subjects each type settles on and
- * give each type its confidence. `null`, or the answer the inference stopped with (a kind past the type cap).
+ * give each type its confidence. No count of types stops it (Q-981).
  */
-function inferTypes(st: InferState): InferResult | null {
+function inferTypes(st: InferState): void {
   const { classes, options, block, book, builtTypes, typeOfClass, ctx, prunedClasses } = st;
   const derivedOf = new Map(classes.classes.map(iri => [iri, readTerm(ctx, iri).how === 'derived'] as const));
   const order = classes.classes.map((iri, n) => ({ iri, n })).sort((a, b) => byCodeUnit(a.iri, b.iri));
@@ -469,7 +445,6 @@ function inferTypes(st: InferState): InferResult | null {
     typeOfClass.set(n, { kind, name, iri, vocabulary: false });
     builtTypes.set(nameKey(kind, name), { kind, name, def: read.how === 'foreign' ? { iri } : {} });
     block.types.push({ kind, type: name, iri, support, confidence: 1 });
-    if (book.over !== undefined) return stoppedAt(st, book.over);
   }
   const multi = new Map<number, number>();
   for (const [digest, list] of classes.subjects) {
@@ -479,7 +454,6 @@ function inferTypes(st: InferState): InferResult | null {
   }
   for (const [n, subjects] of multi) block.multiTyped.push({ iri: classes.classes[n]!, subjects });
   for (const t of block.types) t.confidence = share(st.typeSubjects.get(nameKey(t.kind, t.type)) ?? 0, t.support);
-  return null;
 }
 
 /**
@@ -572,33 +546,33 @@ function keysOf(st: InferState, kind: KnowledgeType, type: string): NameSet {
 
 /**
  * Step 4, one predicate that is an edge label (its objects are nodes): its name, its endpoints, `functional`, and whether the definition is valid.
- * `null`, or the answer the inference stopped with (a kind past the type cap).
+ * A label it does not build is refused into the answer's block.
  */
-function inferEdges(st: InferState, c: PredicateCase): InferResult | null {
+function inferEdges(st: InferState, c: PredicateCase): void {
   const { classes, options, block, book, builtTypes, typeSubjects } = st;
   const { p, perType, support, knownProp, read, refuse } = c;
   // A predicate the space holds as a property of a type is not also an edge label: the two would share one address.
-  if (knownProp.length > 0) { refuse('term-clash'); return null; }
+  if (knownProp.length > 0) { refuse('term-clash'); return; }
   // An edge label: its ends must be the file's typed subjects, or records the space stores (which leave a side open).
   const all = [...perType.values()];
-  if (all.some(s => s.open.has('end-not-described') || s.open.has('end-untyped'))) { refuse('end-not-described'); return null; }
+  if (all.some(s => s.open.has('end-not-described') || s.open.has('end-untyped'))) { refuse('end-not-described'); return; }
   const subjectsOfTypes = all.reduce((n, s) => n + (typeSubjects.get(nameKey(s.kind, s.type)) ?? 0), 0);
   const confidence = share(support, subjectsOfTypes);
-  if (support < options.minSupport) { refuse('support', { confidence }); return null; }
-  if (confidence < options.minConfidence) { refuse('confidence', { confidence }); return null; }
+  if (support < options.minSupport) { refuse('support', { confidence }); return; }
+  if (confidence < options.minConfidence) { refuse('confidence', { confidence }); return; }
   // What the answer says about this edge (its renaming, its open sides) is kept apart until its definition is known valid: a name given back
   // below is taken by a later edge, and an entry left in the block under it would be read as that edge's.
   const renamed: InferredBlock['renamed'] = [];
   const open: InferredBlock['openEndpoints'] = [];
   let name: string | null;
   if (read.how === 'derived') {
-    if (read.kind !== 'edge' || read.prop !== undefined || read.type === null) { refuse('not-a-term'); return null; }
+    if (read.kind !== 'edge' || read.prop !== undefined || read.type === null) { refuse('not-a-term'); return; }
     name = read.type;
-    if (!book.hold('edge', name)) { refuse('term-clash'); return null; }
+    if (!book.hold('edge', name)) { refuse('term-clash'); return; }
   } else {
     const wanted = wantedName(p, classes.labelGroups, validTypeName);
     name = wanted === null ? null : book.claim('edge', wanted, validTypeName);
-    if (wanted === null || name === null) { refuse('no-name'); return null; }
+    if (wanted === null || name === null) { refuse('no-name'); return; }
     if (name !== wanted) renamed.push({ iri: p, name, wanted, kind: 'edge' });
   }
   const def: Record<string, unknown> = read.how === 'foreign' ? { iri: p } : {};
@@ -616,16 +590,16 @@ function inferEdges(st: InferState, c: PredicateCase): InferResult | null {
   if (Object.keys(endpoints).length > 0) def['endpoints'] = endpoints;
   if (options.functional && all.every(s => s.maxNodes <= 1)) def['functional'] = true;
   if (!TypeSchemaZ.safeParse(def).success) {
-    // The name was claimed for a type that is not built: it is given back, so the cap counts built names only.
+    // The name was claimed for a type that is not built: it is given back, so a later label may take it.
     if (read.how !== 'derived') book.release('edge', name);
     refuse('invalid');
-    return null;
+    return;
   }
   block.renamed.push(...renamed);
   block.openEndpoints.push(...open);
   builtTypes.set(nameKey('edge', name), { kind: 'edge', name, def });
   block.edges.push({ kind: 'edge', type: name, iri: p, support, confidence });
-  return book.over !== undefined ? stoppedAt(st, book.over) : null;
+  return;
 }
 
 /** Step 3, one predicate whose objects are plain values: one datatype across every type, and its key and confidence on each type that states it. */
@@ -671,9 +645,8 @@ function inferProperties(st: InferState, c: PredicateCase): void {
 /**
  * Steps 3 and 4: decide each predicate the second pass saw, in an order that gives a derived address its own name before a foreign one asks for it.
  * The checks every predicate meets come first; then it is an edge label ({@link inferEdges}) or a property ({@link inferProperties}).
- * `null`, or the answer the inference stopped with.
  */
-function inferPredicates(st: InferState): InferResult | null {
+function inferPredicates(st: InferState): void {
   const { classes, block, pairs, columns, nodesOf, ctx } = st;
   const classSet = new Set(classes.classes);
   // A derived address takes its own name before any foreign address asks for one, so a foreign predicate is the one numbered.
@@ -700,12 +673,9 @@ function inferPredicates(st: InferState): InferResult | null {
     const nodes = nodesOf.get(p) ?? 0;
     if (literals > 0 && nodes > 0) { refuse('literal-and-node'); continue; }
     const asked: PredicateCase = { p, perType, support, knownProp, read, column, literals, refuse };
-    if (nodes > 0) {
-      const stopped = inferEdges(st, asked);
-      if (stopped !== null) return stopped;
-    } else inferProperties(st, asked);
+    if (nodes > 0) inferEdges(st, asked);
+    else inferProperties(st, asked);
   }
-  return null;
 }
 
 /** The answer: the types built, the block, the pairs left out, and the label groups left out with them. */
@@ -721,8 +691,8 @@ function answerOf(st: InferState): InferResult {
 /**
  * Decide the types (from pass 1, against the names after the declared answer), read pass 2 (properties and edges per type, the ends of
  * edges), and decide the properties and edge labels: {@link inferTypes}, {@link tallyPairs}, {@link inferPredicates} (which asks
- * {@link inferEdges} or {@link inferProperties} of each predicate), then {@link answerOf}. A step that stops the inference (the type cap, the
- * pair bound) answers at once. Pure but for reading `source` again.
+ * {@link inferEdges} or {@link inferProperties} of each predicate), then {@link answerOf}. The pair bound, the one bound a step meets, stops
+ * the inference and answers at once. Pure but for reading `source` again.
  */
 export async function inferFromData(
   source: DataSource, classes: DataClasses, first: InferFirst, options: InferOptions,
@@ -735,7 +705,11 @@ export async function inferFromData(
     builtTypes: new Map(), typeOfClass: new Map(), prunedClasses: [],
     typeSubjects: new Map(), pairs: new Map(), columns: new Map(), nodesOf: new Map(), leaveOut: [], keysHeld: new Map(),
   };
-  return inferTypes(st) ?? await tallyPairs(st) ?? inferPredicates(st) ?? answerOf(st);
+  inferTypes(st);
+  const stopped = await tallyPairs(st);
+  if (stopped !== null) return stopped;
+  inferPredicates(st);
+  return answerOf(st);
 }
 
 /** Does a stored type or property definition give its term an address of its own (an explicit `iri`) instead of the derived one? */

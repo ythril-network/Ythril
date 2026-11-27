@@ -55,7 +55,7 @@ import { log, peerText, peerList, refusalOfParse, NAME_QUOTED } from '../util/lo
 import { notFoundSentence } from '../util/errors.js';
 import { sendLostSpace } from './write-target-answer.js';
 import { restartSchemaConvertInTurn } from '../sync/governance.js';
-import { typesAddedPastCap } from '../spaces/types-added-past-cap.js';
+import { schemaRoomRefusal } from '../spaces/schema-room.js';
 import { currentLibraryState, libraryNamespaces, libraryRdfGuard, namespaceOfGroup, spaceEditRdfGuard } from '../spaces/library-terms.js';
 import { deleteNamespace, forgetNamespacesOfEmptyGroups, putNamespace } from './schema-library-namespaces.js';
 
@@ -484,20 +484,17 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
   const typeSchemas = { ...existingMeta.typeSchemas };
 
   const applied: { knowledgeType: string; typeName: string; entryName: string }[] = [];
-  /** The types the group names, per kind: what the cap counts the additions of. */
-  const groupTypes: Partial<Record<KnowledgeType, Record<string, unknown>>> = {};
 
   for (const entry of groupEntries) {
     const kt = entry.knowledgeType;
     const ktMap = { ...(typeSchemas[kt] ?? {}) };
     ktMap[entry.typeName] = { $ref: `library:${entry.name}` };
     typeSchemas[kt] = ktMap;
-    groupTypes[kt] = { ...(groupTypes[kt] ?? {}), [entry.typeName]: ktMap[entry.typeName] };
     applied.push({ knowledgeType: kt, typeName: entry.typeName, entryName: entry.name });
   }
-  // The cap on types per kind (R5), counting only the types the group adds: the one check the per-type route and the schema-from-RDF door ask.
-  const pastCap = typesAddedPastCap(existingMeta.typeSchemas, groupTypes);
-  if (pastCap) { res.status(pastCap.status).json({ error: pastCap.error }); return; }
+  // Room for the schema with the group's references in it (Q-981): one stored document and the storage quota, as every schema write asks.
+  const room = await schemaRoomRefusal(existingMeta, { ...existingMeta, typeSchemas });
+  if (room) { res.status(room.status).json(room.body); return; }
   // Review finding 9: the term-clash rule and the rename guard, as every library write that renames a linked term runs them.
   const rdfRefused = spaceEditRdfGuard(spaceId, existingMeta, { ...existingMeta, typeSchemas }, parsed.data.rebase === true);
   if (rdfRefused) { res.status(rdfRefused.status).json(rdfRefused.body); return; }

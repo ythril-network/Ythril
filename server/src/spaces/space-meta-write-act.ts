@@ -36,6 +36,7 @@ import {
 import { isPlainObject } from '../util/plain-object.js';
 import { schemaConvertPrice } from './schema-convert-acts.js';
 import { spaceWriteClosedAnswer } from './space-write-gate.js';
+import { schemaRoomRefusal } from './schema-room.js';
 
 /** The code a networked space is refused with when the door may not open a vote round. */
 export const SPACE_META_WRITE_NETWORKED = 'space_networked';
@@ -123,6 +124,10 @@ export async function writeSpaceMeta(input: SpaceMetaWriteInput): Promise<SpaceM
   // function): after every other refusal and before anything is written.
   const priced = plan.convertRecords === undefined ? null : schemaConvertPrice(spaceId, { rights: caller.rights, rateKey: input.rateKey });
   if (priced) return { kind: 'refused', status: priced.status, body: priced.body as SpaceMetaWriteRefused['body'] };
+  // Room for the schema the write would store (Q-981): one stored document and the storage quota, before anything is written. Asked of the
+  // merged meta; a networked proposal is held to it when its round lands and is merged.
+  const room = plan.mergedMeta === undefined ? null : await schemaRoomRefusal(space?.meta, plan.mergedMeta);
+  if (room) return { kind: 'refused', status: room.status, body: room.body };
   // Asked in the step that applies: from here to the apply's vote branch nothing is awaited, so the space cannot join a network in between.
   if (input.refuseIfNetworked === true && getConfig().networks.some(n => n.spaces.includes(spaceId))) {
     return { kind: 'refused', status: CONFLICT, body: {

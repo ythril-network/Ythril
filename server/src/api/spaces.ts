@@ -59,7 +59,7 @@ import { requireSettingsFields, singleTypeEditBody } from '../auth/require-setti
 import { termClashRefusalOfOwnTypeEdit } from '../spaces/meta-update.js';
 import { writeSpaceMeta } from '../spaces/space-meta-write-act.js';
 import { describeFieldRequirement } from '../auth/space-field-rights.js';
-import { typesAddedPastCap } from '../spaces/types-added-past-cap.js';
+import { schemaRoomRefusal } from '../spaces/schema-room.js';
 import { beginSchemaValidate } from '../spaces/schema-validate-door.js';
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
@@ -412,17 +412,17 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
     return;
   }
 
-  // The cap on types per kind (R5): the map replaces the stored one, so it is held to the cap whole, every name in it counted as a new one.
-  const pastCap = typesAddedPastCap({}, parsed.data.typeSchemas);
-  if (pastCap) {
-    res.status(pastCap.status).json({ error: pastCap.error });
-    return;
-  }
-
   // Two terms of an RDF space on one address are refused here as the planner refuses them for PATCH (Q-748 rule 5), before a round opens.
   const clash = termClashRefusalOfOwnTypeEdit(space, parsed.data.typeSchemas as SpaceMeta['typeSchemas'], 'replace');
   if (clash) {
     res.status(clash.status).json(clash.body);
+    return;
+  }
+
+  // Room for the schema (Q-981): one stored document and the storage quota, asked before the backup below is written.
+  const room = await schemaRoomRefusal(space.meta, { ...space.meta, typeSchemas: parsed.data.typeSchemas as SpaceMeta['typeSchemas'] });
+  if (room) {
+    res.status(room.status).json(room.body);
     return;
   }
 
@@ -592,10 +592,11 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   const kt = knowledgeType as KnowledgeType;
   const existingMeta: SpaceMeta = space.meta ?? {};
 
-  // The cap on types per kind, counting only a type this write adds (the one check the schema-from-RDF door asks too).
-  const pastCap = typesAddedPastCap(existingMeta.typeSchemas, { [kt]: { [typeName]: parsed.schema } });
-  if (pastCap) {
-    res.status(pastCap.status).json({ error: pastCap.error });
+  // Room for the schema with this type in it (Q-981): one stored document and the storage quota.
+  const withTheType = { ...existingMeta.typeSchemas, [kt]: { ...existingMeta.typeSchemas?.[kt], [typeName]: parsed.schema } };
+  const room = await schemaRoomRefusal(existingMeta, { ...existingMeta, typeSchemas: withTheType as SpaceMeta['typeSchemas'] });
+  if (room) {
+    res.status(room.status).json(room.body);
     return;
   }
 
