@@ -83,7 +83,7 @@ const WRITERS = {
   'server/src/db/drop-link-arrays.ts:dropLinkArrays': { marker: 'none-by-design', why: 'boot migration of the retired link arrays' },
   'server/src/db/rekey-memory-kind-to-fact.ts:rekeyMemoryKindToFact': { marker: 'none-by-design', why: 'boot migration of the memory kind' },
   'server/src/db/restore.ts:backupLoader': { marker: 'none-by-design', why: 'a dump restored verbatim into a collection emptied for it: every marker comes back with the from and label it was written with, and a restore act builds the guard index before it loads, so a duplicate marker in the backup fails the act' },
-  'server/src/spaces/_shared.ts:repairStaleSpaceIds': { marker: 'none-by-design', why: 'rewrites a stale spaceId field in every collection' },
+  'server/src/spaces/_shared.ts:repairStaleSpaceIdsReporting': { marker: 'none-by-design', why: 'rewrites a stale spaceId field in every collection' },
   // Q-624 (slice I3): the fork module's writers of fork rows (section 7 and the orphan resolve of section 9), each a new row with no marker.
   'server/src/brain/forks.ts:remintForks':
     { marker: 'drop', why: 'a re-minted fork row is built by rekeyedRow and the guard removed by name: a fork is never stamped, its old subject\'s marker would hold that slot for ever' },

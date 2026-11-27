@@ -137,7 +137,7 @@ const KEEP = {
   ...keep('writes or clears the write guard marker, a local-only lock', ['brain/write-plan/commit.ts:clearStaleWriteGuard']),
   ...keep('re-keys ids or space ids, or drops a retired array no schema declares: the content a rule reads is unchanged', [
     'db/drop-link-arrays.ts:dropLinkArrays', 'db/rekey-memory-kind-to-fact.ts:rekeyMemoryKindToFact', 'files/rekey-rows.ts:rekeyRows',
-    'spaces/_shared.ts:repairStaleSpaceIds',
+    'spaces/_shared.ts:repairStaleSpaceIdsReporting',
   ]),
   ...keep('writes landing positions, a decline mark or who delivered a row: local stamps, never body', [
     'sync/delivered-by-backfill.ts:stampCollection', 'sync/positions-owed.ts:carryRows', 'sync/positions-owed.ts:repairRows',

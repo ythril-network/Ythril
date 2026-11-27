@@ -145,7 +145,7 @@ const EXEMPT = {
     + 'live record names (`removeOnlyTheRecordNamed`): the rows DERIVED from the removed record at every level, which no peer sends',
   'server/src/sync/file-sync.ts:recordSyncBase':
     'file sync: the last-agreed hash a conflict is judged against, local bookkeeping on the file row',
-  'server/src/spaces/_shared.ts:repairStaleSpaceIds':
+  'server/src/spaces/_shared.ts:repairStaleSpaceIdsReporting':
     'space creation reached from membership gossip repairs a stale spaceId on records already stored; it stores '
     + 'no arriving document',
   'server/src/sync/delivered-by-backfill.ts:stampCollection':
