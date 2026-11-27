@@ -158,7 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** every local preflight run records a `Preflight-Run` with each stage's time and outcome (kept in `test-results/unrecorded` without an instance); `node scripts/test-times.mjs --preflight-trend` prints the stage times over runs.
 - **Testing:** the CI-run recorder lists main's runs without GitHub's `status=completed` filter and keeps the completed ones itself; a run that filter still lacked is now found.
 - **Testing:** `--preflight-costs` also writes `test-results/file-times-all.json`, the per-file times of every CI test job on main (a rerun counts once), only when every job has times.
-- **Testing:** CI runs the pure standalone files as two jobs (`test:standalone:pure -- --shard=<k>/2`); `test-results/file-times.json` reads both shard jobs' records, a run's shards as one run.
+- **Testing:** CI runs the pure standalone files as three jobs (`test:standalone:pure -- --shard=<k>/3`); `test-results/file-times.json` reads the shard jobs' records, a run's shards as one run.
 - **Testing:** `--record-ci` records every attempt of a run and reads a run's artifact listing to its end; a record cut for size keeps every failed test's name and every file name, and says what it left out.
 - **Testing:** `--record-ci` also records pull request runs of this repository's branches and Full runs, each record saying its kind (`runKind`); a fork's pull request is refused. Recorded times count only green full runs of pushes to main.
 - **Testing:** a local preflight also records the tests it ran, every failed test by name, as `Test-Run` records of kind `preflight` (only results that run wrote), kept and sent like its stage times; a recording problem never changes its verdict.
