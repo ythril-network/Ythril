@@ -14,12 +14,13 @@
  *    with the collections and the files already under the new id and the config still on the old one, and the marker blocks every
  *    other space operation. The rename now moves into a destination it can prove is not data: an EMPTY directory (either tree),
  *    and for the chunk tree only, upload staging that no configured space owns (the rename refused a configured new id). A
- *    non-empty `files/<new>` is real bytes and is never deleted: it fails, worded, with the marker kept.
+ *    non-empty `files/<new>` is real bytes and is never deleted: it fails, worded, and what the rename had moved is moved back (Q-978;
+ *    it used to keep its marker with the collections already under the new id).
  *
  * ## Cases
  *
- *  1. a non-empty `files/<new>`: the rename answers 500 "incomplete" in our words with no absolute path in it (D1), keeps its
- *     marker, leaves the bytes alone, and once they are removed the next operation resumes it (first, so
+ *  1. a non-empty `files/<new>`: the rename answers 500 "was not renamed" in our words with no absolute path in it (D1), leaves the
+ *     bytes alone and the space whole under its old id, and once they are removed the same rename completes (first, so
  *     that on a build without the fix its failure is its own and not the blocked marker of an earlier case);
  *  2. an empty `files/<new>` and an empty `.chunks/<new>`: the rename completes, the tree is under the new id;
  *  3. a non-empty `.chunks/<new>`: the rename completes and the stale content is gone.
@@ -75,25 +76,27 @@ describe('a space rename into a destination that already exists', { skip }, () =
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
-  it('1. a non-empty files directory of the new id is real bytes: the rename fails in our words, names no path, keeps its marker', T, async () => {
+  it('1. a non-empty files directory of the new id is real bytes: the rename fails in our words, names no path, moves back what it moved', T, async () => {
     await fsp.mkdir(dataPath('files', 'real-b'), { recursive: true });
     await fsp.writeFile(dataPath('files', 'real-b', 'precious.md'), 'real bytes');
     const r = await renameMod.renameSpaceAct('real-a', { newId: 'real-b' });
     assert.equal(r.status, 500, `a rename onto real bytes answered ${answer(r)}`);
     const said = String(r.error);
-    assert.match(said, /rename incomplete/);
+    assert.match(said, /was not renamed/);
     assert.ok(!said.includes(process.env['DATA_ROOT']) && !said.includes(tmpDir), `the answer names the data root: ${said}`);
     assert.doesNotMatch(said, /[A-Za-z]:[\\/]|[\\/](?:files|\.chunks)[\\/]/, `the answer names an absolute or data path: ${said}`);
     assert.match(said, /The file system refused this step \(EEXIST\)/, 'the refusal is not worded by the file-system words');
-    assert.equal(loader.getConfig().pendingSpaceOp?.spaceId, 'real-a', 'the failed rename dropped its marker');
+    assert.equal(loader.getConfig().pendingSpaceOp, undefined, 'the refused rename kept its marker although everything moved back');
     assert.equal(fs.readFileSync(dataPath('files', 'real-b', 'precious.md'), 'utf8'), 'real bytes', 'the destination bytes were touched');
-    assert.ok(fs.existsSync(dataPath('files', 'real-a', 'sub', 'a.md')), 'the source was moved anyway');
-    // Once the destination is cleared by whoever owns it, the next operation resumes the rename.
+    assert.ok(fs.existsSync(dataPath('files', 'real-a', 'sub', 'a.md')), 'the source did not stay where it was: the space is split across two names');
+    assert.ok(loader.getConfig().spaces.some(s => s.id === 'real-a') && !loader.getConfig().spaces.some(s => s.id === 'real-b'), 'the config does not name the old id alone');
+    // Once the destination is cleared by whoever owns it, the same rename, asked again, completes.
     await fsp.rm(dataPath('files', 'real-b'), { recursive: true, force: true });
-    const next = await renameMod.renameSpaceAct('next-a', { newId: 'next-b' });
-    assert.equal(next.status, 200, `the next operation did not resume the pending rename: ${answer(next)}`);
-    assert.equal(loader.getConfig().pendingSpaceOp, undefined, 'the pending rename was not resumed');
-    assert.ok(loader.getConfig().spaces.some(s => s.id === 'real-b'), 'the resumed rename did not commit');
+    const again = await renameMod.renameSpaceAct('real-a', { newId: 'real-b' });
+    assert.equal(again.status, 200, `the same rename did not complete once the destination was cleared: ${answer(again)}`);
+    assert.equal(loader.getConfig().pendingSpaceOp, undefined, 'the rename left its marker behind');
+    assert.ok(loader.getConfig().spaces.some(s => s.id === 'real-b'), 'the rename did not commit');
+    assert.ok(fs.existsSync(dataPath('files', 'real-b', 'sub', 'a.md')), 'the files did not move');
   });
 
   it('2. an empty destination directory, files and chunks, is moved into', T, async () => {
