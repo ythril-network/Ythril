@@ -9,7 +9,7 @@
  * - 9: a dry run with `from: data` answers the schema the write builds and writes nothing.
  * - 11: `import_schema_rdf` refuses `from: data`, its REST refusal naming `import_rdf`.
  * - 20: the door's record bound counts the edges of declared and inferred labels, before the act is registered.
- * - 22: the type cap counts declared and inferred types together.
+ * - 22: declared and inferred types together take a kind past 200 types and are written: no count of types refuses a schema (Q-981).
  * - 24: the networked refusal's `proposed` lists hold no statement the file does not hold.
  * - 28, 38: `inferFunctional`, `inferMinSupport` and `inferMinConfidence` without `data` in `from` are refused 400 on both doors.
  * - 31: the audit row of an inferring import carries `schemaInferred` and the sources asked, and no name the file chose.
@@ -17,10 +17,10 @@
  *   (`schemaInferMaxClasses`) on both doors, writes nothing and leaves no import folder; a file at the bound is let through.
  * - I2: a file whose subjects of several graphs add more distinct (subject, predicate) pairs than the pair bound answers 413
  *   (`schemaInferMaxPairs`) the same way; a file at the bound is let through.
- * - I3: an edge label whose built definition is invalid releases its name, so it does not count toward the type cap: a file that brings a kind
- *   to exactly the cap with such a label is written, never answered 500.
+ * - I3: an edge label whose built definition is invalid releases its name and is not written: a file with such a label beside a valid one is
+ *   written with the valid one, never answered 500.
  * - R1: the released name's open sides go with it: an edge that takes the name afterwards is reported with the sides it has, not the released one's.
- * - R2: a space an earlier release filled past the cap on one kind still receives types of another kind; only a kind the file adds to is judged.
+ * - R2: a space holding more than 200 types of one kind still receives types of another kind.
  *
  * Run: node --test testing/standalone/an-rdf-import-inferring-a-schema-is-bounded-and-judged-on-both-doors-db.test.js (server build and the test MongoDB)
  */
@@ -38,7 +38,7 @@ const STRICT = { validationMode: 'strict' };
 const id = (n) => `rdfinfd${n}`;
 const PLAIN = ['8r', '8m', '9', '11', '20a', '20b', '24', '28r', '28m', '31', 'i1r', 'i1m', 'i1ok', 'i2r', 'i2m', 'i2ok'];
 const MANY = Object.fromEntries(Array.from({ length: 199 }, (_, i) => [`held${i}`, {}]));
-/** What an earlier release left in a space: 201 edge types, one more than the cap that now stands. */
+/** A space holding 201 edge types: more than the per-kind count limit this release removed (Q-981). */
 const PAST_CAP = Object.fromEntries(Array.from({ length: 201 }, (_, i) => [`old${i}`, {}]));
 
 describe('an RDF import inferring a schema is bounded and judged on both doors (real routes, real MongoDB)', { skip, timeout: 300_000 }, () => {
@@ -106,15 +106,13 @@ describe('an RDF import inferring a schema is bounded and judged on both doors (
     }
   });
 
-  it('22: the type cap counts declared and inferred types together', async () => {
-    const declaredOnly = ttl('ex:Declared a owl:Class .', people(2, { cls: 'ex:Declared', prefix: 'dc' }));
-    const ok = await d.importRestOne(writer.key, id('22'), declaredOnly, { schema: 'expand', from: ['declared'], dryRun: true });
-    assert.equal(ok.status, 200, `the declared type alone fits: ${ok.text.slice(0, 400)}`);
+  it('22: declared and inferred types together take a kind past 200 types, and are written', async () => {
     const both = ttl('ex:Declared a owl:Class .', people(2, { cls: 'ex:Declared', prefix: 'dc' }), people(2, { cls: 'ex:Inferred', prefix: 'in' }));
-    const r = await d.importRestOne(writer.key, id('22'), both, { schema: 'expand', from: ['declared', 'data'], dryRun: true });
-    assert.equal(r.status, 422, r.text.slice(0, 400));
-    assert.equal(r.code, 'schema_rdf_refused');
-    assert.equal(r.body?.reasons?.[0]?.code, 'type-cap', r.text.slice(0, 400));
+    const r = await d.importRestOne(writer.key, id('22'), both, { schema: 'expand', from: ['declared', 'data'] });
+    assert.equal(r.status, 200, r.text.slice(0, 400));
+    const held = Object.keys(d.heldTypes(id('22')).entity ?? {});
+    assert.equal(held.length, 201, `the 199 held types, the declared one and the inferred one: ${held.filter(n => !n.startsWith('held')).join()}`);
+    assert.ok(held.includes('Declared') && held.includes('Inferred'), held.filter(n => !n.startsWith('held')).join());
   });
 
   it('24: the networked refusal\'s proposed lists hold no statement the file does not hold', async () => {
@@ -195,9 +193,9 @@ describe('an RDF import inferring a schema is bounded and judged on both doors (
     assert.notEqual(at.status, 413, `a file with exactly as many pairs as the bound is inferred from: ${at.text.slice(0, 400)}`);
   });
 
-  it('I3: an edge label whose definition turns out invalid does not count toward the cap, so a kind brought to exactly the cap is written, never a 500', async () => {
+  it('I3: an edge label whose definition turns out invalid is not written, and the valid label beside it is, never a 500', async () => {
     // The space holds 199 edge types. `knows` is the 200th; the other label's address is past the schema's IRI length, so its definition is refused
-    // after its name was claimed. Sorted by address it is claimed first: a name held but never built would take the count to 201 at `knows`.
+    // after its name was claimed. Sorted by address it is claimed first, and its name is given back.
     const LONG = `http://data.example/${'a'.repeat(2100)}`;
     const file = ttl(`<${LONG}> rdfs:label "linkedTo" .`, people(2, { extra: (i) => `ex:knows p:person${1 - i} ; <${LONG}> p:person${1 - i}` }));
     const r = await d.importRestOne(writer.key, id('i3'), file, { schema: 'expand', from: ['data'] });
@@ -227,8 +225,8 @@ describe('an RDF import inferring a schema is bounded and judged on both doors (
     assert.deepEqual((inferred.openEndpoints ?? []).filter(o => o.type === 'rel'), [], `the released name's open side: ${JSON.stringify(inferred.openEndpoints ?? [])}`);
   });
 
-  it('R2: a space an earlier release filled past the cap on one kind still receives types of another kind', async () => {
-    // 201 edge types are stored; the file adds one entity type and no edge, so only `entity` is judged against the cap.
+  it('R2: a space holding more than 200 types of one kind still receives types of another kind', async () => {
+    // 201 edge types are stored; the file adds one entity type and no edge.
     const r = await d.importRestOne(writer.key, id('r2'), ttl(people(2)), { schema: 'expand', from: ['data'] });
     assert.equal(r.status, 200, r.text.slice(0, 600));
     assert.deepEqual(Object.keys(d.heldTypes(id('r2')).entity ?? {}), ['Person'], 'the entity type the file adds is written');
