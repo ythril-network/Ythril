@@ -41,6 +41,7 @@ import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spaceCollection, SPACE_COLLECTIONS, type SpacePart } from '../db/space-collection.js';
 import { andPredicates } from '../db/and-predicates.js';
 import { writeInOneCommands } from '../db/one-command.js';
+import { snapshotKeyedMove } from '../db/keyed-move-undo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import { configuredSpaceIds } from '../spaces/space-lookup.js';
@@ -146,6 +147,14 @@ export async function moveCounterDoc(oldId: string, newId: string): Promise<Spac
   forgetPositionsReady(newId);
   return moved;
 }
+
+/**
+ * What `moveCounterDoc(oldId, newId)` is about to move, as the call that puts it back: the counter of `oldId` as it is, and `newId`'s as it was
+ * (a counter a deleted space kept is kept on purpose, and a refused rename must leave it as it found it). Asked BEFORE the move runs; a move
+ * that had no document to take puts nothing back.
+ */
+export const undoOfCounterMove = (oldId: string, newId: string): Promise<() => Promise<void>> =>
+  snapshotKeyedMove(counters(), [[oldId, newId]], () => { forgetPositionsReady(oldId); forgetPositionsReady(newId); });
 
 // ── the work of one space ─────────────────────────────────────────────────────────────────────────────────────────
 

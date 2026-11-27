@@ -31,6 +31,7 @@
  */
 import { col, asDoc, asFilter, asUpdate } from '../db/mongo.js';
 import { isDuplicateKey } from '../db/write-errors.js';
+import { snapshotKeyedMove } from '../db/keyed-move-undo.js';
 import { escapeRegex } from '../util/redos.js';
 import type { DupeScanStateDoc, DupeScanType } from '../config/types.js';
 import { comparePositionStarts, type PositionStart } from '../util/position-keyset.js';
@@ -180,6 +181,16 @@ export async function carryScanCursors(): Promise<number> {
  */
 function cursorsOfSpace(spaceId: string): ReturnType<typeof asFilter<DupeScanStateDoc>> {
   return asFilter<DupeScanStateDoc>({ _id: { $regex: `^${escapeRegex(spaceId)}:` } });
+}
+
+/**
+ * What `moveScanCursors(oldId, newId)` is about to move, as the call that puts it back: the rows keyed `<oldId>:*` as they are, and what stood at
+ * each `<newId>:*` key as it was (see `snapshotKeyedMove`). Asked BEFORE the move runs; a row the old id does not have is not touched.
+ */
+export async function undoOfScanCursorMove(oldId: string, newId: string): Promise<() => Promise<void>> {
+  const state = col<DupeScanStateDoc>(SCAN_STATE);
+  const ids = (await state.find(cursorsOfSpace(oldId), { projection: { _id: 1 } }).toArray()).map(d => d._id);
+  return snapshotKeyedMove(state, ids.map(id => [id, `${newId}:${id.slice(oldId.length + 1)}`] as const));
 }
 
 /**
