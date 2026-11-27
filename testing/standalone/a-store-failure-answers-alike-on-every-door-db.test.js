@@ -274,9 +274,18 @@ const SERVES_THE_LOG = new Set(['GET /api/about/logs', 'GET /api/about/logs/stre
  */
 const ANSWERS_AROUND_A_FAILED_WRITE = new Map([
   ['POST /api/update_file_meta', 'the one write that failed is the embed job queued behind the update, which is best-effort by design; the metadata update itself changed nothing'],
+  // The same call on the MCP door: the probe names no field to change, so the update writes nothing and the one failed write is the queued embed job.
+  // The excuse holds only while a call that changes a field still refuses: each of the two is asked that once below (`CHANGING_DOORS`).
+  ['MCP update_file_meta', 'the one write that failed is the embed job queued behind the update, which is best-effort by design; the metadata update itself changed nothing'],
   // Asked since MFA is switched off before every door (bundle-40): the setup door before it had closed it with `403 MFA_REQUIRED`.
   ['POST /api/admin/reload-config', 'the writes that failed are the stale-spaceId self-heal of the built-in space\'s init (`repairStaleSpaceIds`), best-effort and idempotent by design: it is logged and runs again on the next boot, reload or rename'],
 ]);
+
+/**
+ * Of the doors above, the two excused because the probe's call changes nothing (`update_file_meta`, which the probe asks with a path alone). The excuse
+ * holds only while the same door, asked to change a field, refuses with the shared sentence: each is asked that once, with a description to write.
+ */
+const CHANGING_DOORS = new Set(['POST /api/update_file_meta', 'MCP update_file_meta']);
 
 /**
  * Doors whose answer REPORTS the store's state rather than failing on it — held to the leak check, not to the 503.
@@ -508,9 +517,18 @@ describe('a store failure answers alike on every door', { skip }, () => {
     const saved = { log: console.log, warn: console.warn, error: console.error };
     console.log = console.warn = console.error = () => {};
     const results = [];
+    const changing = [];
     try {
       const networks = getConfig().networks;
       failing = true;
+      // The exemption of `CHANGING_DOORS` is right only while a call that CHANGES something refuses: the probe names no field, so its update writes nothing.
+      if (answers === 'misconfigured') {
+        for (const d of all.filter(x => CHANGING_DOORS.has(x.name))) {
+          undoNeighbours();
+          const change = d.kind === 'mcp' ? { ...d, args: { ...d.args, description: 'changed' } } : { ...d, body: { ...d.body, description: 'changed' } };
+          changing.push({ d, a: await ask(change) });
+        }
+      }
       for (const d of all) {
         undoNeighbours();
         if (!d.variant) { results.push({ d, a: await ask(d) }); continue; }
@@ -529,6 +547,19 @@ describe('a store failure answers alike on every door', { skip }, () => {
     const reached = results.filter(({ a }) => a.requestId && failedByRequest.has(a.requestId));
     const wrong = [];
     const messages = new Map();
+    if (answers === 'misconfigured') {
+      assert.equal(changing.length, CHANGING_DOORS.size, `the doors asked to change a field are ${changing.map(({ d }) => d.name)}, not ${[...CHANGING_DOORS]}`);
+      for (const { d, a } of changing) {
+        const said = typeof a.error === 'string' ? a.error.replace(/^Error: /, '') : a.error;
+        const why = [];
+        if (!failedByRequest.has(a.requestId)) why.push('no write reached the failing store, so the door was not asked');
+        if (a.status !== 500) why.push(`status ${a.status}`);
+        if (a.retryable !== false) why.push(`retryable ${a.retryable}`);
+        if (a.code !== 100 || a.codeName !== 'UnsatisfiableWriteConcern') why.push(`code ${a.code} ${a.codeName}`);
+        if (said !== UNSATISFIABLE_WRITE_CONCERN_MESSAGE) why.push(`error ${JSON.stringify(a.error)?.slice(0, 80)}`);
+        if (why.length) wrong.push(`${d.name} asked to change the description: ${why.join(', ')} - ${a.raw.slice(0, 160)}`);
+      }
+    }
     for (const { d, a } of results) {
       if (SERVES_THE_LOG.has(d.name) || (answers === 'misconfigured' && ANSWERS_AROUND_A_FAILED_WRITE.has(d.name))) continue;
       const leak = driverTextIn(a.raw);
