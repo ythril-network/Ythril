@@ -18,8 +18,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { splitStandalone, PURE_FILE_SECONDS_PATH } from '../_shared/standalone-split.mjs';
-import { textOnlyFiles } from '../_shared/text-only-test.mjs';
+import { splitStandalone, offlineRuns, PURE_FILE_SECONDS_PATH } from '../_shared/standalone-split.mjs';
 import { DB_FILE_SECONDS_PATH } from '../_shared/db-shard-plan.mjs';
 
 const input = process.argv[2];
@@ -28,15 +27,15 @@ const snapshot = JSON.parse(readFileSync(resolve(input), 'utf8'));
 const ms = snapshot.files ?? {};
 const root = process.cwd();
 const split = splitStandalone({ root });
-const path = (f) => `testing/standalone/${f}`;
 const secondsOf = (f) => ms[f] / 1000;
 const named = (files) => files.filter((f) => Number.isFinite(ms[f]) && ms[f] >= 0);
 
-const text = new Set(textOnlyFiles(split, { root }));
-const pureAll = split.offlinePure.map(path);
-const pureKind = pureAll.filter((f) => !text.has(f));
-const textKind = pureAll.filter((f) => text.has(f));
-const dbKind = split.offlineDb.map(path);
+// The kinds are the plan's own (`offlineRuns`), not a second classification: the files CI's three kinds run are these.
+const planned = offlineRuns(split);
+const filesOfKind = (kind) => planned.filter((r) => r.kind === kind).flatMap((r) => r.files);
+const textKind = filesOfKind('text');
+const pureKind = filesOfKind('pure');
+const dbKind = filesOfKind('db');
 for (const [what, files] of [['pure', pureKind], ['database', dbKind]]) {
   if (named(files).length < files.length / 2) {
     console.error(`record-shard-seconds: the snapshot times ${named(files).length} of ${files.length} ${what} files, which is not the run of this checkout`);
