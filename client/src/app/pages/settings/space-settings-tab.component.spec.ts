@@ -59,9 +59,13 @@ async function setup(
 describe('SpaceSettingsTabComponent — U9 pt3 arrangement', () => {
   beforeEach(() => TestBed.resetTestingModule());
 
-  it('groups the fields into five SettingsCards (Identity · Purpose · Limits · Document extraction · Media analysis)', async () => {
+  it('groups the fields into six SettingsCards (Identity · Purpose · Limits · RDF names · Document extraction · Media analysis)', async () => {
     const { el } = await setup();
-    expect(el.querySelectorAll('app-settings-card').length).toBe(5);
+    expect(el.querySelectorAll('app-settings-card').length).toBe(6);
+    // Q-942: RDF names sits after Limits and before Document extraction, as layout D draws it.
+    const cards = [...el.querySelectorAll('app-settings-card')];
+    const rdf = cards.findIndex(c => c.getAttribute('data-testid') === 'rdf-card');
+    expect(rdf).toBe(3);
   });
 
   it('still renders label, purpose, usage notes and max storage — but no longer edits retention', async () => {
@@ -79,7 +83,8 @@ describe('SpaceSettingsTabComponent — U9 pt3 arrangement', () => {
     const { el } = await setup({ meta: { validationMode: 'strict', strictLinkage: true } } as Partial<Space>);
     // strictLinkage checkbox is gone. The selects are now F11-c's extraction-mode picker plus the four
     // per-space media-analysis pickers (image/audio/video/text) — no validation control among them.
-    expect(el.querySelector('input[type="checkbox"]')).toBeNull();
+    // The one checkbox is the RDF names switch (Q-942).
+    expect([...el.querySelectorAll('input[type="checkbox"]')].map(c => c.getAttribute('data-testid'))).toEqual(['rdf-switch']);
     const selects = el.querySelectorAll('select');
     expect(selects.length).toBe(5);
     // The extraction picker (identified by its 'ocr' option) is present among them.
@@ -112,8 +117,8 @@ describe('SpaceSettingsTabComponent — U9 pt3 arrangement', () => {
 
   it('renders no default-state pills — blank fields convey the default via placeholder and the inherit option', async () => {
     const { el } = await setup(); // no maxGiB / recordTtlDays / documentExtraction → all inherit
-    // The redundant "unlimited" / "no auto-delete" / "instance default" pills were removed.
-    expect(el.querySelectorAll('app-status-pill').length).toBe(0);
+    // The redundant "unlimited" / "no auto-delete" / "instance default" pills were removed. The RDF card's pill is its state, no default repeat.
+    expect(el.querySelectorAll('app-status-pill:not([data-testid="rdf-pill"])').length).toBe(0);
     // Each blank number input still communicates its default through placeholder text...
     const numbers = [...el.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
     expect(numbers.length).toBe(1);   // maxGiB; retention moved to the Danger Zone
@@ -125,7 +130,7 @@ describe('SpaceSettingsTabComponent — U9 pt3 arrangement', () => {
 
   it('still renders no pills once a quota, TTL, and per-space extraction override are set', async () => {
     const { el } = await setup({ maxGiB: 5, recordTtlDays: 30, documentExtraction: 'vlm' } as Partial<Space>);
-    expect(el.querySelectorAll('app-status-pill').length).toBe(0);
+    expect(el.querySelectorAll('app-status-pill:not([data-testid="rdf-pill"])').length).toBe(0);
   });
 
   // The four media pickers follow the DOM order image · audio · video · text, after the extraction
