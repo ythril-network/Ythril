@@ -23,12 +23,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/rdf/triple-index/write-counter.ts';
 /** `$inc` naming the counter, however the braces and spaces fall. */
 const SPELLED = /\$inc\s*:\s*(?:Object\.freeze\(\s*)?\{\s*writes\s*:/;
 /** Comments out: a docblock that quotes the update is not a spelling of it. */
-const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+const code = stripComments;
 
 describe('the write counter update is spelled in one module', () => {
   const sources = readTrackedSources(['server/src'], { ext: ['.ts'], specs: false, floor: 50 });

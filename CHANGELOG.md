@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A member below 6.6.0 keeps a schema vote's conversion steps, takes the schema and converts nothing | After it upgrades, run `POST /api/spaces/:id/schema-convert` on the types the change reached |
 | `PUT /api/spaces/:id/schema` and a library group apply refuse a write past 200 types of a kind (`400`); a single-type write over the rule limits is refused `400` | Keep a kind under 200 types and within the rule limits |
 | The audit row of a call a guard refused names the token it refused; it was empty | None; read `tokenId` on `403` and `429` rows |
-| An edit other writes outran three times answers `409 write_race_lost`, not `404`; a file upload or `write_file` that loses the race answers it too (it answered `500` on REST) and has stored its new bytes | Retry it; upload the file again |
+| An edit other writes outran three times answers `409 write_race_lost`, not `404`; so does an upload (it was `500`), its bytes stored | Retry it |
 
 ### Added
 
