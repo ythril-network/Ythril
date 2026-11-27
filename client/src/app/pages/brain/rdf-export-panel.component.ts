@@ -26,7 +26,6 @@ import { RdfExportRuns, megabytes, type RdfExportRun } from '../../core/rdf-expo
 import { RDF_SPACE_FORMATS, RDF_VIEW_FORMATS, rdfIsOn, type RdfEdgeDetails, type RdfRecordFormat } from '../../core/rdf-names';
 import { rdfRefusalText } from '../../core/rdf-refusal';
 
-
 @Component({
   selector: 'app-rdf-export-panel',
   standalone: true,
