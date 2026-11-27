@@ -260,7 +260,7 @@ describe('the results the decision expects are derived from ci.yml, never listed
     const renamed = ciText().replace('name: test-results-sync-${{ matrix.shard }}-${{ github.run_attempt }}', 'name: test-results-sync-two-${{ matrix.shard }}-${{ github.run_attempt }}');
     assert.notEqual(renamed, ciText(), 'the mutation found nothing to rename: re-anchor this row');
     assert.ok(expectedResultsStems(renamed).includes('sync-two-1') && !expectedResultsStems(renamed).includes('sync-1'));
-    const shorter = ciText().replace('shard: [0, 1, 2, 3]', 'shard: [0, 1]');
+    const shorter = ciText().replace('shard: [0, 1, 2, 3, 4, 5]', 'shard: [0, 1]');
     assert.notEqual(shorter, ciText(), 'the mutation found nothing to shorten: re-anchor this row');
     assert.deepEqual(expectedResultsStems(shorter).filter((s) => s.startsWith('standalone-db-')).sort(), ['standalone-db-0', 'standalone-db-1']);
   });
