@@ -40,8 +40,8 @@
  *    (`positions_clock_unusable`) instead of handing out a position a peer's carried mark already covers.
  *
  *  - **A settled write runs the stream's hook** ({@link onSettled}) before it returns (the records stream's triple index, bundle-273), and a stamp
- *    inside a floor of its space leaves it to the floor, whose transaction commits later. Its failure never fails the write. Inside a
- *    {@link withSettlesJoined} scope the hook runs while the scope goes on, and the scope returns only after it ended.
+ *    inside a floor of its space leaves it to the floor, whose transaction commits later. Its failure never fails the write. For a
+ *    write given a {@link SettlesOwed} the hook runs on while its caller goes on, and the caller joins it before it answers.
  *
  * `last` is per space and per process. Tests set the wall clock through {@link setPositionClockSourceForTest}.
  */
@@ -264,7 +264,9 @@ function assertUsable(stream: PositionStream): void {
  * hold nobody can name is the defect `Q-200` fixed.
  */
 export async function withPositionHeld<P extends number | string, T>(
-  stream: PositionStream<P>, spaceId: string, write: (first: P) => Promise<T>, holder: string, opts: { count?: number } = {},
+  stream: PositionStream<P>, spaceId: string, write: (first: P) => Promise<T>, holder: string,
+  /** `settleInto`: let the settled hook run on and hold it there, for a caller that joins it before it answers ({@link SettlesOwed}). */
+  opts: { count?: number; settleInto?: SettlesOwed } = {},
 ): Promise<T> {
   const count = opts.count ?? 1;
   if (!Number.isInteger(count) || count < 1) throw new Error(`withPositionHeld: count must be a positive integer, got ${count}`);
@@ -279,36 +281,30 @@ export async function withPositionHeld<P extends number | string, T>(
   const hold = holds.enter(spaceId, stream.encode(first), holder);
   const result = await heldWhile(holds, spaceId, hold, () => write(stream.encode(first)));
   const settling = afterSettled(stream, spaceId);
-  const owed = settlesOwed.getStore();
-  if (owed) owed.push(settling); else await settling;
+  if (opts.settleInto) opts.settleInto.owe(settling); else await settling;
   return result;
 }
 
-/** The settled hooks a {@link withSettlesJoined} scope started and has not yet waited for. */
-const settlesOwed = new AsyncLocalStorage<Promise<void>[]>();
-
 /**
- * Run `fn`, letting the settled hook of each write it holds ({@link withPositionHeld}) run while `fn` goes on, and return only once every
- * one of those hooks has ended, whether `fn` returned or threw (bundle-378, Q-976 S3).
+ * The settled hooks a caller let run on while it went on, and the one wait for all of them (bundle-378, Q-976 S3).
  *
  * ## What it is for
  *
  * The records stream's hook is the triple index's follower, the largest part of a record save (about 84 ms of 130 at BSBM 1 000). The work a
  * commit owes after its write (the link rows, the embedding job) needs the landed write and not the follower, so a commit
- * (`brain/write-plan/commit.ts`) runs it inside this scope and the two overlap.
+ * (`brain/write-plan/commit.ts`) hands one of these to its writes ({@link withPositionHeld}'s `settleInto`) and the two overlap.
  *
  * ## What it prevents
  *
- * **An answer before the index has the write.** The wait is in the `finally` of the scope itself, so no caller can return from the scope with
- * a hook still running; a hook never rejects ({@link afterSettled} logs its own failure), so the wait cannot replace `fn`'s own outcome.
+ * **An answer before the index has the write.** The holder calls {@link SettlesOwed.joined} in the `finally` of the work that wrote, before it
+ * answers; a hook never rejects ({@link afterSettled} logs its own failure), so the wait cannot replace the work's own outcome.
  */
-export async function withSettlesJoined<T>(fn: () => Promise<T>): Promise<T> {
-  const owed: Promise<void>[] = [];
-  try {
-    return await settlesOwed.run(owed, fn);
-  } finally {
-    await Promise.all(owed);
-  }
+export class SettlesOwed {
+  private readonly owed: Promise<void>[] = [];
+  /** Hold one hook that is still running. */
+  owe(settling: Promise<void>): void { this.owed.push(settling); }
+  /** Resolves when every hook held so far has ended. */
+  async joined(): Promise<void> { await Promise.all(this.owed); }
 }
 
 /**
