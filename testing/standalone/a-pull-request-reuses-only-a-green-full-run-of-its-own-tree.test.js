@@ -116,7 +116,7 @@ const another = (over) => ({ ...clone(RUNS.workflow_runs[0]), ...over });
 
 describe('the recorded real responses (Full run 41895080392) are what the decision is shown', () => {
   // The artifact list is the recorded one with the Integration, Sync and standalone pure results under the names their shard jobs upload
-  // (bundle-356, Q-947: `test-results-<suite>-<shard>-<attempt>`); the rest is as GitHub answered.
+  // (bundle-356, Q-947: `test-results-<suite>-<shard>-<attempt>`), with the shards bundle-373 (Q-977) added (pure 3, database 4 and 5); the rest is as GitHub answered.
   it('the fixtures are the real run: one run of full-run.yml for the head, its jobs and artifacts, every list whole', () => {
     assert.equal(RUNS.total_count, RUNS.workflow_runs.length);
     assert.equal(JOBS.total_count, JOBS.jobs.length);
