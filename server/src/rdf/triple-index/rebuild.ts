@@ -52,6 +52,7 @@ import { warnOnce, SAY_ONCE_WINDOW_MS } from '../../util/warn-once.js';
 import { detachedWrite } from '../../db/write-bound.js';
 import { rdfIndexRebuildsTotal } from '../../metrics/rdf-index-metrics.js';
 import { isShuttingDown } from '../../lifecycle.js';
+import { assertSpaceTakesWrites, spaceWriteClosedAnswer, spaceWriteRefusal, type SpaceWriteClosedCode } from '../../spaces/space-write-gate.js';
 import { RDF_KIND_COLLECTIONS } from '../rdf-members.js';
 import type { RdfRecordKind } from '../record-triples.js';
 import {
@@ -91,7 +92,7 @@ export interface TripleIndexBuild {
  * What a rebuild did: `built` (swapped in), `busy` (another build holds the row), `no-form` (RDF off or unsettled), `form-changed`,
  * `stopped` (the process began to shut down: none starts, and a fill stops at its next page).
  */
-export interface RebuildResult { outcome: 'built' | 'busy' | 'no-form' | 'form-changed' | 'stopped'; buildId?: string; records?: number }
+export interface RebuildResult { outcome: 'built' | 'busy' | 'no-form' | 'form-changed' | 'stopped' | 'held'; buildId?: string; records?: number }
 
 /** Why an index is rebuilt (the upkeep's reasons, `verify.ts`). */
 export type RebuildReason = 'missing' | 'stale' | 'journal' | 'form' | 'verify' | 'unused-terms';
@@ -168,6 +169,14 @@ class RebuildStopped extends Error {
 /** The form of a space changed while its build ran: the build states the old one, and is given up. */
 class FormChanged extends Error {
   constructor() { super('the space\'s form changed while its triple index was rebuilt'); this.name = 'FormChanged'; }
+}
+
+/**
+ * A space act (a restore, a wipe) began to hold the space while its build ran: the records the fill read may be half replaced, so the
+ * build is given up before its swap and the next upkeep rebuilds from what the act leaves.
+ */
+class RebuildHeld extends Error {
+  constructor() { super('a space act holds the space: its triple index rebuild was given up before the swap'); this.name = 'RebuildHeld'; }
 }
 
 /** One page of records of `kind` stated into the build's collections, in one fenced transaction. */
@@ -274,14 +283,17 @@ export async function rebuildTripleIndex(spaceId: string, opts: { leaseMs?: numb
 
 /** One rebuild's work (see {@link rebuildTripleIndex}, which counts its outcome). */
 async function buildTripleIndex(spaceId: string, opts: { leaseMs?: number; onClaimed?: (claimed: boolean) => void }): Promise<RebuildResult> {
-  const refused = (outcome: 'no-form' | 'busy' | 'stopped'): RebuildResult => { opts.onClaimed?.(false); return { outcome }; };
+  const refused = (outcome: 'no-form' | 'busy' | 'stopped' | 'held'): RebuildResult => { opts.onClaimed?.(false); return { outcome }; };
   if (isShuttingDown()) return refused('stopped');
+  // A space act (a restore above all) replaces the records a fill would read: no rebuild starts while one holds the space.
+  if (spaceWriteRefusal(spaceId) !== null) return refused('held');
   if (formMetaOf(spaceId) === null) return refused('no-form');
   const build = await beginTripleIndexBuild(spaceId, opts);
   if (build === null) return refused(formMetaOf(spaceId) === null ? 'no-form' : 'busy');
   opts.onClaimed?.(true);
   try {
     const records = await fillTripleIndexBuild(build);
+    if (spaceWriteRefusal(spaceId) !== null) throw new RebuildHeld();
     await swapTripleIndexBuild(build);
     log.info(`Triple index of space '${peerText(spaceId)}': rebuilt from ${records} record(s) (build ${peerText(build.buildId)})`);
     return { outcome: 'built', buildId: build.buildId, records };
@@ -289,6 +301,7 @@ async function buildTripleIndex(spaceId: string, opts: { leaseMs?: number; onCla
     await releaseTripleIndexBuild(spaceId, build.buildId);
     if (err instanceof FormChanged) return { outcome: 'form-changed' };
     if (err instanceof RebuildStopped) return { outcome: 'stopped' };
+    if (err instanceof RebuildHeld) return { outcome: 'held' };
     throw err;
   }
 }
@@ -396,7 +409,7 @@ const REBUILD_SHUTTING_DOWN_STATUS = 503 as const;
 
 /** What the admin door's start answers: started (or one runs already), or refused (the codes above). */
 export type RebuildStart = { ok: true; status: 'started' | 'running'; spaceId: string }
-  | { ok: false; status: typeof REBUILD_REFUSED_STATUS | typeof REBUILD_SHUTTING_DOWN_STATUS; code: typeof TRIPLE_INDEX_REBUILD_REFUSAL_CODES[number]; error: string };
+  | { ok: false; status: typeof REBUILD_REFUSED_STATUS | typeof REBUILD_SHUTTING_DOWN_STATUS; code: typeof TRIPLE_INDEX_REBUILD_REFUSAL_CODES[number] | SpaceWriteClosedCode; error: string };
 
 /**
  * Start a rebuild of `spaceId`'s index in the background (the admin door): the rebuild runs outside the request that asked for it, each of
@@ -404,6 +417,14 @@ export type RebuildStart = { ok: true; status: 'started' | 'running'; spaceId: s
  * it, `rebuild_busy` when another instance's build does (finding F11). A space with RDF off or unsettled names is refused.
  */
 export async function startTripleIndexRebuild(spaceId: string): Promise<RebuildStart> {
+  // A space act (a restore, a wipe) holds the space: answer its own 409 and code, as every record write door does.
+  try {
+    assertSpaceTakesWrites(spaceId);
+  } catch (err) {
+    const held = spaceWriteClosedAnswer(err);
+    if (held === null) throw err;
+    return { ok: false, status: held.status, code: held.body.code, error: held.body.error };
+  }
   if (formMetaOf(spaceId) === null) {
     return { ok: false, status: REBUILD_REFUSED_STATUS, code: 'rdf_off', error: `Space '${peerText(spaceId)}' has RDF off or names that are not settled, so it has no triple index to rebuild` };
   }
