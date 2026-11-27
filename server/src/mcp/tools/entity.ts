@@ -187,7 +187,8 @@ export const update_entityTool: ToolHandler = {
     + '\n'
     + 'RESPONSE: one line naming the entity, its type, its id and its new `seq` — the entity\'s version, which a peer '
     + 'compares to know whether this copy is newer. An entity whose next version would pass the ceiling is refused (`409` '
-    + '`record_version_at_ceiling`, nothing written). An id that does not exist is an error, not a silent no-op, so a successful '
+    + '`record_version_at_ceiling`, nothing written). An edit that other writes keep moving ahead of, on every one of its tries, is refused '
+    + '(`409` `write_race_lost`, nothing written; send it again). An id that does not exist is an error, not a silent no-op, so a successful '
     + 'reply means a record really changed.\n\n'
     + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,

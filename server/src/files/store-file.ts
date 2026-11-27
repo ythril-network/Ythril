@@ -23,6 +23,7 @@ import { removeUnrecordedBytes } from './unrecorded-bytes.js';
 import type { InputFormat } from './converters/pipeline.js';
 import { checkQuota } from '../quota/quota.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
+import { RecordWriteRaceLost } from '../util/errors.js';
 
 /**
  * Are the bytes a PEER is delivering to the upload door the content a held file tombstone erased (bundle-51, Q-229)? Asked
@@ -105,8 +106,10 @@ export async function recordStoredFile(
     if (opts.actor) emitWebhookEvent({ event: 'file.created', spaceId, entry: { path: filePath, sha256 }, ...opts.actor });
     return { sha256, sizeBytes, ...dispatched };
   } catch (err) {
-    await removeUnrecordedBytes(spaceId, givenPath, err);
-    throw err;
+    const removed = await removeUnrecordedBytes(spaceId, givenPath, err);
+    // A lost race on an overwrite: the row exists, so the bytes the stored-bytes door replaced in place stay (their predecessor is gone), and the
+    // refusal says so instead of claiming nothing was written (bundle-378, Q-976). Both uploads and `write_file` reach this one catch.
+    throw err instanceof RecordWriteRaceLost && !removed ? err.withBytesStored() : err;
   }
 }
 

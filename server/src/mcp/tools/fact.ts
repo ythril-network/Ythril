@@ -229,7 +229,8 @@ export const update_factTool: ToolHandler = {
     + '\n'
     + 'RESPONSE: one line with the fact\'s id and its new `seq` — the fact\'s version, which a peer compares to know '
     + 'whether this copy is newer. A fact whose next version would pass the ceiling is refused (`409` `record_version_at_ceiling`, nothing '
-    + 'written). An id that does not exist is an error, not a silent no-op.\n\n'
+    + 'written). An edit that other writes keep moving ahead of, on every one of its tries, is refused (`409` `write_race_lost`, nothing '
+    + 'written; send it again). An id that does not exist is an error, not a silent no-op.\n\n'
     + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,

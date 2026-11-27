@@ -33,6 +33,7 @@ import { POSITION_FIELDS, TOMBSTONE_LOCAL_FIELDS, WRITTEN_HERE, RESOLVED_ELSEWHE
 import { FORKING_FAMILIES } from './upsert-plan.js';
 import { isPartialIdentity, isFromIndex, type ListedIndex } from '../spaces/edge-identity-index.js';
 import { COUNTERS } from './positions-ready.js';
+import { RAISE_WRITES } from '../rdf/triple-index/write-counter.js';
 
 /** What the tool did to one space. */
 export interface RolledBackSpace {
@@ -145,7 +146,7 @@ export async function rollBackPositions(db: Db, { log, discardUnresolvedForks = 
     // The 5.6 build that runs next writes records with no journal and no position (bundle-273, Q-764 S2): the space's triple index, if it
     // has one, is stale from here, and the 6.x start after it rebuilds it. On `db`, the rollback's own client: never through the door.
     // A stale mark raises the index's write counter in the same write, as every stale mark does (`rdf/triple-index/stale-mark.ts`).
-    await db.collection(spaceCollection(spaceId, 'rdfState')).updateOne({ _id: 'state' as never }, { $set: { status: 'stale' }, $inc: { writes: 1 } });
+    await db.collection(spaceCollection(spaceId, 'rdfState')).updateOne({ _id: 'state' as never }, { $set: { status: 'stale' }, ...RAISE_WRITES });
     done.push({ spaceId, rowsCleared, counterBefore, counterAfter });
     log(`${spaceId}: ${rowsCleared} rows cleared, counter ${counterBefore ?? 'none'} -> ${counterAfter ?? 'none'}`);
   }

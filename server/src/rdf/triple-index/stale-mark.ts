@@ -15,6 +15,7 @@
  */
 import { col, asFilter, asUpdate } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { RAISE_WRITES } from './write-counter.js';
 
 /** The part of the state row this write reads and sets (`store.ts` `TripleIndexState` is the whole row). */
 interface StaleMarkRow { _id: 'state'; status: string; writes?: number }
@@ -27,5 +28,5 @@ interface StaleMarkRow { _id: 'state'; status: string; writes?: number }
  */
 export async function markTripleIndexStale(spaceId: string): Promise<void> {
   await col<StaleMarkRow>(spaceCollection(spaceId, 'rdfState')).updateOne(
-    asFilter<StaleMarkRow>({ _id: 'state' }), asUpdate<StaleMarkRow>({ $set: { status: 'stale' }, $inc: { writes: 1 } }));
+    asFilter<StaleMarkRow>({ _id: 'state' }), asUpdate<StaleMarkRow>({ $set: { status: 'stale' }, ...RAISE_WRITES }));
 }

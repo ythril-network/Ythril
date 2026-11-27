@@ -147,7 +147,7 @@ export const write_fileTool: ToolHandler = {
     + 'IT REPLACES THE WHOLE FILE. There is no append and no patch: whatever you send becomes the entire content, so read first if you meant to add to it. Writing a path that already exists overwrites it without asking. A path that runs THROUGH a file (`a.txt/x` where `a.txt` is a file) is REFUSED with `409`, and nothing is written.\n\n'
     + 'The file is CHUNKED and each chunk is embedded separately, which is why `recall` returns a passage rather than a document and why `includeFileContent: false` is worth using — one long chunk can crowd out several one-line records. Structure the text with headings: a chunk that begins under a heading carries it, and that is what makes a recall hit locatable.\n\n'
     + 'Embedding is ASYNCHRONOUS, as with `saveFact`: the write returns once the bytes are stored and a queued job computes the vectors afterwards. `recall` always scans the newest records straight from the collection, so a chunk the vector index has not ingested yet is still found — but a chunk whose embedding job has not RUN yet has no vector to compare and stays invisible until it does; `list_embed_jobs` says whether the queue is behind. Rewriting a file resets its embedding: new content is new content, and a previous failure to embed it is not carried forward.'
-    + '\n\nWHEN IT FAILS the result carries a `code` in `structuredContent`: `path_blocked` (`409`) when a file stands where a directory is needed or the name is not one the file system accepts, `file_system_fault` (`500`, `retryable: false`) when the server\'s own storage refused the write, and a plain refusal of your arguments (`400`) otherwise. A `500` names no path and no message of the runtime\'s.',
+    + '\n\nWHEN IT FAILS the result carries a `code` in `structuredContent`: `path_blocked` (`409`) when a file stands where a directory is needed or the name is not one the file system accepts, `file_system_fault` (`500`, `retryable: false`) when the server\'s own storage refused the write, `write_race_lost` (`409`) when other writes kept changing the file\'s record on every one of the write\'s tries (the new bytes ARE stored, the record is unchanged: write the same file again to finish it), and a plain refusal of your arguments (`400`) otherwise. A `500` names no path and no message of the runtime\'s.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -596,6 +596,7 @@ export const update_file_metaTool: ToolHandler = {
     + 'THE FILE CONTENT IS NOT RE-READ. This edits the record ABOUT the file, never the bytes: no '
     + 're-extraction, no media analysis, no new thumbnail. The record is re-embedded so the new description '
     + 'and tags are searchable, which is the only reason a metadata edit costs anything at all.\n\n'
+    + 'AN EDIT OTHER WRITES KEEP MOVING AHEAD OF, on every one of its tries, is refused (`409` `write_race_lost`, nothing written; send it again).\n\n'
     + 'PARAMETERS:\n'
     + '- `path` — the file path relative to the space root, exactly as `list_dir` reports it. Required.\n'
     + '- `description` — replaces the description. This is what `recall` ranks a file on, alongside its '

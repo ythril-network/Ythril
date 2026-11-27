@@ -256,7 +256,8 @@ export const WRITE_RACE_LOST = 'write_race_lost';
 
 /**
  * A local edit without `If-Match` missed the record's version on every attempt (`brain/write-at-read-version.ts`): another write kept
- * changing the record while this one read it again and wrote again (bundle-378, Q-976 S2). Nothing was written; the record is there, so it
+ * changing the record while this one read it again and wrote again (bundle-378, Q-976 S2). Nothing was written (a file upload's new bytes excepted:
+ * they are stored before the row, `withBytesStored`); the record is there, so it
  * is no 404. `409`, `{ error, code, id }` on every door that edits a record (`connectionRefusalAnswer`; MCP carries the same body and
  * sentence). What it prevents: a record that exists answered `not found` because a writer lost a race.
  */
@@ -264,9 +265,18 @@ export class RecordWriteRaceLost extends Error {
   override readonly name = 'RecordWriteRaceLost';
   readonly code = WRITE_RACE_LOST;
   readonly status = 409 as const;
-  constructor(readonly id: string, readonly attempts: number) {
-    super(`'${id}' was changed by other writes on each of this write's ${attempts} attempts; nothing was written. Retry it (write_race_lost).`);
+  /** `bytesStored`: the write was a file's and its new bytes are on disk (see {@link RecordWriteRaceLost.withBytesStored}). */
+  constructor(readonly id: string, readonly attempts: number, readonly bytesStored = false) {
+    super(bytesStored
+      ? `'${id}' was changed by other writes on each of this write's ${attempts} attempts; the new bytes of the file were stored, but its record (size, hash, description, tags) was not changed. Upload the file again to finish it (write_race_lost).`
+      : `'${id}' was changed by other writes on each of this write's ${attempts} attempts; nothing was written. Retry it (write_race_lost).`);
   }
+
+  /**
+   * The same refusal for a FILE upload whose bytes were stored before its row was written: the stored-bytes door replaced the old bytes in place,
+   * so nothing can take the new ones back, and "nothing was written" would be false. The row is as it was; the caller uploads the file again.
+   */
+  withBytesStored(): RecordWriteRaceLost { return new RecordWriteRaceLost(this.id, this.attempts, true); }
 }
 
 /**

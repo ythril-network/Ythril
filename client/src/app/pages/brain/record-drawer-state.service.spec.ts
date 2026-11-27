@@ -89,6 +89,6 @@ describe('RecordDrawerState — lastSaved', () => {
     state.save();
 
     expect(state.lastSaved()).toBeNull();
-    expect(state.drawerError()).toBeTruthy();
+    expect(state.drawerFailure()).toBeTruthy();
   });
 });

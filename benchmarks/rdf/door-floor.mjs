@@ -31,7 +31,23 @@ import { substitute } from './params.mjs';
 import { loadTemplates } from './queries.mjs';
 import { lookupQueries, mapParameters, parameterAddresses, tableFromBindings } from './ythril-params.mjs';
 import { median, percentile } from './stats.mjs';
-import { mcpPhasesOf, phasesOf } from './server-timing.mjs';
+import { mcpCallResult, mcpPhasesOf, phasesOf } from './server-timing.mjs';
+
+/**
+ * What one asked family answered: `{ status, ok, phases }`. A REST family answers a `fetch` response, read here to its end (so the wall time includes the
+ * body) with its figures in the `Server-Timing` header; the MCP family answers {@link readingOfMcp} itself, its figures in the result's `_meta`.
+ */
+async function readingOf(answer) {
+  if (!(answer instanceof Response)) return answer;
+  await answer.text();
+  return { status: answer.status, ok: answer.ok, phases: phasesOf(answer.headers.get('server-timing')) };
+}
+
+/** The reading of an MCP tool result (`mcpCallResult`): a refusal (`isError`) is `refused` and measured as no time; no answer at all is not ok. */
+function readingOfMcp(result) {
+  if (result === null || result.error) return { status: 'no answer', ok: false, phases: {} };
+  return result.isError ? { status: 'refused', ok: true, phases: {} } : { status: 200, ok: true, phases: mcpPhasesOf(result) };
+}
 
 /** The 95th percentile, nearest rank (`stats.mjs`). */
 const PERCENTILE = 95;
@@ -76,10 +92,7 @@ async function main() {
 
   const families = {
     'sparql Q11 (REST)': (k) => fetch(sparqlUrl, { method: 'POST', headers: { ...auth, 'content-type': 'application/sparql-query', accept: 'application/sparql-results+json' }, body: q11(k) }),
-    'sparql Q11 (MCP)': (k) => fetch(`${origin}/mcp`, {
-      method: 'POST', headers: { ...json, accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'sparql_query', arguments: { space, query: q11(k) } } }),
-    }),
+    'sparql Q11 (MCP)': async (k) => readingOfMcp(await mcpCallResult(origin, state.token, 'sparql_query', { space, query: q11(k) })),
     'recall': () => fetch(`${origin}/api/brain/recall`, { method: 'POST', headers: json, body: JSON.stringify({ space, query: 'product offer', topK: 5 }) }),
     'filter': () => fetch(`${origin}/api/filter`, { method: 'POST', headers: json, body: JSON.stringify({ space, collection: 'entities', filter: {}, limit: 10 }) }),
     'traverse': () => fetch(`${origin}/api/brain/spaces/${encodeURIComponent(space)}/traverse`, { method: 'POST', headers: json, body: JSON.stringify({ startId: entity, maxDepth: 1 }) }),
@@ -97,21 +110,10 @@ async function main() {
     let status = null;
     for (let k = 0; k < warm + runs; k++) {
       const t0 = performance.now();
-      const res = await ask(k);
-      const text = await res.text();
+      const reading = await readingOf(await ask(k));
       const wall = performance.now() - t0;
-      status = res.status;
-      let phases = phasesOf(res.headers.get('server-timing'));
-      if (family.endsWith('(MCP)')) {
-        const data = /^(?:event|data):/m.test(text) ? text.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5)) : [text];
-        for (const d of data) {
-          let msg = null; try { msg = JSON.parse(d); } catch { /* not JSON */ }
-          const held = mcpPhasesOf(msg?.result);
-          if (Object.keys(held).length > 0) phases = held;
-          if (msg?.result?.isError) status = 'refused';
-        }
-      }
-      if (k >= warm && res.ok && status !== 'refused') measured.push({ wall, phases });
+      status = reading.status;
+      if (k >= warm && reading.ok && status !== 'refused') measured.push({ wall, phases: reading.phases });
     }
     const of = (pick) => {
       const xs = measured.map(pick).filter(Number.isFinite);

@@ -1,8 +1,8 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import type { Observable } from 'rxjs';
 import { ChronoType, ChronoStatus, Fact, Entity, Edge, ChronoEntry, KnowledgeType } from '../../core/api.types';
 import { BrainApi } from '../../core/brain-api.service';
-import { httpErrorReason, type RefusalSource, type WireRow } from '../../core/refusal-text';
+import type { RefusalSource, WireRow } from '../../core/refusal-text';
 import { RetypeConfirmService } from '../../core/retype-confirm.service';
 import { splitWriteWarnings } from '../../core/write-warnings';
 import { BrainStore } from './brain-store.service';
@@ -68,11 +68,6 @@ export class RecordDrawerState {
   drawerSaving = signal(false);
   /** The refused answer of the last save, as the request gave it; null when the last save did not fail. */
   readonly drawerFailure = signal<RefusalSource | null>(null);
-  /** The same failure as a plain, untranslated sentence ('' when there is none): for a host that wants a string and not rows. */
-  readonly drawerError = computed(() => {
-    const failure = this.drawerFailure();
-    return failure ? httpErrorReason(failure) || String(failure.status ?? '') || 'error' : '';
-  });
   /** The `warnings` of the last successful save: shown until the next save replaces them or the reader dismisses them. */
   readonly drawerWarnings = signal<WireRow[]>([]);
   /** The save's warnings were cut by the server (`warningsTruncated`): the notice says rows were left out. */
