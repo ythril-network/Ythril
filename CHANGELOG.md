@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Operations:** `ythril_write_group_aborts_total{reason}` counts write groups that landed nothing: the all-or-nothing writer a SPARQL Update uses. A delete in it is refused whole (`referenced`) while something still names the record.
 - **Schema:** every schema violation row carries a stable `code` and its `params` beside its `reason` on every REST door and MCP tool, and the web app words it in your language; a bulk warning row gains `warning`. The integration guide lists the codes; an older unconverted item has none.
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.
-- **Schema:** the schema versions a space uses are kept privately in `<space>_schema_snapshots`, named by their fingerprint, with what each was built from (own types, network layers). A database backup carries them.
+- **Schema:** the schema versions a space uses are kept privately on this instance, named by their fingerprint, with what each was built from (own types, network layers). A database backup carries them.
 - **Schema:** a schema version is kept while a record here carries it, while it is current or a network's layer, and while a kept version links it; once none holds, the housekeeping cycle removes it no sooner than a day after it first found it unused.
 - **Schema:** `GET /api/spaces/:id/schema-versions` and MCP `space_schema_versions` list a space's schema versions with record counts, read one (`fp`), or say what changed per type from one to another (`fp` and `against`); a peer-bound token sees only what the sync door would serve it.
 - **Schema:** `against: stamp` on `POST /api/spaces/:id/validate-schema` and MCP `schema_validate` judges each stored record by the version it carries, counting those it cannot in `skipped` (`unversioned`, `notHeld`, `unread`); `against` is echoed in every answer.
@@ -68,10 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web:** a vote that comes with a conversion shows its steps in words and this instance's own record counts before a member votes.
 - **Web:** Settings → About has a "Third-party software" card, and Settings → Help offers the third-party notices as a document readable inside the instance.
 - **Web:** the namespace field of the Schema Library says an address ending in `/` with no `#`.
-- **RDF:** a space with RDF on keeps a triple index (`<space>_rdf_terms`, `_rdf_quads`, `_rdf_records`, `_rdf_state`), brought up to every positioned write before the write answers; it is derived from the records, left out of backups and dropped by a restore.
-- **RDF:** a record write without a position (a redaction, a schema stamp, a wipe, a delete) is journaled in `<space>_rdf_dirty` and brought into the triple index; a write that names no record, a dropped collection or a positions rollback marks the index stale.
-- **RDF:** a SPARQL query reads a space from its triple index when that is caught up, else from its records, with the same answer; joins look up 100 bindings at once.
-- **RDF:** a missing, stale or drifted triple index is rebuilt in the background and swapped in whole; the new tool `space_rdf_rebuild` (knowledge `admin`) rebuilds one space now, and `space_rdf_index` reads its state.
+- **RDF:** SPARQL queries of a space with RDF on, and queries that join many statements in particular, are faster and answer as before; what makes them fast is derived from the records, left out of backups and rebuilt after a restore.
+- **RDF:** while that is not ready (after a restore, a change that names no record, or a rollback), a query reads the records and answers the same, only slower.
+- **RDF:** when it is missing or out of date it is rebuilt in the background; the new tool `space_rdf_rebuild` (knowledge `admin`) rebuilds it for one space now, and `space_rdf_index` reads its state.
 - **RDF:** config key `sparql.maxIndexRowsRead` (default 20 times `sparql.maxRecordsRead`) bounds the index statements one query reads (`413 sparql_too_much_read`).
 - **RDF:** a personal view can be a SPARQL CONSTRUCT (`sparql: { query }`): the export, SPARQL and `/ld/@<name>/` read its statements over what you read, at most 50 000, one code per cause on each door; other doors answer `409 view_is_construct`.
 - **RDF:** the statements a SPARQL Update removes and inserts are read into record writes by the import's own rules, or refused with a named reason (`server-owned-removed`, `edge-ends-change`, `not-writable-here`, `field-not-removable`, `subject-not-an-address-here`).
@@ -115,12 +114,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Brain:** a record over 10 MiB as JSON is refused `400` at the single-record doors (none checked its size before); `POST .../bulk` and `save_bulk` answer `507` `storage_exceeded` at the brain's hard storage limit, as the fact doors do.
 - **Licence:** releases from the next one on are under the Ythril License: passing on the source, changed versions or images is no longer licensed, and the free small-business tier is under 50 people. Releases already published keep their terms.
 - **Schema:** type rows in the schema tab show only the name: the property, rules, pattern, library and retention pills are gone; retention and the library link stay in the type's pane.
-- **Schema:** `older` no longer walks every stamped record; version texts are read in byte-bounded chunks; a pass past its deadline answers 503 `schema_versions_busy`; edges get a `{label: 1}` index, built in the background.
+- **Schema:** `older` is faster on a space with many stamped records; a pass past its deadline answers `503 schema_versions_busy`.
 - **Schema:** a record whose type field holds an array is matched by no type in `schemaVersion` filters and the History dialog; it is counted as unclassified.
 - **Schema:** peer-bound tokens' `older` and `sameAs` see only versions they may have.
 
 - **Schema:** the per-type files `schemas/<space>_<kind>_<type>.json` are no longer written; the housekeeping cycle removes the ones this instance wrote, locally and without a tombstone.
-- **Schema:** the schema version index keys the stamp and the type; the index pass builds it, then drops the old one. Until a collection has either, a schema-version read answers `503 schema_index_building`.
+- **Schema:** after the upgrade, what schema-version reads need is prepared in the background; until a space has it, such a read answers `503 schema_index_building`.
 - **Schema:** `schema_update` and `PATCH` say a named type is replaced whole: send the complete type as `space_meta` returned it. The MCP door has no `If-Match`; read `space_meta` after the write.
 - **Schema:** the bulk dismissal (`POST /api/spaces/:id/schema-convert/items/dismiss`, MCP `dismiss_unconverted_shown`) answers `400 unconverted_bad_status` to a `status` other than `open`: it dismisses open items only. A caller that sent `all` or `dismissed` must drop it.
 - **Records:** a `schemaFingerprint` sent in a write body is ignored (not named as an unknown field, never stored); `deleteFields` refuses it by name.
@@ -141,7 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web:** the Files page's processing poll lives in a module of its own; nothing on the page changes.
 - **Deployment:** the app's container in `docker-compose.yml` drops all capabilities, forbids new privileges and has a read-only root and a process ceiling (`YTHRIL_PIDS_LIMIT`, default 1024). A model that is not bundled needs `MODEL_CACHE_DIR` under `/data`.
 - **Testing:** the size check fails a tracked file that grows past its limit unless an entry in its allow file names the file, its decomposing ticket and a review date.
-- **Testing:** the metric-source tests read declarations through `testing/standalone/_metric-sources.mjs`, which finds every metrics module that declares a metric; a test fails a scanner that reads `registry.ts` on its own.
+- **Testing:** the tests that read metric declarations find every module that declares a metric; a test fails a scanner that reads only the registry.
 - **Testing:** the local preflight runs its source gates first, then the builds, then the test suites, and stops at the first failing stage, naming the stages it did not run.
 - **Testing:** within each of those, the preflight runs first the stage whose failure is cheapest to find, from the recorded stage times (`test-results/stage-costs.json`, refreshed after each recorded run), never before a stage it reads; with no snapshot it keeps the listed order.
 - **Testing:** the local preflight runs several standalone batches at once, never more than 8 test files together, parses test files in parallel, and ends a batch that never exits at a time bound.
@@ -179,9 +178,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docs:** changed: the upgrading guide names the removal of records whose file bytes are gone, its timings and holds, and putting lost bytes back before upgrading.
 - **Docs:** added: the integration guide's Converting Records page (the steps, what a run does to a record, the Convert act, the unconverted list, the network case) and the upgrading note for members below 6.6.0.
 - **Build:** the build stops with one line naming the package and `run npm ci` when the install differs from package-lock.json or lacks a package the build needs, instead of failing with misleading type errors.
-- **Build:** the OIDC settings types moved out of `config/types.ts` into `config/types-oidc.ts`, which brings that file back under its size limit; no behaviour changes.
+- **Build:** the OIDC settings types live in a file of their own, which brings the settings file back under its size limit; no behaviour changes.
 - **Repository:** the contributor licence agreement, its signing workflow and the pull-request template are removed, and a standalone test fails if a guide, agreement or template for outside code returns.
-- **RDF:** no user-facing effect yet: `server/src/rdf/term-reverse.ts` reads an address the export writes back to its record or term, for the import that follows; it accepts exactly the spellings the export writes and nothing else.
+- **RDF:** no user-facing effect yet: the server reads an address the export writes back to its record or term, for the import that follows; it accepts exactly the spellings the export writes and nothing else.
 
 ### Fixed
 
@@ -190,7 +189,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` and `PUT /api/spaces/:id/schema` refuse a type that would give two terms of the space one RDF address (`422 rdf_term_clash`), as `PATCH /api/spaces/:id` and `schema_update` do; they stored it.
 - **RDF:** the RDF import lands typed entities and chrono entries with no `rdfs:label`, named by their address's local name; a refused record is coded by its cause (`missing-required-field`, `end-refused`, `stored-link-dangling`, `address-gives-no-name`) with the planner's sentence.
 - **RDF:** a peer can no longer push a space's base epoch to the maximum: an epoch above half of it is refused as an offer, as a shared space's first enable (no base adopted) and as a `space_rebase` round's epoch.
-- **Schema library:** a group called `constructor`, `__proto__` or `toString` behaves as any other, and a group's namespace goes with its last entry instead of staying hidden and holding its prefix.
+- **Schema library:** a group named like a built-in object member (for example `constructor` or `__proto__`) behaves as any other, and a group's namespace goes with its last entry instead of staying hidden and holding its prefix.
 - **Web:** the Brain Overview's pencil on a type opens the space's settings on that type for a token with the schema right; it was never drawn, and neither was the Usage panel's "Reset usage", which shows to the same tokens now.
 - **Web:** a property is "Eigenschaft" in German and "właściwość" in Polish in the schema tab, where they said "Eigentum" and "Neuer Immobilienname" (real estate) and "nieruchomość"; Polish words written without their accents ("wedlug", "wyslij", among others) are corrected.
 - **Web:** a document-processing setting an environment variable pins is shown locked on the Media processing page, and a save no longer sends it. Before, one pinned setting made every save on the page fail with no reason shown.
