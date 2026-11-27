@@ -82,4 +82,23 @@ describe('failEdit translates a refusal only when the body has a code (decision 
       expect(text).toContain('{{id}}');
     }
   });
+
+  it('write_race_lost has its sentence, with its {{id}} placeholder, in all three locales (bundle-378, Q-976)', () => {
+    for (const locale of LOCALES) {
+      const text = dictionary(locale)['networks.refusal.write_race_lost'];
+      expect(text, `${locale}.json has no networks.refusal.write_race_lost`).toBeTruthy();
+      expect(text).toContain('{{id}}');
+    }
+  });
+
+  it('a 409 write_race_lost on the edit path is the dictionary\'s sentence with the id, and not the server\'s English', () => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [getTranslocoModule({ translation: { en: { networks: { refusal: { write_race_lost: 'RACE-LOST for {{id}}' } } } } })],
+      providers: [RecordListState],
+    });
+    const s = TestBed.inject(RecordListState);
+    s.failEdit({ status: 409, error: { error: 'x was changed by other writes ... (write_race_lost).', code: 'write_race_lost', id: 'r1' } });
+    expect(s.editError()).toBe('RACE-LOST for r1');
+  });
 });
