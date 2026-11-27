@@ -703,7 +703,7 @@ export const save_spaceTool: ToolHandler = {
     // the deprecated name would be a new surface adopting an old one on the day it is written.
     if (a['purpose'] !== undefined) body['description'] = a['purpose'];
 
-    const decision = planSpaceCreate(body, { rights: ctx.rights ?? null });
+    const decision = await planSpaceCreate(body, { rights: ctx.rights ?? null });
     if (!decision.ok) {
       // The sentence, and the refusal's `code` beside it as the REST body carries it (as `schema_update` answers its refusals).
       return refusedMetaUpdate(decision.refusal);

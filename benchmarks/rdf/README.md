@@ -6,10 +6,12 @@ a triple cache rests on numbers. Q-759.
 
 - **Data**: BSBM Tools v0.2, generated at 1 000, 5 000 and 20 000 products **without forward chaining**, then
   turned into one Ythril-loadable variant that both engines load (see [The dataset variant](#the-dataset-variant)).
-  Ythril runs only the sizes its import takes: 1 000, and the largest product count whose generated data stays under
-  the import's 200 types per kind (found by `typecap-search.mjs`, 4 641 products with 135 types; at 4 642 the
-  hierarchy grows to 263). 5 000 and 20 000 are Oxigraph-only: Ythril refuses them (`schema_rdf_refused`, 200 types
-  per kind; 20 000 would also exceed the 1 GiB import body bound).
+  The pinned runs load Ythril with 1 000 products and with 4 641, the largest count whose generated data stayed under
+  the import's old limit of 200 types per kind (found by `typecap-search.mjs`, 135 types; at 4 642 the hierarchy
+  grows to 263). That limit is gone (Q-981: a space holds as many types as its storage allows, and a schema is held
+  to the size a peer takes a snapshot of), so the search has no use for a new run and is kept only as the record of
+  how 4 641 was chosen. 5 000 and 20 000 are Oxigraph-only in the pinned runs, made when Ythril refused them
+  (`schema_rdf_refused`, 200 types per kind); 20 000 would also exceed the 1 GiB import body bound.
 - **Queries**: the 11 Explore queries, Q1-Q5 and Q7-Q12. BSBM removed Q6 from the mix, so the "12" in the
   ticket is 11. Their text is read from the pinned archive, never retyped here.
 - **Parameters**: chosen by BSBM's own test driver under its seed. Run `k` of a query uses parameter set `k`
@@ -261,7 +263,7 @@ docker run --rm -v <checkout>:/w:ro -w /w node:24 node --test testing/standalone
 |---|---|
 | `pin.json` | URLs, hashes, image digests, seeds, sizes |
 | `generate.mjs` | download and verify BSBM Tools, generate datasets (no forward chaining), make the variant (again when its rules changed), capture the driver's parameters |
-| `typecap-search.mjs` | the largest product count under the import's type cap, from the generator's output |
+| `typecap-search.mjs` | the largest product count under the import's old type cap (gone since Q-981), from the generator's output; the record of how the pinned size was chosen, with no use for a new run |
 | `load.mjs` | `oxigraph-up/down`, `ythril-up/down`, `ythril` |
 | `run.mjs` | runs the queries, maps Ythril's parameters, judges validity, writes the record and the table |
 | `server-timing.mjs` | the `Server-Timing` header (and MCP `_meta`) read once for `run.mjs` and `door-floor.mjs`: the door's total and the engine's own time |

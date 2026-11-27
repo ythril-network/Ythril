@@ -124,8 +124,8 @@ export async function writeSpaceMeta(input: SpaceMetaWriteInput): Promise<SpaceM
   // function): after every other refusal and before anything is written.
   const priced = plan.convertRecords === undefined ? null : schemaConvertPrice(spaceId, { rights: caller.rights, rateKey: input.rateKey });
   if (priced) return { kind: 'refused', status: priced.status, body: priced.body as SpaceMetaWriteRefused['body'] };
-  // Room for the schema the write would store (Q-981): one stored document and the storage quota, before anything is written. Asked of the
-  // merged meta; a networked proposal is held to it when its round lands and is merged.
+  // Room for the schema the write would store (Q-981): the size bound and the storage quota, before anything is written. Asked of the
+  // merged meta. A networked proposal is asked here, when it is proposed, and nowhere else: nothing checks again when its round lands.
   const room = plan.mergedMeta === undefined ? null : await schemaRoomRefusal(space?.meta, plan.mergedMeta);
   if (room) return { kind: 'refused', status: room.status, body: room.body };
   // Asked in the step that applies: from here to the apply's vote branch nothing is awaited, so the space cannot join a network in between.

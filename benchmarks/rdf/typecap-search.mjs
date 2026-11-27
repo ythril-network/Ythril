@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Finds the largest product count the Ythril import can take under its type cap, from the generator's output.
+ * Finds the largest product count the Ythril import could take under its old type cap, from the generator's output. The cap (200 types per
+ * kind) is gone since Q-981, so a new run has no use; the script is kept as the record of how the pinned 4 641 was chosen.
  *
  *   node benchmarks/rdf/typecap-search.mjs [--lo 1000] [--hi 3000] [--cap 200] [--work <dir>]
  *

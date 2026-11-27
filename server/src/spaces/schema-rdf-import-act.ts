@@ -53,6 +53,7 @@ import { assertSchemaWritable } from './schema-write-gate.js';
 import { spaceWriteClosedAnswer } from './space-write-gate.js';
 import { planSpaceMetaUpdate, type MetaUpdatePlan, type WriteCaller } from './meta-update.js';
 import { writeSpaceMeta, fieldRefusalsOf, SPACE_META_WRITE_NETWORKED } from './space-meta-write-act.js';
+import { schemaRoomRefusal } from './schema-room.js';
 import { unknownSpaceAnswer, lostSpaceAnswer } from './unknown-space.js';
 import { RDF_IMPORT_ADDRESS_MAX } from './rdf-import-files.js';
 
@@ -387,11 +388,13 @@ export interface JudgedProposal {
 /**
  * Judge `proposal` as its write would, without writing: the field rungs first (a file whose shapes give a type rules needs `schema: admin`), asked
  * by the write act's one function, then the planner's verdict. The step the schema door and the data import's schema option (Q-955) share, so a
- * dry run of either is refused what its write is refused. `proposed` is the body a networked refusal carries.
+ * dry run of either is refused what its write is refused: the room check (the size bound and the storage quota, `schemaRoomRefusal`) is asked here
+ * too, so a dry run does not answer 200 where the write answers 422 `schema_rdf_refused` with the reason `storage_exceeded` or `schema_too_large`.
+ * `proposed` is the body a networked refusal carries.
  */
-export function judgeSchemaProposal(
+export async function judgeSchemaProposal(
   spaceId: string, proposal: SchemaProposal, caller: SchemaRdfImportInput['caller'], proposed: () => SchemaRdfImportBody,
-): JudgedProposal | SchemaRdfImportRefusal {
+): Promise<JudgedProposal | SchemaRdfImportRefusal> {
   const instanceAdmin = !!caller && isInstanceAdmin(caller);
   const fields = fieldRefusalsOf(spaceId, writeBodyOf(proposal), { rights: caller?.rights, instanceAdmin });
   if (fields.length > 0) return rungRefusal(fields);
@@ -399,6 +402,9 @@ export function judgeSchemaProposal(
   const verdict = planSpaceMetaUpdate({ spaceId, space, body: writeBodyOf(proposal), ifMatch: String(proposal.version), caller: writeCallerOf(caller) });
   if (!verdict.ok) return chainRefusal(verdict.refusal.status, verdict.refusal.body as { error: string; code?: string }, proposed());
   const mergedMeta = verdict.plan.mergedMeta as SpaceMeta | undefined;
+  // Where the write would be a vote (no merged meta), the proposal is asked of the round's own door, as a networked PATCH is: when proposed.
+  const room = mergedMeta === undefined ? null : await schemaRoomRefusal(space?.meta, mergedMeta);
+  if (room) return chainRefusal(room.status, room.body, proposed());
   const merged = (mergedMeta?.typeSchemas ?? proposal.answer.typeSchemas) as SpaceMeta['typeSchemas'];
   return { kind: 'judged', merged: structuredClone(merged), mergedMeta };
 }
@@ -504,7 +510,7 @@ async function readAndBuild(input: SchemaRdfImportInput, p: SchemaRdfImportParam
   const proposed = proposedBodyOf(input.spaceId, { mode: p.mode, dryRun }, from, format, proposal);
 
   // What the write would refuse, the dry run refuses (the shared judgement: the field rungs, then the planner's verdict).
-  const judged = judgeSchemaProposal(input.spaceId, proposal, input.caller, () => proposed);
+  const judged = await judgeSchemaProposal(input.spaceId, proposal, input.caller, () => proposed);
   if (judged.kind === 'refused') return judged;
   // A dry run writes nothing, and a build that changes nothing writes nothing either (R3): a write raises the version and pushes a history
   // snapshot, and a space in a network would be refused for a vote that has nothing to carry. Whether the space is in a network is asked once,

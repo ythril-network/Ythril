@@ -599,7 +599,6 @@ function inferEdges(st: InferState, c: PredicateCase): void {
   block.openEndpoints.push(...open);
   builtTypes.set(nameKey('edge', name), { kind: 'edge', name, def });
   block.edges.push({ kind: 'edge', type: name, iri: p, support, confidence });
-  return;
 }
 
 /** Step 3, one predicate whose objects are plain values: one datatype across every type, and its key and confidence on each type that states it. */

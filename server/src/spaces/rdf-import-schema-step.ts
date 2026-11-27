@@ -152,7 +152,7 @@ export async function schemaAtDoor(input: {
   const proposal = await proposeSchemaFromRdf(spaceId, found.quads, { from: declaring, mode: schema.mode, ...(options.source ? { source: options.source } : {}), ...(infer ? { infer } : {}) });
   if (proposal.kind === 'refused') return proposal;
   const proposed = (): ReturnType<typeof proposedBodyOf> => proposedBodyOf(spaceId, { mode: schema.mode, dryRun: input.dryRun }, schema.from, options.format, proposal);
-  const judged = judgeSchemaProposal(spaceId, proposal, input.caller, proposed);
+  const judged = await judgeSchemaProposal(spaceId, proposal, input.caller, proposed);
   if (judged.kind === 'refused') return judged;
   const names = typeNamesOf(proposal);
   const changeList = proposal.answer.changes;

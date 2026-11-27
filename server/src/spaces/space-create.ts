@@ -29,6 +29,7 @@ import {
   CreateSpaceBody, TypeSchemasZ, libraryRefRefusal, parseSpaceMeta, stripServerOwnedSpace,
 } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
+import { schemaRoomRefusal, type SchemaRoomRefusal } from './schema-room.js';
 import { RDF_BASE_NEEDED_STATUS, RDF_BASE_STANDS_STATUS, settleRdf, sharedRdfBaseRefusal } from './rdf-settle.js';
 import { getConfig } from '../config/loader.js';
 import type { TokenRights } from '../config/rights-shape.js';
@@ -46,8 +47,8 @@ const TERM_CLASH_STATUS = 422 as const;
 
 /** A refusal, carrying the status the contract suite pins. */
 export type SpaceCreateRefusal = {
-  status: 400 | typeof RDF_BASE_STANDS_STATUS | 422;
-  body: { error: string; code?: string };
+  status: 400 | typeof RDF_BASE_STANDS_STATUS | 422 | SchemaRoomRefusal['status'];
+  body: { error: string; code?: string; storageExceeded?: true };
 };
 
 /** Exactly the arguments `createSpace()` takes, with the id resolved and the meta seeded. */
@@ -62,10 +63,10 @@ export type SpaceCreateDecision =
 /**
  * Decide a space creation: refuse it, or return the call that makes it.
  *
- * Reads config (the space list, the schema library) and writes nothing, so the refusal chain is reachable without a
+ * Reads config (the space list, the schema library) and the storage usage, and writes nothing, so the refusal chain is reachable without a
  * request and testable without standing up Docker.
  */
-export function planSpaceCreate(body: unknown, caller?: { rights?: TokenRights | null }): SpaceCreateDecision {
+export async function planSpaceCreate(body: unknown, caller?: { rights?: TokenRights | null }): Promise<SpaceCreateDecision> {
   const removed = refuseRemovedDescription(body);
   if (removed) return { ok: false, refusal: removed };
   // `proxyFor` is retired (6.0): a proxy is a personal view now, made with `POST /api/views` / `view_create`. Refused BY NAME before the
@@ -133,6 +134,11 @@ export function planSpaceCreate(body: unknown, caller?: { rights?: TokenRights |
   if (!minted.ok) {
     return { ok: false, refusal: { status: 400, body: { error: minted.message } } };
   }
+
+  // Room for the schema the new space starts with (Q-981), as every schema write door asks it: its text within the size bound and its bytes
+  // within the storage quota. After every other refusal and before the plan, so a refused create leaves no space behind.
+  const room = await schemaRoomRefusal(undefined, minted.meta);
+  if (room) return { ok: false, refusal: room };
 
   return {
     ok: true,

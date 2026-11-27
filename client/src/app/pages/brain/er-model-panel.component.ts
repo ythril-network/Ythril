@@ -170,7 +170,7 @@ import { PluralText } from '../../core/plural-text.service';
 
                   @if (canEdit()) {
                     <g class="pen" role="button" tabindex="0"
-                       [attr.aria-label]="(t.declared ? 'brain.overview.er.editSchema' : 'brain.overview.er.declareSchema') | transloco"
+                       [attr.aria-label]="((t.declared ? 'brain.overview.er.editSchema' : 'brain.overview.er.declareSchema') | transloco) + ' ' + t.type"
                        (click)="editType.emit(t.type)" (keydown.enter)="editType.emit(t.type)">
                       <rect [attr.x]="b.x + b.w - 34" [attr.y]="b.y + b.h - 26" width="22" height="20" rx="4"
                             fill="var(--bg-elevated)" stroke="var(--border)" />
