@@ -15,6 +15,8 @@
  *    Exactly 50 000 statements are answered whole (the export and the address; the SPARQL endpoint's own `maxResults` bounds what it answers).
  * 4. **The address is the owner's.** Another token's SPARQL view, and a plain view, have no Linked Data address: `404 ld_not_found`.
  *
+ * The export ends as every RDF export does (its report graph, Q-942); the comparisons read its statements without that ending.
+ *
  * ## Seen red on 9f5d8d295
  *
  * Rule 1: `export: a statement of no entity: https://rdf.example.org/ld/q762-read-a/ http://purl.org/dc/terms/isPartOf ...` (the members'
@@ -28,6 +30,7 @@ import assert from 'node:assert/strict';
 import { Parser } from 'n3';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openSparqlDoors, baseOf } from './_sparql-doors.mjs';
+import { withoutReportGraph } from './_sparql-view-doors.mjs';
 
 const skip = await mongoSkipReason();
 const A = 'q762-read-a';
@@ -44,7 +47,7 @@ const previousPublic = process.env['PUBLIC_BASE_URL'];
 
 let d, both, onlyA, other;
 const fmt = (a) => `${a.status} ${(a.text ?? '').slice(0, 300)}`;
-const nquads = (text) => new Parser({ format: 'application/n-quads' }).parse(text);
+const nquads = (text) => new Parser({ format: 'application/n-quads' }).parse(withoutReportGraph(text));
 /** A statement as a line without its graph: what the CONSTRUCT made, whichever door wrote it. */
 const tripleText = (q) => `${q.subject.value} ${q.predicate.value} ${q.object.termType}:${q.object.value}`;
 const triplesOf = (text) => nquads(text).map(tripleText).sort();

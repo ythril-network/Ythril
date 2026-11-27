@@ -12,8 +12,8 @@
  *
  * - A space with two values left out (a list and an object, planted by a direct write): Turtle, TriG, N-Quads and JSON-LD all read as
  *   complete, with the record count, the left-out count, each key and the reason as the client words it (`notPlain`).
- * - A personal view over members writes an ending the client reads as complete. A view with a SPARQL CONSTRUCT (a different code path,
- *   `export-construct.ts`) writes none today: that case is a todo, the finding for the server's side.
+ * - A personal view over members writes an ending the client reads as complete. So does a view with a SPARQL CONSTRUCT (a different code
+ *   path, `export-construct.ts`), in Turtle, N-Quads and JSON-LD; its document cut before the ending, or half way, reads as no ending.
  * - Every reason the server words (`REASON_WORDS` in `export-act.ts`) is one the client words: none reads as `other`.
  * - A stream the server could not finish (the incomplete mark) is `complete: false` to the client.
  *
@@ -87,21 +87,27 @@ describe('the client reads the ending the server writes', { skip }, () => {
     });
   }
 
-  // OPEN, found by this guard (bundle-358 fix round): the CONSTRUCT page (`export-construct.ts`, `constructPage`) writes the statements and no
-  // closing comment or report, so the export screen reads such a document as cut off and never saves it. The fix is the server's: the same
-  // ending as every other export. A todo, not a pass: it fails today, and the run says so without failing; when the server writes the ending
-  // the todo is removed.
-  it('a view with a SPARQL CONSTRUCT writes an ending the client reads as complete', { todo: 'the CONSTRUCT page writes no ending (server change, export-construct.ts)' }, async () => {
-    const t = await d.mint('construct', reads(SPACE));
-    const made = await d.rest(t.key, 'POST', '/api/views', { name: 'ending-construct', members: [SPACE], sparql: { query: 'CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }' } });
-    assert.ok(made.status < 300, `${made.status} ${made.text.slice(0, 300)}`);
-    const r = await d.exportRest(t.key, '@ending-construct', { format: 'nquads', maxChars: BIG });
-    assert.equal(r.status, 200, r.text.slice(0, 300));
-    const e = parse(tailOf(r.text), 'nquads');
-    assert.ok(e, `no ending read from the last lines:\n${r.text.slice(-600)}`);
-    assert.equal(e.complete, true);
-    assert.ok(e.records > 0, JSON.stringify(e));
-  });
+  // A SPARQL view's export (`export-construct.ts`) is one document written by the same ending as every other export; found by this guard
+  // when the CONSTRUCT page wrote the statements and no closing comment or report, so the screen read it as cut off and never saved it.
+  for (const format of ['turtle', 'nquads', 'jsonld']) {
+    it(`a view with a SPARQL CONSTRUCT, ${format}: the ending reads as complete, and a document cut before it does not`, async () => {
+      const t = await d.mint(`construct-${format}`, reads(SPACE));
+      const made = await d.rest(t.key, 'POST', '/api/views', { name: `ending-construct-${format}`, members: [SPACE], sparql: { query: 'CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }' } });
+      assert.ok(made.status < 300, `${made.status} ${made.text.slice(0, 300)}`);
+      const r = await d.exportRest(t.key, `@ending-construct-${format}`, { format, maxChars: BIG });
+      assert.equal(r.status, 200, r.text.slice(0, 300));
+      const e = parse(tailOf(r.text), format);
+      assert.ok(e, `no ending read from the last lines:\n${r.text.slice(-600)}`);
+      assert.equal(e.complete, true);
+      assert.ok(e.records > 0, JSON.stringify(e));
+      assert.equal(e.leftOutCount, 0);
+      // The guard an ending must keep: the same document without its closing lines, or cut anywhere before them, is never read as whole.
+      const lines = r.text.split('\n').filter(l => l.trim() !== '');
+      const withoutEnding = lines.slice(0, format === 'jsonld' ? -3 : -1).join('\n');
+      assert.equal(parse(withoutEnding, format), null, 'the document without its ending reads as whole');
+      assert.equal(parse(lines.slice(0, Math.floor(lines.length / 2)).join('\n'), format), null, 'a document cut half way reads as whole');
+    });
+  }
 
   it('every reason the server words is one the client words', () => {
     const source = readFileSync(new URL('../../server/src/rdf/export-act.ts', import.meta.url), 'utf8');
