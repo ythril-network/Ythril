@@ -71,7 +71,7 @@ import { clearOidcCache } from './auth/oidc.js';
 import { initAddedSpaces, markSpacesOwedInit, ensureGeneralSpace, reconcilePendingSpaceOp, removeSpaceFromConfig, WIPE_COLLECTION_TYPES, wipeTypesOf } from './spaces/lifecycle.js';
 import { log, peerText, runWithRequestId } from './util/log.js';
 import { indexRoutes, routeLabel } from './http/route-map.js';
-import { phaseTimingMiddleware } from './http/phase-timer.js';
+import { phaseTimingMiddleware, rejoinPhaseTimer } from './http/phase-timer.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
 import { isShuttingDown } from './lifecycle.js';
@@ -128,6 +128,12 @@ export function createApp() {
   app.use(compression({
     filter: (req, res) => shouldCompress(req, res, compression.filter),
   }));
+
+  // ── Phase times ──────────────────────────────────────────────────────────
+  // Every answer, REST and `/mcp` alike, carries a `Server-Timing` header with the time of each phase the request met (Q-976): set up above the
+  // body parsers, which answer before any route (a body that does not parse is a 400, one past the limit a 413), so no answer can leave without
+  // it (`http/phase-timer.ts`). The parsers lose the request's async context; `rejoinPhaseTimer`, below them, restores it.
+  app.use(phaseTimingMiddleware);
 
   // ── Request body parsers ─────────────────────────────────────────────────
   // The admin import reads its own body (`api/admin-space-transfer.ts`): marked here, by Express's own match of its path, so neither parser
@@ -191,10 +197,8 @@ export function createApp() {
     runWithRequestId(id, next);
   });
 
-  // ── Phase times ──────────────────────────────────────────────────────────
-  // Every answer, REST and `/mcp` alike, carries a `Server-Timing` header with the time of each phase the request met (Q-976): set up here,
-  // above every route and inside the request id's context, so no door can answer without it (`http/phase-timer.ts`).
-  app.use(phaseTimingMiddleware);
+  // The request's phase timer again, in the context the parsers dropped and inside the request id's (see "Phase times" above).
+  app.use(rejoinPhaseTimer);
 
   // ── Health ───────────────────────────────────────────────────────────────
   app.get('/health', (_req, res) => {

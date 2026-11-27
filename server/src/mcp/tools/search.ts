@@ -388,7 +388,7 @@ export const recallTool: ToolHandler = {
        * set, which this branch did by hand.
        */
       seeds = await recallGlobal(memberIds, query, topK, tags, types, minPerType, minScore, filter,
-        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath, rerank });
+        { caller: ctx.actor?.tokenId ?? null, maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath, rerank });
       traverseSpaces = memberIds;
     } else {
       /*
@@ -400,7 +400,7 @@ export const recallTool: ToolHandler = {
        * where the space was in the path and this branch could not be reached.
        */
       seeds = await recallGlobal(accessibleSpaceIds, query, topK, tags, types, minPerType, minScore, filter,
-        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath, rerank });
+        { caller: ctx.actor?.tokenId ?? null, maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath, rerank });
       traverseSpaces = accessibleSpaceIds;
     }
 

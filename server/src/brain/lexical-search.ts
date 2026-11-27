@@ -73,6 +73,13 @@ export async function lexicalSearch(
   /** The caller's eligibility match (tags / filter). Applied by the QUERY — a lexical channel that
    *  skipped it would resurrect records the caller filtered out. */
   eligibility: Record<string, unknown> = {},
+  /**
+   * What ends the query: the recall's deadline as the server's `maxTimeMS` (the store scores EVERY record that matches a text query whatever
+   * the limit, so without it a runaway query outlives the recall), and a signal the recall aborts when it ends, so a recall that failed or
+   * never reads its text rankings leaves none running. An ended or timed-out query answers `[]`, as every failure does; an abort is the
+   * recall's own doing and is not warned about.
+   */
+  bound: { maxTimeMS?: number; signal?: AbortSignal } = {},
 ): Promise<LexicalHit[]> {
   const q = query.trim();
   if (!q || limit <= 0) return [];
@@ -82,7 +89,11 @@ export async function lexicalSearch(
     const rows = await col(collName)
       // `eligibility` is the recall's own predicate, built by `recallPredicate` FOR THIS TYPE — so for a file recall
       // it already excludes the audit rows of deleted files, and this channel cannot rank one the vector path refused.
-      .find({ ...eligibility, $text: { $search: q } }, { projection: { _id: 1, lexicalScore: { $meta: 'textScore' } } })
+      .find({ ...eligibility, $text: { $search: q } }, {
+        projection: { _id: 1, lexicalScore: { $meta: 'textScore' } },
+        ...(bound.maxTimeMS !== undefined ? { maxTimeMS: bound.maxTimeMS } : {}),
+        ...(bound.signal ? { signal: bound.signal } : {}),
+      })
       // `_id` ends the sort, like every other ranking sort in recall (`byIdAsc`). A text score depends only on the
       // matched terms and the field length, so records written from one template tie EXACTLY, and the database
       // orders a tie differently on every call. This order is the lexical RANK, a term of the fused score, so
@@ -101,6 +112,7 @@ export async function lexicalSearch(
     }
     return out;
   } catch (err) {
+    if (bound.signal?.aborted) return [];
     // The common case is "text index required for $text query" on a space created before this shipped.
     // Logged at debug volume, not per query, because it is a degradation and not an error.
     const msg = err instanceof Error ? err.message : String(err);

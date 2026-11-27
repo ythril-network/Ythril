@@ -17,6 +17,7 @@ import { NotFoundError, NotEmbeddedYetError, notFoundSentence } from '../util/er
 import { embed, prepareInput, type EmbeddingResult } from './embedding.js';
 import { QueryEmbeddingCache, QUERY_EMBEDDINGS_MAX, QUERY_EMBEDDING_TTL_MS } from './query-embedding-cache.js';
 import { timePhase, beginPhase } from '../http/phase-timer.js';
+import { noteCacheLookup, reportCacheSize } from '../metrics/cache-metrics.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { needsReindex } from '../spaces/_shared.js';
 // The pure half — merge, rank and the text projections. Moved out to pay back part of this file's
@@ -94,15 +95,22 @@ export const MIN_RECALL_BUDGET_MS = 250;
 export const MIN_SEARCH_DEADLINE_MS = 100;
 
 /** The query vectors of this process (`query-embedding-cache.ts` says what the cache keeps and what it must not). */
-const queryVectors = new QueryEmbeddingCache<EmbeddingResult>({ max: QUERY_EMBEDDINGS_MAX, ttlMs: QUERY_EMBEDDING_TTL_MS });
+const queryVectors = new QueryEmbeddingCache<EmbeddingResult>({
+  max: QUERY_EMBEDDINGS_MAX, ttlMs: QUERY_EMBEDDING_TTL_MS, onLookup: hit => noteCacheLookup('query_vector', hit ? 'hit' : 'miss'),
+});
+reportCacheSize('query_vector', () => queryVectors.size());
 
 /**
- * The query vector of `text` under the embedding configuration now: kept per (prepared text, model, endpoint), or embedded once. The
- * key is built here, from the same `prepareInput` the model call uses, so a changed model, endpoint or prefix scheme is never a hit.
+ * The query vector of `text` under the embedding configuration now, for the caller `caller` (its token id): kept per (caller, prepared text,
+ * model, endpoint), or embedded once. The key is built here, from the same `prepareInput` the model call uses, so a changed model, endpoint
+ * or prefix scheme is never a hit. A caller with no identity (`null`) shares nothing: its query is embedded every time, never kept, because a
+ * vector kept for it could be handed to the next caller with none, and the hit would tell that one what this one searched.
  */
-function embedQuery(text: string): Promise<EmbeddingResult> {
+function embedQuery(text: string, caller: string | null): Promise<EmbeddingResult> {
+  // `typeof`, not `=== null`: a caller that arrives with nothing (a JS caller that left it out) is a caller with no identity too.
+  if (typeof caller !== 'string' || caller === '') return embed(text, 'query');
   const cfg = getEmbeddingConfig();
-  return queryVectors.get({ input: prepareInput(text, 'query', cfg), model: cfg.model, endpoint: cfg.baseUrl ?? 'local' }, () => embed(text, 'query'));
+  return queryVectors.get({ caller, input: prepareInput(text, 'query', cfg), model: cfg.model, endpoint: cfg.baseUrl ?? 'local' }, () => embed(text, 'query'));
 }
 
 /**
@@ -141,8 +149,27 @@ async function settleSearches(
 // The shapes a recall answers with live in a leaf both this file and `recall-shape.ts` import; every name is re-exported, so no importer changed.
 export type { RecallKnowledgeType, RecallBase, RecallMemory, RecallEntity, RecallEdge, RecallChrono, RecallFile, RecallResult } from './recall-types.js';
 
-/** Semantic recall using $vectorSearch (Atlas Local / Atlas / MongoDB 8.2+) */
+/**
+ * Semantic recall using $vectorSearch (Atlas Local / Atlas / MongoDB 8.2+).
+ *
+ * The text queries recall sends when it begins (`askLexical`) end with the recall, whatever ends it: an embedder that refuses the query, a
+ * store that fails, an empty pool that never reads them. The signal is aborted in the `finally`, after the fusion has read what it wanted
+ * (then it is a no-op), so no text query is left scoring a space for a caller who has gone.
+ */
 export async function recall(
+  spaceId: string, query: string, topK = 10, tags?: string[], types?: RecallKnowledgeType[],
+  minPerType?: Partial<Record<RecallKnowledgeType, number>>, minScore?: number, filter?: RecallFilter,
+  opts?: Parameters<typeof recallSpace>[8],
+): Promise<RecallResult[]> {
+  const ending = new AbortController();
+  try {
+    return await recallSpace(spaceId, query, topK, tags, types, minPerType, minScore, filter, { ...opts, lexicalEnds: ending.signal });
+  } finally {
+    ending.abort();
+  }
+}
+
+async function recallSpace(
   spaceId: string,
   query: string,
   topK = 10,
@@ -194,6 +221,13 @@ export async function recall(
      * because this signature was already eight parameters long.
      */
     embedded?: EmbeddingResult;
+    /**
+     * The caller's token id, which the query vector cache is keyed by (`embedQuery`): a vector kept for one caller is never handed to another.
+     * Absent (or `null`, a caller with no identity) means the query is embedded every time and kept for no one. Not used when `embedded` is handed in.
+     */
+    caller?: string | null;
+    /** Set by `recall` itself, never by a caller: the signal that ends this recall's text queries when the recall ends. */
+    lexicalEnds?: AbortSignal;
     /**
      * Skip the rerank stage and return the whole candidate pool, because the CALLER will rerank it —
      * set only by `recallGlobal`, which merges every space's pool and asks the reranker once. Without it a
@@ -261,15 +295,6 @@ export async function recall(
   const searchDeadline = (): number =>
     Math.max(MIN_SEARCH_DEADLINE_MS, effectiveBudgetMs - (Date.now() - startedAt));
 
-  // One text, one vector. `recallGlobal` embeds the query ONCE and hands it down, because it fans out over
-  // spaces and every one of those calls would otherwise embed the identical string again — N spaces, N calls,
-  // N times the cost, the concurrency footprint and the failure surface, for a byte-identical vector.
-  //
-  // The canary operator found this from the outside while a reindex saturated their shared embedder: every
-  // recall produced exactly five `POST /v1/embeddings`, all five 429'd, and the query died. They read the five
-  // as one per knowledge type; it is one per SPACE, which is why the fix lives at the fan-out and not in the
-  // per-type search. A 1-wide request fits where an N-wide burst does not.
-  // Kept per (text, model) for a while (`query-embedding-cache.ts`): a repeated query costs no model call.
   const activeTypes: RecallKnowledgeType[] = (types && types.length > 0)
     ? types
     : [...RECORD_TYPES];
@@ -286,10 +311,23 @@ export async function recall(
   // The text (lexical) queries need the query text and the recall's own predicate and nothing the vector side finds, so they are sent NOW
   // and the store runs them while the query is embedded and the vector searches and the fresh scan run (bundle-378, Q-976 S3): the text
   // search was the largest phase of a recall (about 150 ms of 180 at BSBM 1 000), paid after everything else. Only the fusion below
-  // waits for them. `lexicalSearch` never rejects, so a recall that fails before the fusion leaves nothing unhandled.
-  const lexicalAsked = hybridSearchEnabled() ? askLexical(spaceId, query, activeTypes, perTypeK, tags, filter) : null;
+  // waits for them. `lexicalSearch` never rejects, so a recall that fails before the fusion leaves nothing unhandled. They carry the recall's
+  // own deadline (`maxTimeMS`) and end with it (`opts.lexicalEnds`, aborted by `recall` whatever ends the call), so a text query is never left
+  // scoring a space for a recall that failed or never read it.
+  const lexicalAsked = hybridSearchEnabled()
+    ? askLexical(spaceId, query, activeTypes, perTypeK, tags, filter, { maxTimeMS: searchDeadline(), signal: opts?.lexicalEnds })
+    : null;
 
-  const embResult = opts?.embedded ?? await timePhase('embed', () => embedQuery(query));
+  // One text, one vector. `recallGlobal` embeds the query ONCE and hands it down, because it fans out over
+  // spaces and every one of those calls would otherwise embed the identical string again — N spaces, N calls,
+  // N times the cost, the concurrency footprint and the failure surface, for a byte-identical vector.
+  //
+  // The canary operator found this from the outside while a reindex saturated their shared embedder: every
+  // recall produced exactly five `POST /v1/embeddings`, all five 429'd, and the query died. They read the five
+  // as one per knowledge type; it is one per SPACE, which is why the fix lives at the fan-out and not in the
+  // per-type search. A 1-wide request fits where an N-wide burst does not.
+  // Kept per caller, text and model for a while (`query-embedding-cache.ts`): a repeated query costs no model call.
+  const embResult = opts?.embedded ?? await timePhase('embed', () => embedQuery(query, opts?.caller ?? null));
 
   /*
    * WHICH PATH the filter took, observed across every collection this call searches.
@@ -411,11 +449,12 @@ export async function recall(
  * clause, and the type is what selects it. Never rejects: `lexicalSearch` answers `[]` for every failure.
  */
 function askLexical(
-  spaceId: string, query: string, activeTypes: readonly RecallKnowledgeType[], perTypeK: number, tags?: string[], filter?: RecallFilter,
+  spaceId: string, query: string, activeTypes: readonly RecallKnowledgeType[], perTypeK: number, tags: string[] | undefined,
+  filter: RecallFilter | undefined, bound: { maxTimeMS: number; signal: AbortSignal | undefined },
 ): Promise<LexicalHit[][]> {
   const limit = perTypeK * LEXICAL_LIMIT_MULTIPLIER;
   return timePhase('text', () => Promise.all(
-    activeTypes.map(t => lexicalSearch(spaceId, t, query, limit, recallPredicate(tags, filter, t) ?? {})),
+    activeTypes.map(t => lexicalSearch(spaceId, t, query, limit, recallPredicate(tags, filter, t) ?? {}, bound)),
   ));
 }
 
@@ -1056,13 +1095,18 @@ export { MAX_PER_TYPE_CANDIDATES };
 export async function recallGlobal(
   spaceIds: string[],
   query: string,
-  topK = 10,
-  tags?: string[],
-  types?: RecallKnowledgeType[],
-  minPerType?: Partial<Record<RecallKnowledgeType, number>>,
-  minScore?: number,
-  filter?: RecallFilter,
-  opts?: {
+  topK: number,
+  tags: string[] | undefined,
+  types: RecallKnowledgeType[] | undefined,
+  minPerType: Partial<Record<RecallKnowledgeType, number>> | undefined,
+  minScore: number | undefined,
+  filter: RecallFilter | undefined,
+  opts: {
+    /**
+     * The caller's token id (`null`: a caller with no identity), REQUIRED so no door can forget it: the query vector cache is keyed by it
+     * (`embedQuery`), and a door that left it out would share one caller's vectors with the next. `null` embeds the query every time.
+     */
+    caller: string | null;
     maxPerType?: Partial<Record<RecallKnowledgeType, number>>;
     maxTimeMS?: number;
     degraded?: string[];
@@ -1082,7 +1126,7 @@ export async function recallGlobal(
   // embedded once per space: identical input, identical vector, N times the cost and N times the chance that
   // a busy embedder refuses one of them and takes the whole recall with it.
   const startedAt = Date.now();
-  const embedded = await timePhase('embed', () => embedQuery(query));
+  const embedded = await timePhase('embed', () => embedQuery(query, opts.caller));
 
   // Rerank ONCE, over the merged pool, for the same reason the query is embedded once: every space would
   // otherwise send its own pass to the same model — 13 concurrent requests for one recall on the platform

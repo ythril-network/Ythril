@@ -33,6 +33,7 @@ import { setVersionRaiseSink, VERSION_RAISE_REASONS } from './version-raise-coun
 import { setConfigFlushFailureSink } from './config-flush-count.js';
 import { declareEmbedJobMetrics } from './embed-job-metrics.js';
 import { setScanHoldSink, SCAN_HOLD_SCANNERS } from './scan-hold-count.js';
+import { setCacheLookupSink, cacheEntries, CACHES } from './cache-metrics.js';
 import { setSchemaSnapshotSink, SCHEMA_SNAPSHOT_OUTCOMES } from './schema-snapshot-count.js';
 import { oldestRecordPositionHoldSeconds } from '../sync/record-position-stream.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
@@ -2101,6 +2102,29 @@ export const scanHoldsCounter = new Counter({
 });
 setScanHoldSink(scanner => scanHoldsCounter.labels({ scanner }).inc());
 for (const scanner of SCAN_HOLD_SCANNERS) scanHoldsCounter.labels({ scanner }).inc(0);
+
+/**
+ * Lookups of the process's in-memory caches (bundle-378, Q-976), by `cache` (`CACHES`, `metrics/cache-metrics.ts`) and `result`: `hit` when the cache
+ * answered, `miss` when the answer was computed. The caches count through that leaf, which the owning modules can import where they cannot import
+ * this one. Zero is meaningful: a cache nothing has asked yet reads 0 for both results.
+ */
+export const cacheLookupsCounter = new Counter({
+  name: 'ythril_cache_lookups_total',
+  help: 'Lookups of the in-memory caches (recall query vectors, planning counts, RDF schema verdicts), by cache and result',
+  labelNames: ['cache', 'result'] as const,
+  registers: [register],
+});
+setCacheLookupSink((cache, result) => cacheLookupsCounter.labels({ cache, result }).inc());
+for (const cache of CACHES) for (const result of ['hit', 'miss'] as const) cacheLookupsCounter.labels({ cache, result }).inc(0);
+
+/** Entries each in-memory cache holds now, by `cache`, read at scrape time from the cache itself. */
+export const cacheEntriesGauge = new Gauge({
+  name: 'ythril_cache_entries',
+  help: 'Entries held by the in-memory caches, by cache',
+  labelNames: ['cache'] as const,
+  registers: [register],
+  collect() { for (const [cache, n] of cacheEntries()) this.set({ cache }, n); },
+});
 
 /**
  * Writes that overwrote a record another writer had changed since it was read — a LOST UPDATE.
