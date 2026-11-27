@@ -231,7 +231,11 @@ export class SpaceRdfCardComponent {
    */
   readonly defaultBase = computed(() => (this.publicUrl() && this.spaceId() ? defaultBaseOf(this.publicUrl(), this.spaceId()) : ''));
   readonly example = computed(() => { this.touched(); return recordAddressExample(this.state.rdfForm.base.trim() || this.defaultBase() || EXAMPLE_BASE); });
-  readonly vocabPlaceholder = computed(() => { this.touched(); const base = this.state.rdfForm.base.trim() || this.defaultBase(); return base ? `${base}vocab/` : ''; });
+  readonly vocabPlaceholder = computed(() => {
+    this.touched();
+    const base = this.state.rdfForm.base.trim() || this.defaultBase();
+    return base ? `${base}vocab/` : '';
+  });
   readonly changeReasonId = 'rdf-change-r';
   readonly changeReason = computed(() => this.voteOpen() ? 'rdf.card.oneAtATime' : this.networksFailed() ? 'rdf.card.changeWhatUnknown' : this.shared() ? 'rdf.card.proposeWhat' : 'rdf.card.changeWhat');
 
