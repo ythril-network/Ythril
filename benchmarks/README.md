@@ -97,7 +97,7 @@ everything it generates lives outside the repository.
 node benchmarks/rdf/generate.mjs --sizes 1000
 node benchmarks/rdf/load.mjs oxigraph-up --size 1000
 node benchmarks/rdf/run.mjs --engine oxigraph --size 1000
-node benchmarks/rdf/load.mjs oxigraph-down --size 1000
+node benchmarks/rdf/load.mjs oxigraph-down --size 1000 --work <dir>
 ```
 
 The Ythril side (`load.mjs ythril-up`, `load.mjs ythril`, `run.mjs --engine ythril`), the record's fields and what a

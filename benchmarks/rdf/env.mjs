@@ -44,6 +44,16 @@ export function namePrefixOf(flags, work) {
   return prefix;
 }
 
+/**
+ * A `-down` command removes containers, volumes and a network by the run's name prefix, and without `--work` or `--name-prefix` that prefix
+ * is the default run's (`DEFAULT_NAME_PREFIX`): a `ythril-down` meant for another run's folder took down the default run's instance, with no
+ * word. It throws, naming both flags, before anything is touched; any other command keeps the default folder.
+ */
+export function downNeedsItsRun(cmd, flags) {
+  if (!String(cmd).endsWith('-down') || flags.work !== undefined || flags['name-prefix'] !== undefined) return;
+  throw new Error(`${cmd} refuses to run without --work <the run's folder> or --name-prefix <its prefix>: without one it would remove the default run's containers (prefix ${DEFAULT_NAME_PREFIX})`);
+}
+
 export function parseArgs(argv) {
   const flags = {};
   const positional = [];

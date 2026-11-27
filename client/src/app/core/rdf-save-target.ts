@@ -70,7 +70,7 @@ export interface SaveTarget {
 }
 
 /** How long a saved Blob's object URL is kept after the click: a large file may take the browser a moment to hand over. */
-const SAVED_URL_HOLD_MS = 10_000;
+export const SAVED_URL_HOLD_MS = 10_000;
 
 /** The browsers without a picker: the chunks are held, then saved as one Blob. */
 export function memoryTarget(): SaveTarget {
@@ -78,7 +78,8 @@ export function memoryTarget(): SaveTarget {
   return {
     inMemory: true,
     name: undefined,
-    write: async (chunk) => { parts.push(chunk); },
+    // A chunk a fetch body hands out is never backed by a shared buffer, which is all a Blob part may not be.
+    write: async (chunk) => { parts.push(chunk as Uint8Array<ArrayBuffer>); },
     commit: async (file, contentType) => {
       try { saveBlob(new Blob(parts, { type: contentType }), file, { revokeAfterMs: SAVED_URL_HOLD_MS }); } catch (err) { throw new SaveFailure(err); } finally { parts = []; }
     },

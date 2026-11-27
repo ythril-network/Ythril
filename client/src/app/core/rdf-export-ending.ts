@@ -106,9 +106,3 @@ function endingOfJsonLd(tail: string): RdfExportEnding | null {
 export function rdfExportEnding(tail: string, format: 'turtle' | 'trig' | 'nquads' | 'jsonld'): RdfExportEnding | null {
   return format === 'jsonld' ? endingOfJsonLd(tail) : endingOfText(tail);
 }
-
-/** A header's list of space ids (`Ythril-View-Members-Without-Rdf`), [] when absent. */
-export function headerList(value: string | null): string[] {
-  // Each id is percent-encoded by the server (a header value is Latin-1).
-  return (value ?? '').split(',').map(s => s.trim()).filter(Boolean).map(s => { try { return decodeURIComponent(s); } catch { return s; } });
-}
