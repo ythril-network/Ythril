@@ -73,6 +73,7 @@ const NOT_PLACING = Object.freeze({
   peerBytesShadowed: 'a question about a tombstone, writes nothing',
   ensureSpaceFilesDir: 'creates a space\'s own root, a path the instance names, never a caller\'s',
   removeTree: 'removes a tree; a delete places nothing',
+  bytesPresent: 'asks whether a path is there and writes nothing (the rename asks it of the directories it is about to move)',
   moveTree: 'moves a space\'s own directory to its renamed id, a path the instance names (the new id is validated by the rename), never a caller\'s destination',
 });
 

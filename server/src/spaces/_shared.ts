@@ -97,14 +97,16 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
  * The repair of `repairStaleSpaceIds`, with its failures handed back instead of swallowed: how many documents it rewrote, and each
  * step that failed (`what` names it, `err` is the error as thrown). Nothing is logged for a failure here; the caller says it.
  * It sets `spaceId` on the documents of the collections under `inCollectionsOf` (default: `spaceId` itself) to `spaceId`; a rename
- * that moves back asks for the other pair, while the collections still stand under the new name.
+ * that moves back asks for the other pair, while the collections still stand under the new name. `only` narrows it to the collections of
+ * that name (an empty list: none): a rename moves back the documents of the collections IT moved and no others, so a collection that
+ * stood under the new name before it, with documents of its own, is not rewritten either way.
  *
  * The caller that must not go on past a failure is the space rename: one that committed over a repair that failed left the
  * documents of a space under its new name carrying the old name, invisible to every list, with no error anywhere (Q-978). The boot
  * path (`repairStaleSpaceIds`) swallows, as it always did.
  */
 export async function repairStaleSpaceIdsReporting(
-  spaceId: string, inCollectionsOf: string = spaceId,
+  spaceId: string, inCollectionsOf: string = spaceId, only?: readonly string[],
 ): Promise<{ repaired: number; failures: Array<{ what: string; err: unknown }> }> {
   const db = getDb();
   const failures: Array<{ what: string; err: unknown }> = [];
@@ -125,7 +127,7 @@ export async function repairStaleSpaceIdsReporting(
     // (validated `^[a-z0-9-]+$`), so `_` separates unambiguously. See space-id-prefix-safety.test.js.
     collections = (await db.listCollections().toArray())
       .map(c => c.name)
-      .filter(n => n.startsWith(prefix));
+      .filter(n => n.startsWith(prefix) && (only === undefined || only.includes(n)));
   } catch (err) {
     failures.push({ what: `could not list collections for '${peerText(inCollectionsOf)}'`, err });
     return { repaired: 0, failures };

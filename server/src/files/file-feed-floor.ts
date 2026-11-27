@@ -23,6 +23,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { snapshotKeyedMove } from '../db/keyed-move-undo.js';
 import { settledPositionCap } from '../util/position-clock.js';
 import { isPositionNumber } from '../util/position-number.js';
 
@@ -83,6 +84,10 @@ export async function fileFeedStateOf(spaceId: string): Promise<{ stream: string
 export async function dropFileFeedFloor(spaceId: string): Promise<void> {
   await floors().deleteOne(asFilter<FloorDoc>({ _id: spaceId }));
 }
+
+/** What `moveFileFeedFloor(oldId, newId)` is about to move, as the call that puts it back (see `snapshotKeyedMove`). Asked BEFORE the move runs. */
+export const undoOfFloorMove = (oldId: string, newId: string): Promise<() => Promise<void>> =>
+  snapshotKeyedMove(floors(), [[oldId, newId]]);
 
 /** Carry the floor document of `oldId` to `newId` (a rename): the higher floor and the old stream tag stay, the old document goes. */
 export async function moveFileFeedFloor(oldId: string, newId: string): Promise<void> {

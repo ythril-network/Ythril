@@ -26,6 +26,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { bulkCommandOf, writeInOneCommands } from '../db/one-command.js';
+import { snapshotKeyedMove } from '../db/keyed-move-undo.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { log, peerText } from '../util/log.js';
 import { intervalJob } from '../util/interval-job.js';
@@ -163,6 +164,16 @@ export async function purgeSpaceActivity(spaceId: string): Promise<number> {
     asFilter<ActivityDoc>({ space: spaceId }),
   );
   return res.deletedCount ?? 0;
+}
+
+/**
+ * What `renameSpaceActivity(fromId, toId)` is about to move, as the call that puts it back: the buckets of `fromId` as they are, and what stood at
+ * each bucket's key under `toId` as it was (see `snapshotKeyedMove`). Asked BEFORE the move runs.
+ */
+export async function undoOfActivityMove(fromId: string, toId: string): Promise<() => Promise<void>> {
+  const c = col<ActivityDoc>(ACTIVITY_COLLECTION);
+  const rows = await c.find(asFilter<ActivityDoc>({ space: fromId }), { projection: { _id: 1, bucket: 1 } }).toArray();
+  return snapshotKeyedMove(c, rows.map(r => [r._id, activityDocId(toId, r.bucket)] as const));
 }
 
 /**

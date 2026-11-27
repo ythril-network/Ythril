@@ -99,7 +99,7 @@ const EXEMPT = {
   ]),
   ...reasoned('a boot migration or a restore rewrites every row of a collection, forks with the rest, before any door opens', [
     'db/drop-link-arrays.ts:dropLinkArrays', 'db/rekey-memory-kind-to-fact.ts:rekeyMemoryKindToFact', 'db/restore.ts:backupLoader',
-    'spaces/_shared.ts:repairStaleSpaceIdsReporting',
+    'spaces/_shared.ts:repairStaleSpaceIdsReporting', 'db/keyed-move-undo.ts:snapshotKeyedMove',
   ]),
   ...reasoned('whole-collection removal, or an offline tool that unsets 6.0 fields on every row', [
     'spaces/lifecycle.ts:wipeSpaceUnqueued', 'sync/positions-rollback.ts:rollBackPositions', 'sync/positions-rollback.ts:rollBackForks',

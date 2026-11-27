@@ -230,12 +230,12 @@ The rename atomically:
 | `409`  | `newId` already exists |
 | `409`  | `code: "space_name_in_use"` — another space already syncs under `newId` in one of this instance's networks; nothing is moved. Pick another name |
 | `409`  | `code: "space_being_restored"` or `"space_being_migrated"` — a restore or migration of the instance stands, so the rename is refused at once and nothing is registered; send it again once the act completes ([acts](06c-space-deletion-and-wipe-api.md#every-kind-of-act)). A standing deletion or wipe of the space is refused `409` as well, without a code |
-| `500`  | Partial rename failure (collections may be in an inconsistent state). The sentence names which step stopped, in our words, with no server path in it |
+| `500`  | Rename refused part-way: what moved is moved back and the space stands whole under its old name, and the rename is over (repeat it). If a move back is refused too, the answer names what stays under `newId`, the space stays closed to writes, and repeating the same rename finishes it. The sentence names which step stopped, in our words, with no server path in it |
 | `503`  | `code: "space_still_being_removed"`, `retryable: true`, with `Retry-After` — `newId` is the id of a space deleted a moment ago whose search-index drop is still running; nothing is registered or moved. Send it again in a few seconds ([Create a Space](#create-a-space)) |
 | `503`  | The database could not answer, in a step of the rename or while finishing a pending one. Retryable, with `Retry-After`, in our words and not the driver's; it is never reported as one of the refusals above ([Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field)) |
 
 **A rename or delete that did not finish does not block the next one.** Each records its intent before it moves
-anything, and an interrupted one is finished forward (a delete is never undone). That used to happen only at
+anything, and an interrupted one is finished forward (a delete is never undone; a rename that the store refused is moved back, see the `500` row above). That used to happen only at
 restart, so until then every other rename and delete answered `500` *"… is still pending … It resumes
 automatically on restart"*. Now the next rename or delete on the instance finishes the pending op first and then
 proceeds; it is refused only when finishing it fails again, and the `500` then says *"resuming it just now did not

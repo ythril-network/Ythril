@@ -25,7 +25,7 @@ import {
   runSpaceAct, registerOwnSpaceAct, releaseSpaceActWaiter, defineSpaceActBody, spaceActRunning, SpaceActsClosedError, canonicalWipeTypes,
   type SpaceActRequest, type SpaceRoundSettled, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from './space-act-runner.js';
-import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
+import { moveSpaceData, applySpaceRenameToConfig, isRenameTarget } from './rename.js';
 import { configuredSpaceIds } from './space-lookup.js';
 import { assertNotRetiredSpaceId, unknownSpaceSentence } from './unknown-space.js';
 import { dropSpaceFromViews } from '../config/views.js';
@@ -515,6 +515,11 @@ export async function createSpace(opts: {
   await settleSearchIndexDropsOf(opts.id);
   if (cfg.spaces.some(s => s.id === opts.id)) {
     throw new Error(`Space '${opts.id}' already exists`);
+  }
+  // The new name of a rename that is owed or running is taken, though no space is configured under it yet: collections of that rename stand under it
+  // (Q-978). A conflict in our words, like the id above; it is free again when the rename ends.
+  if (isRenameTarget(getConfig(), opts.id)) {
+    throw new Error(`Space '${opts.id}' already exists as the new name of a rename that is owed or running; create it once that rename has ended`);
   }
   const space: SpaceConfig = {
     id: opts.id,
