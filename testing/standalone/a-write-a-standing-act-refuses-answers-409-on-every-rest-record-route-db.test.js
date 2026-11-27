@@ -38,13 +38,53 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
-import { REQUESTS, subjects } from './_act-held-409-requests.mjs';
+import { REQUEST_ROUTES, subjects } from './_act-held-409-requests.mjs';
 import { seedActEntry, clearActEntries } from './_space-act-harness.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
 
 const skip = await mongoSkipReason();
 
 const S = 'actheld409';
+/**
+ * One valid write per route, as `{ params, query, body }`. The ids name records seeded below, so an update, a delete or a merge reaches the
+ * writer rather than a 404.
+ */
+const REQUESTS = {
+  'POST /api/brain/spaces/:spaceId/facts': { body: { fact: 'written during the restore', tags: [] }, coll: 'facts', match: { fact: 'written during the restore' } },
+  'PATCH /api/brain/spaces/:spaceId/facts/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000f1' }, body: { fact: 'changed during the restore' }, coll: 'facts', match: { fact: 'changed during the restore' } },
+  'DELETE /api/brain/spaces/:spaceId/facts/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000f2' }, gone: { coll: 'facts', _id: 'aaaaaaaa-0000-4000-8000-0000000000f2' } },
+  'POST /api/brain/spaces/:spaceId/entities': { body: { name: 'Written during', type: 'concept' }, coll: 'entities', match: { name: 'Written during' } },
+  'PATCH /api/brain/spaces/:spaceId/entities/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000e1' }, body: { name: 'Changed during' }, coll: 'entities', match: { name: 'Changed during' } },
+  'DELETE /api/brain/spaces/:spaceId/entities/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000e2' }, gone: { coll: 'entities', _id: 'aaaaaaaa-0000-4000-8000-0000000000e2' } },
+  'POST /api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId': { params: { survivorId: 'aaaaaaaa-0000-4000-8000-0000000000e3', absorbedId: 'aaaaaaaa-0000-4000-8000-0000000000e4' }, body: {}, gone: { coll: 'entities', _id: 'aaaaaaaa-0000-4000-8000-0000000000e4' } },
+  'POST /api/brain/spaces/:spaceId/edges': { body: { from: 'aaaaaaaa-0000-4000-8000-0000000000e1', to: 'aaaaaaaa-0000-4000-8000-0000000000e3', label: 'written_during' }, coll: 'edges', match: { label: 'written_during' } },
+  'PATCH /api/brain/spaces/:spaceId/edges/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000a1' }, body: { label: 'changed_during' }, coll: 'edges', match: { label: 'changed_during' } },
+  'DELETE /api/brain/spaces/:spaceId/edges/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000a2' }, gone: { coll: 'edges', _id: 'aaaaaaaa-0000-4000-8000-0000000000a2' } },
+  'POST /api/brain/spaces/:spaceId/chrono': { body: { title: 'Written during', type: 'event', startsAt: '2026-10-21T00:00:00.000Z' }, coll: 'chrono', match: { title: 'Written during' } },
+  'PATCH /api/brain/spaces/:spaceId/chrono/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000c1' }, body: { title: 'Changed during' }, coll: 'chrono', match: { title: 'Changed during' } },
+  'DELETE /api/brain/spaces/:spaceId/chrono/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000c2' }, gone: { coll: 'chrono', _id: 'aaaaaaaa-0000-4000-8000-0000000000c2' } },
+  'POST /api/brain/spaces/:spaceId/links': { body: { from: 'aaaaaaaa-0000-4000-8000-0000000000f2', fromKind: 'fact', to: 'aaaaaaaa-0000-4000-8000-0000000000e1', toKind: 'entity' }, coll: 'links', match: { from: 'aaaaaaaa-0000-4000-8000-0000000000f2', to: 'aaaaaaaa-0000-4000-8000-0000000000e1' } },
+  'DELETE /api/brain/spaces/:spaceId/links/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000b1' }, gone: { coll: 'links', _id: 'aaaaaaaa-0000-4000-8000-0000000000b1' } },
+  'PATCH /api/brain/spaces/:spaceId/files': { query: { path: 'held.txt' }, body: { tags: ['changed-during'] }, coll: 'files', match: { tags: 'changed-during' } },
+  // Review's fork resolve (bundle-81): the fork of the fact seeded below as `f1`; a refused resolve neither deletes it nor writes its text on the parent.
+  // Q-624 (design rev 4 section 9): the resolve takes five parameters, all required, so the body names the kind and both versions as listed (the fork
+  // at 3, its parent `f1` at 1); `{ keep }` alone is a 400 before the act is asked.
+  'POST /api/brain/spaces/:spaceId/forks/:forkId/resolve': { params: { forkId: 'aaaaaaaa-0000-4000-8000-0000000000f3' }, body: { kind: 'fact', keep: 'fork', ifMatchSeq: 3, ifMatchParentSeq: 1 }, gone: { coll: 'facts', _id: 'aaaaaaaa-0000-4000-8000-0000000000f3' }, coll: 'facts', match: { _id: 'aaaaaaaa-0000-4000-8000-0000000000f1', fact: 'the fork text, resolved during the restore' } },
+  'POST /api/brain/spaces/:spaceId/bulk': { body: { facts: [{ fact: 'bulk during the restore' }] }, coll: 'facts', match: { fact: 'bulk during the restore' } },
+  // The RDF import (bundle-270): one entity as JSON-LD, which the door reads from a JSON body. A space another act holds takes no import: the
+  // door answers that act's code before it registers an act of its own, and no record of the file lands.
+  'POST /api/brain/spaces/:spaceId/import/rdf': { query: { format: 'jsonld' }, body: { '@context': { name: 'http://schema.org/name' }, '@id': 'https://example.org/actheld409/imported-during', name: 'Imported during' }, coll: 'entities', match: { name: 'Imported during' } },
+  // SPARQL Update (bundle-272, Q-761): an INSERT DATA of one entity, sent as the protocol's own media type (`text` under `contentType`, not JSON);
+  // a standing act refuses it with its own code, and the entity is not stored.
+  'POST /api/brain/spaces/:spaceId/sparql/update': { contentType: 'application/sparql-update', text: 'INSERT DATA { <https://example.org/actheld409/entity/updated-during> a <https://w3id.org/ythril/ns#Entity>, <https://example.org/actheld409/vocab/entity/person> ; <http://www.w3.org/2000/01/rdf-schema#label> "Updated during" }', coll: 'entities', match: { name: 'Updated during' } },
+  // The triple index rebuild (bundle-273): it writes no record, but a rebuild during a restore would read records the restore is replacing,
+  // so it answers the act's 409 and code like every write door, and no build of the space's index starts (its build row stays empty).
+  'POST /api/brain/spaces/:spaceId/rdf-index/rebuild': { body: {}, coll: 'rdf_state', match: { _id: 'build' } },
+};
+
+// The routes the pure file holds to the mounts are the routes this table sends to: a difference fails the file as it loads (Q-969).
+assert.deepEqual(Object.keys(REQUESTS).sort(), [...REQUEST_ROUTES].sort(), 'REQUESTS and REQUEST_ROUTES (_act-held-409-requests.mjs) name different routes');
+
 let door, server, adminKey, wantCode;
 
 describe('a write a standing act refuses answers 409 with its code on every REST record route (real MongoDB, real app)', { skip }, () => {
