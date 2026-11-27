@@ -297,7 +297,7 @@ export class IndexRead {
       const hit = cache.get(k);
       if (hit !== undefined) found.set(k, hit); else missing.push(k);
     }
-    const ids = await idsOfStoredKeys(spaceCollection(space, 'rdfTerms'), missing, { beforeFind: () => this.opts.check(), maxTimeMS: () => msLeft(this.opts.deadline) });
+    const ids = await idsOfStoredKeys(spaceCollection(space, 'rdfTerms'), missing, { beforeFind: () => this.opts.check(), findMs: () => msLeft(this.opts.deadline) });
     for (const k of missing) {
       const id = ids.get(k) ?? null;
       found.set(k, id);
