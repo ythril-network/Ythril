@@ -155,10 +155,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** a standalone gate refuses a public or protected member of a client component, service or directive that no template and no non-spec source reads; the dead ones were removed.
 - **Testing:** the schema-layers panel no longer throws NG0950 when an effects pass runs before its `spaceId` is bound, which failed the client suite at random under load.
 - **Testing:** the local preflight starts the pure test files that took 15 s or more in recent CI runs first, each alone (times in `test-results/file-times.json`).
-- **Testing:** every local preflight run records a `Preflight-Run` with each stage's time and outcome (kept in `test-results/unrecorded` without an instance); `node scripts/test-times.mjs --preflight-trend` prints the stage times over runs.
+- **Testing:** every local preflight run records a `Preflight-Run` with each stage's time and outcome; `node scripts/test-times.mjs --preflight-trend` prints the stage times over runs.
 - **Testing:** the CI-run recorder lists main's runs without GitHub's `status=completed` filter and keeps the completed ones itself; a run that filter still lacked is now found.
 - **Testing:** `--preflight-costs` also writes `test-results/file-times-all.json`, the per-file times of every CI test job on main (a rerun counts once), only when every job has times.
-- **Testing:** CI runs the pure standalone files as three jobs (`test:standalone:pure -- --shard=<k>/3`); `test-results/file-times.json` reads the shard jobs' records, a run's shards as one run.
+- **Testing:** CI runs the pure standalone files as three jobs (`test:standalone:pure -- --shard=<k>/3`) and database files as six.
 - **Testing:** `--record-ci` records every attempt of a run and reads a run's artifact listing to its end; a record cut for size keeps every failed test's name and every file name, and says what it left out.
 - **Testing:** `--record-ci` also records pull request runs of this repository's branches and Full runs, each record saying its kind (`runKind`); a fork's pull request is refused. Recorded times count only green full runs of pushes to main.
 - **Testing:** a local preflight also records the tests it ran, every failed test by name, as `Test-Run` records of kind `preflight` (only results that run wrote), kept and sent like its stage times; a recording problem never changes its verdict.
