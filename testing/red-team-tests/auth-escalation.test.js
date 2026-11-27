@@ -26,6 +26,7 @@ import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody, waitFor } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 import { spaceAdminRights } from '../_shared/space-admin-rights.mjs';
+import { mcpAnswerSansDurations, mcpPhasesOf } from '../_shared/mcp-answer-sans-durations.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -101,7 +102,10 @@ describe('H1 — a personal view belongs to its owner and reaches only what its 
     assert.equal(JSON.stringify(rest.body).replaceAll(viewId, '<id>'), JSON.stringify(never.body).replaceAll(neverId, '<id>'),
       'another token\'s view must be answered word for word as an unknown id');
     const mcpNever = await mcpCall(otherToken, 'space_stats', { space: neverId });
-    assert.equal(mcp.text.replaceAll(viewId, '<id>'), mcpNever.text.replaceAll(neverId, '<id>'), 'the same on MCP');
+    // Every MCP answer carries its own timing figures (`_meta` `ythril/server-timing`): the durations differ between any two requests, so they are set
+    // aside; the phases the answer names, and how often, are part of what it gives away and stay compared (Q-976).
+    assert.deepEqual(mcpPhasesOf(mcp.text), mcpPhasesOf(mcpNever.text), 'the view and an unknown id run the same phases on MCP');
+    assert.equal(mcpAnswerSansDurations(mcp.text).replaceAll(viewId, '<id>'), mcpAnswerSansDurations(mcpNever.text).replaceAll(neverId, '<id>'), 'the same on MCP');
     const list = await get(INSTANCES.a, otherToken, '/api/views');
     assert.equal(list.body.views.some(v => v.id === viewId), false, 'another token\'s view must not be listed');
   });
