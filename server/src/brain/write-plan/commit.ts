@@ -58,7 +58,7 @@ import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
 import { mapLimit } from '../../util/map-limit.js';
 import { EndpointRemoved, ENDPOINT_REMOVED } from '../../util/errors.js';
 import { timePhase } from '../../http/phase-timer.js';
-import { withSettlesJoined } from '../../util/position-clock.js';
+import { SettlesOwed } from '../../util/position-clock.js';
 import type { AuthorRef, EdgeDoc, LinkDoc, TombstoneDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
@@ -75,8 +75,9 @@ export async function commitPlans(
   spaceId: string, plans: readonly WritePlan[], opts: { somethingLanded?: boolean } = {},
 ): Promise<CommitOutcome[]> {
   // The triple index follows each stage's write while the work after it (link rows, embedding jobs) runs, and the commit returns only once
-  // both are done (`withSettlesJoined`, bundle-378 Q-976 S3): every record door and kind saves through here.
-  return withSettlesJoined(async () => {
+  // both are done (`SettlesOwed`, joined in the `finally`, bundle-378 Q-976 S3): every record door and kind saves through here.
+  const settles = new SettlesOwed();
+  try {
     for (const p of plans) {
       if (p.spaceId !== spaceId) {
         throw new Error(`commitPlans: a plan decided for space '${p.spaceId}' was handed to a commit for '${spaceId}'`);
@@ -112,7 +113,7 @@ export async function commitPlans(
       }
       let stageLanded: number[];
       try {
-        stageLanded = await stageOutcomes(spaceId, kind, plans, ready, outcomes, landed.length > 0 || landedBefore);
+        stageLanded = await stageOutcomes(spaceId, kind, plans, ready, outcomes, landed.length > 0 || landedBefore, settles);
       } finally {
         leaveWriteUnit();
       }
@@ -121,7 +122,9 @@ export async function commitPlans(
 
     await runAfterCommit(spaceId, { dupeRules: landed.map(i => plans[i]!).filter(p => p.dupeRules) });
     return outcomes.map(o => o ?? { ok: false, reason: 'not written' });
-  });
+  } finally {
+    await settles.joined();
+  }
 }
 
 /** What one kind's stage write did (`writeStage`). Indexes are into the plans it was handed. */
@@ -148,7 +151,9 @@ export interface StageWrite {
  * handed back in `writeError`; a failure to take the versions or the position block is thrown.
  */
 export async function writeStage(
-  spaceId: string, kind: PlanKind, plans: readonly WritePlan[], opts: { session?: ClientSession } = {},
+  spaceId: string, kind: PlanKind, plans: readonly WritePlan[],
+  /** `settleInto`: the caller joins the triple index's follower of this write before it answers (`SettlesOwed`); without it the write waits. */
+  opts: { session?: ClientSession; settleInto?: SettlesOwed } = {},
 ): Promise<StageWrite> {
   const { session } = opts;
   // A delete is not a write of a document: written here it would be a converge of nothing that stamps the record it meant to remove.
@@ -174,7 +179,7 @@ export async function writeStage(
         if (session) throw error;
         writeError = { error };
       }
-    }, `write.${kind}`);
+    }, `write.${kind}`, opts.settleInto ? { settleInto: opts.settleInto } : {});
   }
   return { rows, sent, stamps, matched, inserted, ...(writeError ? { writeError } : {}) };
 }
@@ -182,11 +187,11 @@ export async function writeStage(
 /** One kind's stage for `commitPlans`: written by `writeStage`, then mapped to item outcomes. Returns the indexes whose record landed; sets every index's outcome. */
 async function stageOutcomes(
   spaceId: string, kind: PlanKind, plans: readonly WritePlan[], candidates: readonly number[],
-  outcomes: Array<CommitOutcome | undefined>, somethingLanded: boolean,
+  outcomes: Array<CommitOutcome | undefined>, somethingLanded: boolean, settleInto: SettlesOwed,
 ): Promise<number[]> {
   let stage: StageWrite;
   try {
-    stage = await writeStage(spaceId, kind, candidates.map(i => plans[i]!));
+    stage = await writeStage(spaceId, kind, candidates.map(i => plans[i]!), { settleInto });
   } catch (err) {
     // The versions or the position block failed: nothing of this stage is known to be written.
     if (!somethingLanded) throw err;

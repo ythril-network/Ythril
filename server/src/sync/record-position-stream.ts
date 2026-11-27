@@ -30,7 +30,7 @@
  * `write` should be the position-writing operation and nothing else: everything it awaits holds every position-paged reader of the space
  * below the block.
  */
-import { createPositionStream, withPositionHeld, oldestPositionHoldSeconds, type PositionStream } from '../util/position-clock.js';
+import { createPositionStream, withPositionHeld, oldestPositionHoldSeconds, type PositionStream, type SettlesOwed } from '../util/position-clock.js';
 import { highestStored } from '../util/index-top.js';
 import { SEQ_CARRYING } from '../util/seq.js';
 import { col } from '../db/mongo.js';
@@ -108,6 +108,8 @@ type PatchOf<R extends LandingRow> = R extends { readonly local: true } ? LocalL
  */
 export function withLandingStamp<R extends LandingRow, T>(
   spaceId: string, rows: readonly R[], write: (patches: PatchOf<R>[]) => Promise<T>, holder: string,
+  /** `settleInto`: the caller joins the settled hook before it answers instead of this waiting for it ({@link SettlesOwed}). */
+  opts: { settleInto?: SettlesOwed } = {},
 ): Promise<T> {
   if (rows.length === 0) return write([]);
   return withPositionHeld(recordPositions, spaceId, (first) => write(rows.map((row, i): PatchOf<R> => {
@@ -115,5 +117,5 @@ export function withLandingStamp<R extends LandingRow, T>(
     return (row.local
       ? { seq: row.version, pos, posAtSeq: row.version, writtenHere: true }
       : { pos, posAtSeq: row.version }) as PatchOf<R>;
-  })), holder, { count: rows.length });
+  })), holder, { count: rows.length, ...(opts.settleInto ? { settleInto: opts.settleInto } : {}) });
 }
