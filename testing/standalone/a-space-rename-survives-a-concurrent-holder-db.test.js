@@ -110,7 +110,7 @@ describe('a space rename and a concurrent holder', { skip }, () => {
     assert.equal(fs.existsSync(dataPath('.chunks', 'held-b')), false, 'the old chunk directory was stranded and the rename answered success');
   });
 
-  it('(c) a handle held longer than the retry window fails the rename, keeps its marker, and the next operation resumes it', T, async () => {
+  it('(c) a handle held longer than the retry window fails the rename, which moves back what it moved, and the same rename then completes', T, async () => {
     // Held until THIS case releases it, which is after the rename has answered: longer than any retry window.
     const fh = await fsp.open(dataPath('files', 'held-c', 'transcripts', 'a.md'), 'r');
     let r;
@@ -122,9 +122,12 @@ describe('a space rename and a concurrent holder', { skip }, () => {
     if (process.platform === 'win32') {
       // Elsewhere a held handle does not stop a directory rename, so there is no failure to keep.
       assert.equal(r.status, 500, `a rename held by an open handle answered ${answer(r)}`);
-      assert.match(String(r.error), /rename incomplete/);
-      assert.equal(loader.getConfig().pendingSpaceOp?.spaceId, 'held-c', 'the failed rename dropped its marker');
+      assert.match(String(r.error), /was not renamed/);
+      assert.equal(loader.getConfig().pendingSpaceOp, undefined, 'the failed rename kept its marker although everything moved back');
       assert.ok(fs.existsSync(dataPath('files', 'held-c', 'transcripts', 'a.md')), 'the failed rename moved the files anyway');
+      // The handle is released: the same rename, asked again, completes.
+      const again = await renameMod.renameSpaceAct('held-c', { newId: 'held-c2' });
+      assert.equal(again.status, 200, `the same rename did not complete once the handle was released: ${answer(again)}`);
     } else {
       assert.equal(r.status, 200, answer(r));
     }

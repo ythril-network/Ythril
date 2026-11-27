@@ -412,11 +412,35 @@ describe('a store failure answers alike on every door', { skip }, () => {
     for (const { name } of await door.mongo.getDb().listCollections({}, { nameOnly: true }).toArray()) {
       if (name.startsWith(`${S}_`)) await door.mongo.getDb().collection(name).deleteMany({});
     }
-    // A stored file at the probes' path, so a file delete's first store write is its tombstone — a BULK write — and
-    // every file door is asked about a file that exists rather than refused for one that does not.
+    await plantProbe();
+  }
+
+  /**
+   * A stored file at the probes' path, so a file delete's first store write is its tombstone — a BULK write — and
+   * every file door is asked about a file that exists rather than refused for one that does not.
+   */
+  async function plantProbe() {
+    const files = path.join(process.env['DATA_ROOT'], 'files', S);
+    fs.mkdirSync(files, { recursive: true });
     fs.writeFileSync(path.join(files, BODY.path), 'probe');
-    await door.mongo.col(`${S}_files`).insertOne({ _id: BODY.path, spaceId: S, path: BODY.path, sizeBytes: 5, tags: [],
-      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' });
+    await door.mongo.col(`${S}_files`).replaceOne({ _id: BODY.path }, { _id: BODY.path, spaceId: S, path: BODY.path, sizeBytes: 5, tags: [],
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }, { upsert: true });
+  }
+
+  /**
+   * What a door that came before took from the probes' path, put back — so every door is asked about the same file whatever an earlier
+   * door left (Q-978). The rename door moved the space's collections and files directory to another name before it was made to move
+   * them back, and every file door after it then met a space with no file: the run's doors differed by how far a refused rename got.
+   * Asked of the store with the fault lifted (this is the setup, not a door), and only when something is missing.
+   */
+  async function restoreProbe() {
+    const was = failing;
+    failing = false;
+    try {
+      const present = fs.existsSync(path.join(process.env['DATA_ROOT'], 'files', S, BODY.path))
+        && await door.mongo.col(`${S}_files`).findOne({ _id: BODY.path });
+      if (!present) await plantProbe();
+    } finally { failing = was; }
   }
 
   /** Every door: REST from the mounts (the tool door per tool), then MCP per tool. */
@@ -531,6 +555,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
       }
       for (const d of all) {
         undoNeighbours();
+        await restoreProbe();
         if (!d.variant) { results.push({ d, a: await ask(d) }); continue; }
         networks.push(structuredClone(NETWORK));
         try { results.push({ d, a: await ask(d) }); } finally {

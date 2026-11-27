@@ -19,7 +19,8 @@
  * - **the fault fired**: its unique token is in the log line the door writes for a store failure. A fault that never
  *   fired leaves every assertion above passing about a request the store never failed (`failWrites` throws for a method
  *   it did not wrap; whether the wrapped call was reached is what the token proves);
- * - for the rename, the retry of the same request completes the rename — the marker the failed one left is what resumes.
+ * - for the rename, the retry of the same request completes the rename. (What the refused one left is the subject of
+ *   `a-refused-rename-leaves-the-space-whole-db`: nothing moved, or what moved is moved back.)
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-store-failure-is-not-read-as-a-refusal-db.test.js
