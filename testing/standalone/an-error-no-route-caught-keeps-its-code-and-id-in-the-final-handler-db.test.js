@@ -41,7 +41,7 @@ import { REPO_ROOT } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'b378finalerr';
-const SECRET = 'a driver host 10.0.0.7:27017 refused the socket';
+const SECRET = 'the internal store host refused the socket';
 
 describe('an error no route caught keeps its code and id in the final handler', { skip }, () => {
   let door; let app; let server; let adminKey; let E; let thrown;
@@ -121,7 +121,7 @@ describe('an error no route caught keeps its code and id in the final handler', 
     const out = await ask('GET', '/__throws/internal5xx');
     assert.equal(out.status, 500, out.text);
     assert.deepEqual(out.body, { error: 'Internal server error' });
-    assert.ok(!out.text.includes('10.0.0.7'), `an internal message reached the caller: ${out.text}`);
+    assert.ok(!out.text.includes(SECRET), `an internal message reached the caller: ${out.text}`);
   });
 
   it('a 4xx of the request itself (body-parser) answers its status and its sentence, with no code it does not carry', async () => {
