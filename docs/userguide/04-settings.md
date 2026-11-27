@@ -250,7 +250,7 @@ While the instance is being restored from a backup or copied to another database
 
 **A name that belongs to a space you deleted a moment ago can be refused for a few seconds** (`503`, `space_still_being_removed`): the old space's search indexes are still being removed, and the new space would lose its own to that. Nothing moved; rename again in a few seconds. Creating a space under such an id answers the same, in the same words.
 
-**A rename that meets a database outage says so and can be repeated.** The answer is `503`, *database unavailable, try again*, and it never claims that the name is taken or that the space does not exist. A rename that was interrupted part-way keeps its place: repeat the same rename once the database answers again and it is finished. The same holds for the MCP `space_rename` tool.
+**A rename that meets a database outage says so and can be repeated.** The answer is `503`, *database unavailable, try again*, and it never claims that the name is taken or that the space does not exist. A rename the database refused part-way moves back what it had moved, so the space stands whole under its old name; repeat the same rename once the database answers again. If the move back is refused too, the server log names what stays under the new name, and repeating the same rename finishes it. The same holds for the MCP `space_rename` tool.
 
 ### Deleting a space
 
