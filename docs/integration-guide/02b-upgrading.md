@@ -35,6 +35,13 @@ read stop the start in the same way, where an empty one was used before. A direc
 answers `500` `file_system_fault` and changes nothing, where it used to act on the part of the tree it could list
 ([Files API](05-files-api.md#every-code-a-file-act-answers)).
 
+**After upgrading, every space with RDF on gets a SPARQL triple index built in the background, and storage grows.** The first start after the
+upgrade builds one index per RDF space, which takes extra work and extra storage in the database in proportion to each space's records. Nothing
+needs to be done and nothing stops: until a space's index is built, its SPARQL queries read the records and answer the same, only more slowly.
+`space_rdf_index` shows a space's state and `space_rdf_rebuild` builds one space now, with the knowledge `admin` right
+([SPARQL API](04j-sparql-api.md#the-triple-index-and-when-a-query-reads-the-records)). The config key `sparql.maxIndexRowsRead` bounds what
+one query may read from the indexes ([Setup API](11-setup-api.md)).
+
 **After upgrading to 6.6.0, the record of a file whose bytes this instance no longer has is removed, and that cannot be undone.** Before, such
 a record stayed for good: counted, never listed, so no one could delete it. Once a day per space the instance now looks for records whose bytes
 are missing from its disk and stamps them. A stamped record is removed one day after the stamp when it has a recorded hash, and 30 days after

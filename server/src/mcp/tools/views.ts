@@ -88,7 +88,8 @@ export const view_createTool: ToolHandler = {
   name: 'view_create',
   ownerScoped: true,
   description: 'Create a personal view of your own: a named read lens over spaces you read, id "@<name>". Read tools (recall, filter, similar, graph_traverse, '
-    + 'space_stats and the other reads) accept it as `space` and read each member you can read at that moment, naming the members read in `viewMembers`. '
+    + 'space_stats and the other reads) accept a plain view as `space` and read each member you can read at that moment, naming the members read in `viewMembers`. '
+    + 'A view you define with `sparql` (a CONSTRUCT) is read by export_rdf and sparql_query alone; every other tool refuses it (view_is_construct). '
     + 'It never writes: write to one of its member spaces. At most 50 views per token; names are 1-40 characters of a-z, 0-9 and hyphen, unique per token.',
   // The shared act judges the whole body with the coded refusals REST answers (`view_members_empty`, `view_members_limit`, `view_name_invalid`
   // ...), so the dispatcher's schema check would only answer the same mistakes first, in the validator's words and with no code (b100 row P).

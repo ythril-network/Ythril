@@ -14,7 +14,8 @@ caller can read at that moment and merges the answer.
   token-rights row can name it, and a space id is still `^[a-z0-9-]+$`. The [RDF records export](06f-exports.md#several-spaces-at-once-a-personal-view)
   is a read and takes a view: one named graph per member it reads.
 - **A view reads and never writes.** Every write door and every configuration door answers a view id as a missing
-  space. To write, name one of the view's members.
+  space, except for a view defined by a [SPARQL CONSTRUCT](#a-view-defined-by-a-sparql-construct): the doors that do not read it
+  answer `409 view_is_construct`. To write, name one of the view's members.
 - **A view never reads more than its caller could read by naming the member.** The members are judged per call, in
   the area of the door being called (`knowledge` for a recall, `files` for a file read), with the caller's rights as
   they are now. A member the caller cannot read drops out of that call; it does not refuse the call.
@@ -35,8 +36,8 @@ REST and MCP take the same parameters and answer the same sentences.
 |---|---|---|
 | List your views | `GET /api/views` → `{ views }` | `view_list` |
 | Read one | `GET /api/views/:id` → `{ view }` | `view_get` (`view`) |
-| Create | `POST /api/views` `{ name, members }` → `201 { view }` | `view_create` |
-| Rename or change members | `PATCH /api/views/:id` `{ name?, members? }` → `{ view }` | `view_update` (`view`, `name?`, `members?`) |
+| Create | `POST /api/views` `{ name, members, sparql? }` → `201 { view }` | `view_create` (`name`, `members`, `sparql?`) |
+| Rename or change members | `PATCH /api/views/:id` `{ name?, members?, sparql? }` → `{ view }` | `view_update` (`view`, `name?`, `members?`, `sparql?`) |
 | Delete | `DELETE /api/views/:id` → `204` | `view_delete` (`view`) |
 | Give a token a copy | `POST /api/views/:id/copy` `{ toTokenId, fromTokenId? }` | `view_copy` |
 | Instance admin: count orphaned views | `GET /api/admin/views/orphans` | `view_orphans` |

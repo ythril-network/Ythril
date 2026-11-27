@@ -2,9 +2,9 @@
 
 > Part of the [Ythril Integration Guide](../integration-guide.md).
 
-A space with RDF switched on ([Exports](06f-exports.md)) answers SPARQL 1.1 queries over its records, read at query time: the statements a
-query sees are exactly the ones the [RDF records export](06f-exports.md) writes, under the same addresses. There is no copy to load or
-keep in step. The same capability on both doors:
+A space with RDF switched on ([Exports](06f-exports.md)) answers SPARQL 1.1 queries over its records: the statements a
+query sees are exactly the ones the [RDF records export](06f-exports.md) writes, under the same addresses. A
+[stored index](#the-triple-index-and-when-a-query-reads-the-records) makes queries faster and changes no answer. The same capability on both doors:
 
 | | REST | MCP | rights |
 |---|---|---|---|
@@ -98,31 +98,24 @@ An answer is read while the records change: it is not a point-in-time snapshot, 
 
 ### The triple index, and when a query reads the records
 
-Each space with RDF on keeps a triple index: its statements, stored once each in the space's own collections and brought up to date
-before a write's answer is sent. A query reads a space from its index when the index is ready, was built for the space's schema as it is
-now, and is caught up: no record or deletion stands beyond what it holds, and no write outside the record positions (a raw database
-write, the journal's case) is still to be applied. When it is behind by at most 2 000 records, the query lets it catch up for up to a
-quarter of the time it has left. Otherwise that space is read from its records, which answer the same statements (more slowly), and the
-index catches up in the background. A space whose index is stale (its schema changed, or a write the index cannot name) is read from its
-records until the index is rebuilt.
+Each space with RDF on keeps a triple index: a stored copy of the statements its records make, kept up to date with every write, that
+makes queries faster. A query reads a space from its index when the index is ready and current for the space's schema, and from its
+records otherwise. The answer is the same either way: the same statements, the same rights (without `files: read` no file statement is
+read from either) and the same refusals. Nothing is lost when an index is missing or behind; the space is only read more slowly.
 
-**Rebuilds.** A background job checks each space's index every minute and rebuilds it when it is missing (a new space, a restore, or
-an index never built whole), stale, built for another schema, named by a write no record row could name, or found to have drifted. Every
-ten minutes at most it also verifies a rolling sample of 200 records of each space against the index, and 200 terms of its dictionary; a
-record that differs is logged and starts a rebuild, and so does a dictionary more than half of whose terms no statement uses. A rebuild
-reads every record (also those stored before positions) into collections of its own and swaps them in when it is done; meanwhile the space
-is read from its index as before, or from its records. Only one rebuild of a space runs at a time, across instances sharing a database. A
-query that read an index which a rebuild swapped in while the query ran is answered again from that space's records, so no answer mixes
-two builds. An admin rebuilds one space at once with `space_rdf_rebuild` (MCP, `POST /api/space_rdf_rebuild` with `{"space": "<id>"}`, or
-`POST /api/brain/spaces/:spaceId/rdf-index/rebuild`; the knowledge `admin` right on the space; `409 rdf_off` for a space with RDF off, `409 rebuild_busy` when
-another instance's rebuild of the space is running; audited as `space.rdf.rebuild`) and reads its state with `space_rdf_index`
-(`POST /api/space_rdf_index`; knowledge `read`): `status` (`ready`: queries read the index; `catching-up`, `stale`, `unbuilt` (a state no rebuild built) or `absent`: they read the records), `buildId`, `appliedPos` and
+**Rebuilds.** Ythril builds the index itself, in the background, and needs no action: after an upgrade from a release that kept no index,
+after a restore, for a new space, and after a change of the space's schema. It also compares the index with the records from time to
+time and rebuilds it when they differ. While the build runs, queries, reads and writes work as before and the space is read from its
+records. The index is a derived copy: it is not part of a backup, and it takes extra storage in the instance's database in proportion to
+the statements the space's records make. An admin rebuilds one space at once with `space_rdf_rebuild` (MCP, `POST /api/space_rdf_rebuild`
+with `{"space": "<id>"}`, or `POST /api/brain/spaces/:spaceId/rdf-index/rebuild`; the knowledge `admin` right on the space; `409 rdf_off`
+for a space with RDF off, `409 rebuild_busy` when another instance's rebuild of the space is running; audited as `space.rdf.rebuild`) and reads its state with `space_rdf_index`
+(`POST /api/space_rdf_index`; knowledge `read`): `status` (`ready`: queries read the index; `catching-up`, `stale`, `unbuilt` (not built yet) or `absent`: they read the records), `buildId`, `appliedPos` and
 `rebuilding`.
 
-Either way the answer is the same: the same statements, the same rights (without `files: read` no file statement is read from either),
-and the same refusals. A read from the index counts statements against `sparql.maxIndexRowsRead`; a read from the records counts records
-against `sparql.maxRecordsRead`; either bound passed is `413 sparql_too_much_read`. A join over an index looks its bindings up a hundred at
-a time. A SPARQL Update always evaluates its patterns over the records.
+A read from the index counts statements against `sparql.maxIndexRowsRead`; a read from the records counts records against
+`sparql.maxRecordsRead`; either bound passed is `413 sparql_too_much_read`. A SPARQL Update always evaluates its patterns over the
+records.
 
 The keys are read live. At most two queries run at once on an instance and one per token (`503 sparql_busy` with `Retry-After`).
 `SERVICE` (federation), `LOAD` and SPARQL Update are refused: this endpoint reads this server's own records and never reaches the network.
