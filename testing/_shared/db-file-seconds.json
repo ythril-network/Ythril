@@ -437,6 +437,7 @@
     "a-space-act-runner-runs-registers-and-retries-db.test.js": 42.9,
     "a-space-delete-is-not-held-by-a-search-index-call-db.test.js": 21.7,
     "a-space-delete-survives-a-concurrent-writer-db.test.js": 2.6,
+    "a-space-holds-as-many-types-as-its-storage-allows-db.test.js": 3.9,
     "a-space-list-says-which-spaces-wait-for-search-db.test.js": 4.4,
     "a-space-lists-reads-and-compares-its-schema-versions-db.test.js": 12.8,
     "a-space-owes-its-positions-until-one-write-db.test.js": 99.8,
