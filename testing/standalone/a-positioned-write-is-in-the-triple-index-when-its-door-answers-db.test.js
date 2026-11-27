@@ -23,6 +23,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openSparqlDoors, rdfMeta, baseOf } from './_sparql-doors.mjs';
+import { buildIndexes } from './_triple-index-read.mjs';
 import { assertIndexedAsStored, indexedStatements, formStatements, quadRow, indexState, allQuadRows } from './_triple-index.mjs';
 
 const skip = await mongoSkipReason();
@@ -50,6 +51,8 @@ describe('a positioned write is in the triple index when its door answers', { sk
     });
     stream = await import('../../server/dist/sync/record-position-stream.js');
     await (await import('../../server/dist/brain/links-conversion.js')).convertAndMarkSpaces([{ id: S }, { id: K }]);
+    // The follower applies to an index a rebuild built (pre-ship finding P2): build each space's, as the upkeep does.
+    await buildIndexes([S, K]);
     admin = await d.mint('tix-admin', {}, { admin: true });
   });
   after(async () => { await d?.close(); });

@@ -7,8 +7,9 @@
  * "Does this space's index need rebuilding now?" Asked per space by the housekeeping job `Triple index upkeep` (every
  * {@link UPKEEP_INTERVAL_MS}, through `eachSpace`), whose step is {@link upkeepTripleIndex}. The answer is a reason, or none:
  *
- * - `missing`: the space has RDF on and settled names, and its index has no state row (a new space, a restore that dropped it), or one no
- *   rebuild wrote (`buildId` absent: the follower started it from position 0 and never read a row without a `pos`);
+ * - `missing`: the space has RDF on and settled names, and its index has no state row (a new space, an upgrade, a restore that dropped it), or
+ *   one no rebuild wrote (`buildId` absent: a build of the index that a follower started from position 0, which never reads a row without a
+ *   `pos`; the follower no longer starts one, so only that older state has it);
  * - `stale`: the index is marked `stale` (a record collection dropped or renamed, the positions rollback, a form change the follower met);
  * - `journal`: the journal holds a `*` row (a write no record row could name);
  * - `form`: the index was built for another form than the space's now;
@@ -16,7 +17,8 @@
  * - `unused-terms`: the verify's passes over the dictionary found more than {@link UNUSED_TERMS_SHARE} of its terms used by no statement
  *   (the dictionary never frees an id; a rebuild starts a fresh one).
  * A reason starts a rebuild (`rebuild.ts` `launchTripleIndexRebuild`), at most one per tick and none while one runs in this process
- * ({@link upkeepTripleIndexes}, finding F5); the reason is logged.
+ * ({@link upkeepTripleIndexes}, finding F5); the reason is logged. A space whose rebuilds keep failing is retried after longer waits
+ * (`rebuild-backoff.ts`).
  *
  * ## The drift verify
  *
@@ -34,7 +36,6 @@ import { col, asFilter, asUpdate } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { idKeysetPage } from '../../db/id-keyset-page.js';
 import { readStoredById } from '../../db/read-by-id.js';
-import { inChunks } from '../../util/chunks.js';
 import { log, peerText } from '../../util/log.js';
 import { eachSpace } from '../../util/housekeeping-walk.js';
 import { declareStep } from '../../util/housekeeping-signals.js';
@@ -42,12 +43,13 @@ import { intervalJob } from '../../util/interval-job.js';
 import { configuredSpaces } from '../../spaces/space-lookup.js';
 import { RDF_KIND_COLLECTIONS, rdfKindCollection } from '../rdf-members.js';
 import type { RdfRecordKind } from '../record-triples.js';
-import { storedKeyOf, type TermRow } from './terms.js';
+import { idsOfStoredKeys, storedKeyOf, type TermRow } from './terms.js';
 import { formKeyOf, liveCollections, packStatement, readTripleIndexState, recordKeyOf, STATEMENT_BYTES } from './store.js';
 import { hasOutstandingJournalRows, journalAsksForRebuild } from './journal.js';
 import { formMetaOf, projectionOf, statementsOf } from './follow.js';
 import { filterOf, lagOf } from './read.js';
-import { anyRebuildRunsHere, launchTripleIndexRebuild, requestTripleIndexRebuild, type RebuildResult } from './rebuild.js';
+import { anyRebuildRunsHere, launchTripleIndexRebuild, requestTripleIndexRebuild, type RebuildReason, type RebuildResult } from './rebuild.js';
+import { rebuildBackoff } from './rebuild-backoff.js';
 
 /** The records one verify run recomputes, at most. */
 export const VERIFY_SAMPLE_RECORDS = 200;
@@ -61,13 +63,10 @@ export const UPKEEP_INTERVAL_MS = 60_000;
 export const VERIFY_EVERY_MS = 10 * 60_000;
 /** The longest one verify's barrier read may take. */
 const BARRIER_MS = 10_000;
-/** Ids per term lookup. */
-const IDS_PER_FIND = 1_000;
 /** Record keys a verify mismatch line names, at most. */
 const KEYS_NAMED = 5;
 
-/** Why an index is rebuilt. */
-export type RebuildReason = 'missing' | 'stale' | 'journal' | 'form' | 'verify' | 'unused-terms';
+export type { RebuildReason };
 
 /**
  * Where the verify stands: the record cursor (a kind's place in `RDF_KIND_COLLECTIONS` and the last `_id`), the cursor over the record rows
@@ -178,11 +177,7 @@ async function mismatchesOf(spaceId: string, expected: ReadonlyMap<string, strin
   const live = liveCollections(spaceId);
   const termKeys = new Set<string>();
   for (const statements of expected.values()) for (const s of statements) for (const k of JSON.parse(s) as string[]) termKeys.add(storedKeyOf(k));
-  const ids = new Map<string, number>();
-  for (const chunk of inChunks([...termKeys], IDS_PER_FIND)) {
-    const rows = await col<TermRow>(live.terms).find(asFilter<TermRow>({ k: { $in: chunk } }), { projection: { _id: 1, k: 1 } }).toArray();
-    for (const r of rows) ids.set(r.k, r._id);
-  }
+  const ids = await idsOfStoredKeys(live.terms, [...termKeys]);
   const stored = new Map<string, string>();
   const rows = await readStoredById<{ _id: string; q: Binary }>(live.records, [...expected.keys()], { _id: 1, q: 1 });
   for (const [id, r] of rows) stored.set(id, hexIds(Buffer.from(r.q.buffer)));
@@ -241,7 +236,7 @@ export async function upkeepTripleIndex(spaceId: string, opts: { verify: boolean
   const reason = await upkeepReasonOf(spaceId, opts.verify);
   if (reason === null) return { rebuilt: null, reason: null };
   log.info(`Triple index of space '${peerText(spaceId)}': rebuilt (${reason})`);
-  const r = await requestTripleIndexRebuild(spaceId);
+  const r = await requestTripleIndexRebuild(spaceId, reason);
   return { rebuilt: r.outcome === 'built' ? reason : null, reason, outcome: r.outcome };
 }
 
@@ -252,28 +247,41 @@ async function upkeepReasonOf(spaceId: string, verify: boolean): Promise<Rebuild
 }
 
 const STEP = declareStep('Triple index upkeep');
-/** When each space was verified last in this process. */
+/**
+ * When each space was verified last in this process. A space the tick sees for the first time starts a random part of {@link VERIFY_EVERY_MS}
+ * ago, so a process that just started does not verify every space at its first tick: each first verify falls somewhere in the next interval.
+ */
 const verifiedAt = new Map<string, number>();
+/** The waits after rebuilds of a space failed (`rebuild-backoff.ts`). */
+const backoff = rebuildBackoff(UPKEEP_INTERVAL_MS);
+
+/** What a tick takes from outside: the clock and the rebuild launcher (the defaults are the real ones; a spec moves the clock and fails the launch). */
+export interface UpkeepOptions { now?: () => number; launch?: typeof launchTripleIndexRebuild }
 
 /**
  * One tick: every configured space's upkeep, its verify when one is due. It starts at most one rebuild, and none while one runs in this
  * process (finding F5): on an upgrade every RDF space is `missing`, and a tick that rebuilt them all, each awaited, ran for as long as all of
  * them together and left the verify of every other space waiting. The rebuild is started and not awaited; the walk goes on, and a space that
  * needs one meanwhile waits for a later tick. Nor does a tick verify a space it cannot rebuild: a verify that found drift would have
- * moved its cursor past it.
+ * moved its cursor past it. A space whose rebuilds failed is left alone for the wait `rebuild-backoff.ts` gives.
  */
-export async function upkeepTripleIndexes(): Promise<void> {
+export async function upkeepTripleIndexes(opts: UpkeepOptions = {}): Promise<void> {
+  const clock = opts.now ?? Date.now;
+  const launch = opts.launch ?? launchTripleIndexRebuild;
   let started = false;
   await eachSpace(STEP, configuredSpaces(), async (s) => {
     if (started || anyRebuildRunsHere()) return;
-    const now = Date.now();
-    const due = now - (verifiedAt.get(s.id) ?? 0) >= VERIFY_EVERY_MS;
+    const now = clock();
+    if (!backoff.mayStart(s.id, now)) return;
+    if (!verifiedAt.has(s.id)) verifiedAt.set(s.id, now - Math.floor(Math.random() * VERIFY_EVERY_MS));
+    const due = now - verifiedAt.get(s.id)! >= VERIFY_EVERY_MS;
     const reason = await upkeepReasonOf(s.id, due);
     if (due) verifiedAt.set(s.id, now);
     if (reason === null) return;
     started = true;
     log.info(`Triple index of space '${peerText(s.id)}': rebuilding (${reason})`);
-    await launchTripleIndexRebuild(s.id, 'the upkeep');
+    const { run, joined } = await launch(s.id, 'the upkeep', reason).catch((err: unknown) => { backoff.settled(s.id, null, clock()); throw err; });
+    if (!joined) run.result.then(r => backoff.settled(s.id, r.outcome, clock()), () => backoff.settled(s.id, null, clock()));
   });
 }
 

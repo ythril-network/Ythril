@@ -25,7 +25,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openSparqlDoors, rdfMeta } from './_sparql-doors.mjs';
-import { landAll, followUntilReady, bendState, entityDoc, edgeDoc } from './_triple-index-read.mjs';
+import { landAll, bendState, entityDoc, edgeDoc } from './_triple-index-read.mjs';
 import { indexedStatements } from './_triple-index.mjs';
 import { assertIndexEqualsRecords, dropIndex, verifyModule } from './_triple-index-rebuild.mjs';
 
@@ -62,10 +62,11 @@ describe('the triple index is rebuilt on each trigger', { skip }, () => {
     assert.ok((await indexedStatements(d, S, 'entity', LEGACY))?.length > 0, 'the row without a position is stated');
   });
 
-  it('an index the follower started and nobody built whole is rebuilt', async () => {
+  it('an index a follower started and nobody built whole is rebuilt', async () => {
     await dropIndex(d, S);
-    await followUntilReady(d, S);
-    assert.equal(await indexedStatements(d, S, 'entity', LEGACY), null, 'the follower alone never reads a row without a position');
+    // The state a follower that started its own index left (the follower no longer starts one, so an upgrade from such a build plants it).
+    await d.col(`${S}_rdf_state`).insertOne({ _id: 'state', status: 'ready', appliedPos: 0, formKey: 'older-build' });
+    assert.equal(await indexedStatements(d, S, 'entity', LEGACY), null, 'that index states nothing of the row without a position');
     await rebuiltFor('missing');
   });
 

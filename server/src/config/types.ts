@@ -7,6 +7,7 @@ import type { SpaceActEntry, SpaceActSet } from './types-space-acts.js';
 import type { DupeScannerConfig, ContradictionScannerConfig, DupeActionRule } from './types-scanners.js';
 import type { EmbeddingConfig } from './types-embedding.js';
 import type { FaceRecognitionConfig } from './types-face-recognition.js';
+import type { ViewRecord } from './view-record.js';
 export type { SpaceActEntry, SpaceActKind, SpaceActState, SpaceActRound, SpaceActPostSteps, SpaceActSet, SpaceActSetMember } from './types-space-acts.js';
 export interface TokenRecord {
   id: string;
@@ -1115,7 +1116,6 @@ export interface Config extends ConfigLimits {
 }
 
 /** A personal view as `config.json` holds it (`view-record.ts`). */
-import type { ViewRecord } from './view-record.js';
 export type { ViewRecord };
 
 /** A migrated proxy definition with no owner yet (see `Config.unclaimedViews`). */

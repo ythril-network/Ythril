@@ -50,6 +50,7 @@ import { recordPositions } from '../../sync/record-position-stream.js';
 import { log, outsideRequest, peerText } from '../../util/log.js';
 import { warnOnce, SAY_ONCE_WINDOW_MS } from '../../util/warn-once.js';
 import { detachedWrite } from '../../db/write-bound.js';
+import { rdfIndexRebuildsTotal } from '../../metrics/rdf-index-metrics.js';
 import { isShuttingDown } from '../../lifecycle.js';
 import { RDF_KIND_COLLECTIONS } from '../rdf-members.js';
 import type { RdfRecordKind } from '../record-triples.js';
@@ -91,6 +92,11 @@ export interface TripleIndexBuild {
  * `stopped` (the process began to shut down: none starts, and a fill stops at its next page).
  */
 export interface RebuildResult { outcome: 'built' | 'busy' | 'no-form' | 'form-changed' | 'stopped'; buildId?: string; records?: number }
+
+/** Why an index is rebuilt (the upkeep's reasons, `verify.ts`). */
+export type RebuildReason = 'missing' | 'stale' | 'journal' | 'form' | 'verify' | 'unused-terms';
+/** Who started a rebuild, for its counter: the upkeep with its reason, or `admin` (the door, or a call by hand). */
+export type RebuildTrigger = RebuildReason | 'admin';
 
 /**
  * Start a build of `spaceId`: claim the build row, read the cap, mark the journal rows done before now as the build's. `null` when another
@@ -254,7 +260,20 @@ async function dropBuildCollections(build: Pick<TripleIndexBuild, 'spaceId' | 'b
  * Rebuild `spaceId`'s index whole: begin, fill, swap (see the module docblock). `onClaimed(true)` is called once the build row is held,
  * `onClaimed(false)` when the rebuild ends without it (the outcome says why): the admin door answers after that call.
  */
-export async function rebuildTripleIndex(spaceId: string, opts: { leaseMs?: number; onClaimed?: (claimed: boolean) => void } = {}): Promise<RebuildResult> {
+export async function rebuildTripleIndex(spaceId: string, opts: { leaseMs?: number; onClaimed?: (claimed: boolean) => void; reason?: RebuildTrigger } = {}): Promise<RebuildResult> {
+  const reason = opts.reason ?? 'admin';
+  try {
+    const result = await buildTripleIndex(spaceId, opts);
+    rdfIndexRebuildsTotal.inc({ reason, outcome: result.outcome });
+    return result;
+  } catch (err) {
+    rdfIndexRebuildsTotal.inc({ reason, outcome: 'failed' });
+    throw err;
+  }
+}
+
+/** One rebuild's work (see {@link rebuildTripleIndex}, which counts its outcome). */
+async function buildTripleIndex(spaceId: string, opts: { leaseMs?: number; onClaimed?: (claimed: boolean) => void }): Promise<RebuildResult> {
   const refused = (outcome: 'no-form' | 'busy' | 'stopped'): RebuildResult => { opts.onClaimed?.(false); return { outcome }; };
   if (isShuttingDown()) return refused('stopped');
   if (formMetaOf(spaceId) === null) return refused('no-form');
@@ -281,7 +300,7 @@ export interface TripleIndexRebuildRun { result: Promise<RebuildResult>; claimed
 const running = new Map<string, TripleIndexRebuildRun>();
 
 /** The rebuild of `spaceId` this process runs, started when none runs: `joined` says it ran already. */
-function runOf(spaceId: string): { run: TripleIndexRebuildRun; joined: boolean } {
+function runOf(spaceId: string, reason: RebuildTrigger): { run: TripleIndexRebuildRun; joined: boolean } {
   const now = running.get(spaceId);
   if (now) return { run: now, joined: true };
   let resolveClaim!: (claimed: boolean) => void;
@@ -289,7 +308,7 @@ function runOf(spaceId: string): { run: TripleIndexRebuildRun; joined: boolean }
   const claimed = new Promise<boolean>((resolve, reject) => { resolveClaim = resolve; rejectClaim = reject; });
   // Nobody may be waiting for the claim (the upkeep's start): its rejection is the result's, which the caller handles.
   claimed.catch(() => undefined);
-  const result = rebuildTripleIndex(spaceId, { onClaimed: resolveClaim }).then(
+  const result = rebuildTripleIndex(spaceId, { onClaimed: resolveClaim, reason }).then(
     r => { resolveClaim(false); return r; },
     (err: unknown) => { rejectClaim(err); throw err; },
   ).finally(() => { if (running.get(spaceId)?.result === result) running.delete(spaceId); });
@@ -301,8 +320,8 @@ function runOf(spaceId: string): { run: TripleIndexRebuildRun; joined: boolean }
 /**
  * Rebuild `spaceId`'s index once in this process: a call while one runs shares it. Resolves with its result, rejects with its failure.
  */
-export function requestTripleIndexRebuild(spaceId: string): Promise<RebuildResult> {
-  return runOf(spaceId).run.result;
+export function requestTripleIndexRebuild(spaceId: string, reason: RebuildTrigger = 'admin'): Promise<RebuildResult> {
+  return runOf(spaceId, reason).run.result;
 }
 
 /** Whether this process runs a rebuild of `spaceId` now. */
@@ -333,9 +352,9 @@ export async function awaitTripleIndexRebuilds(ms: number): Promise<boolean> {
  * and the upkeep tick call it). Answers at once with the handle: `claimed` settles when the build row is held or the rebuild ended
  * without it, `result` when the rebuild ends. A failure is said once per window and space, whoever waits; `joined` says one ran already.
  */
-export function launchTripleIndexRebuild(spaceId: string, who: string): Promise<{ run: TripleIndexRebuildRun; joined: boolean }> {
+export function launchTripleIndexRebuild(spaceId: string, who: string, reason: RebuildTrigger): Promise<{ run: TripleIndexRebuildRun; joined: boolean }> {
   return outsideRequest(() => detachedWrite(async () => {
-    const started = runOf(spaceId);
+    const started = runOf(spaceId, reason);
     if (!started.joined) {
       started.run.result.catch((err: unknown) => rebuildFailed(spaceId,
         () => log.warn(`Triple index of space '${peerText(spaceId)}': the rebuild ${peerText(who)} started failed: ${peerText(String(err))}`)));
@@ -347,9 +366,12 @@ export function launchTripleIndexRebuild(spaceId: string, who: string): Promise<
 /** The status of one space's index, as the admin door reads it (`space_rdf_index`). */
 export interface TripleIndexStatusView {
   spaceId: string;
-  /** `absent`: no index (RDF off, or never started); otherwise its state row's status. */
-  status: TripleIndexStatus | 'absent';
-  /** The build the live index came from (`null`: none, or one the follower started and no rebuild wrote). */
+  /**
+   * `absent`: no index (RDF off, or none built yet); `unbuilt`: a state no rebuild wrote (it names no build, so queries read the records,
+   * whatever its own status says); otherwise its state row's status, which only a built index has.
+   */
+  status: TripleIndexStatus | 'absent' | 'unbuilt';
+  /** The build the live index came from (`null`: none, or a state no rebuild wrote). */
   buildId: string | null;
   appliedPos: number | null;
   /** A rebuild holds the build row now (in this process or another). */
@@ -360,7 +382,9 @@ export interface TripleIndexStatusView {
 export async function tripleIndexStatusOf(spaceId: string): Promise<TripleIndexStatusView> {
   const state = await readTripleIndexState(spaceId);
   const building = rebuildRunsHere(spaceId) || (await runningTripleIndexBuild(spaceId)) !== null;
-  return { spaceId, status: state?.status ?? 'absent', buildId: state?.buildId ?? null, appliedPos: state?.appliedPos ?? null, rebuilding: building };
+  const buildId = state?.buildId ?? null;
+  const status = state === null ? 'absent' : buildId === null ? 'unbuilt' : state.status;
+  return { spaceId, status, buildId, appliedPos: state?.appliedPos ?? null, rebuilding: building };
 }
 
 /** The codes the admin door's start refuses with: the one list `space_rdf_rebuild`'s description names them from. */
@@ -383,7 +407,7 @@ export async function startTripleIndexRebuild(spaceId: string): Promise<RebuildS
   if (formMetaOf(spaceId) === null) {
     return { ok: false, status: REBUILD_REFUSED_STATUS, code: 'rdf_off', error: `Space '${peerText(spaceId)}' has RDF off or names that are not settled, so it has no triple index to rebuild` };
   }
-  const { run, joined } = await launchTripleIndexRebuild(spaceId, 'an admin');
+  const { run, joined } = await launchTripleIndexRebuild(spaceId, 'an admin', 'admin');
   if (joined || await run.claimed) return { ok: true, status: joined ? 'running' : 'started', spaceId };
   // Not claimed: the rebuild ended at once, and its outcome says why.
   const outcome = (await run.result).outcome;

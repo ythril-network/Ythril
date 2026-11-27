@@ -28,7 +28,8 @@
  *    form leaves out is a record with no statements, and its statements are dropped.
  *
  * A space with RDF off has no index and the follower does nothing for it; a space whose RDF is on but unsettled (a contested base, a term
- * clash) is not followed until it is settled.
+ * clash) is not followed until it is settled. Nor does it start an index: a space whose index has no state row, or one no rebuild wrote, is
+ * left alone until the rebuild's swap writes the state (the upkeep builds it), so a write in it does no index work meanwhile (P2).
  */
 import { randomUUID } from 'node:crypto';
 import type { SpaceMeta } from '@ythril-network/schema';
@@ -45,7 +46,7 @@ import { onSettled, settledPositionCap, type SettledHook } from '../../util/posi
 import { recordPositions } from '../../sync/record-position-stream.js';
 import { termKey } from './terms.js';
 import {
-  applyTripleIndexBatch, formKeyOf, markTripleIndexStale, readTripleIndexState, releaseTripleIndexLease, startTripleIndex, takeTripleIndexLease,
+  applyTripleIndexBatch, formKeyOf, markTripleIndexStale, readTripleIndexState, releaseTripleIndexLease, takeTripleIndexLease,
   type RecordChange, type StatementKeys,
 } from './store.js';
 import { clearableJournalRows, journalAsksForRebuild, journalRecordWrites } from './journal.js';
@@ -53,7 +54,7 @@ import { catchUpTripleIndexWith } from './read.js';
 
 /** The most records one batch applies, in one transaction. */
 export const BATCH_RECORDS = 500;
-/** The most batches one run applies: a space far behind (its index just started) is caught up over several writes, `catching-up` meanwhile. */
+/** The most batches one run applies: a space far behind (records landed in bulk above its rebuild) is caught up over several writes, `catching-up` meanwhile. */
 export const BATCHES_PER_RUN = 8;
 /** How long a follower's lease lasts; renewed each batch. */
 const LEASE_MS = 60_000;
@@ -124,12 +125,15 @@ function wakeFollower(spaceId: string): void {
 
 /** One run: see the module docblock. */
 async function followOnce(spaceId: string, settledCap: () => Promise<number>): Promise<void> {
-  const first = formMetaOf(spaceId);
-  if (first === null) return;
+  if (formMetaOf(spaceId) === null) return;
+  // An index no rebuild built is never read and the upkeep's rebuild replaces it: applying records to one (P2) was work thrown away inside
+  // every write of the space until the rebuild landed. The rebuild's swap writes the state; the follower takes over from its `appliedPos`.
+  if (typeof (await readTripleIndexState(spaceId))?.buildId !== 'string') return;
   if (!(await takeTripleIndexLease(spaceId, OWNER, LEASE_MS))) return;
   try {
-    const state = await readTripleIndexState(spaceId) ?? await startTripleIndex(spaceId, formKeyOf(first));
-    if (state.status === 'stale') return;
+    // The state is read again under the lease: a swap or a restore may have come between.
+    const state = await readTripleIndexState(spaceId);
+    if (state === null || typeof state.buildId !== 'string' || state.status === 'stale') return;
     if (!(await followPositions(spaceId, state.appliedPos, settledCap))) return;
     await followJournal(spaceId);
   } finally {
