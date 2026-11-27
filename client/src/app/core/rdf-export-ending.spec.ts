@@ -3,7 +3,7 @@
  * count, whether it is whole, and the values left out, in the shapes the server writes (`rdf/export-act.ts`, `rdf/serialize.ts`).
  */
 import { describe, it, expect } from 'vitest';
-import { headerList, rdfExportEnding } from './rdf-export-ending';
+import { rdfExportEnding } from './rdf-export-ending';
 
 const TURTLE = [
   '@prefix ythril: <https://ythril.dev/ns#> .',
@@ -55,8 +55,17 @@ describe('rdfExportEnding', () => {
     expect(rdfExportEnding(doc.slice(0, -4), 'jsonld')).toBeNull();
   });
 
-  it('reads a view header\'s percent-encoded member list', () => {
-    expect(headerList('field-notes, scratch%20pad')).toEqual(['field-notes', 'scratch pad']);
-    expect(headerList(null)).toEqual([]);
+  it('reads the endings the real server writer wrote (captured from a scratch instance at 3e9c7b590, bundle-358 drive)', () => {
+    // The last lines of GET /api/brain/spaces/rdf-on/export/rdf in Turtle and in TriG, byte for byte. The full guard, over every format and a
+    // view, runs the real writer: `testing/standalone/the-client-reads-the-ending-of-every-rdf-export-the-server-writes-db.test.js`.
+    const shapes = '<http://b358-app:3361/ld/rdf-on/schema/49bea0b1b287256c8bf200fb74fabfa5505e43634da1aba9ec7e44717c868186>';
+    const turtle = `prov:wasAttributedTo <http://b358-app:3361/ld/rdf-on/agent/915a> .\n\n# ythril-export: 303 records; complete, nothing is left; 0 property values left out; shapes: ${shapes}\n`;
+    expect(rdfExportEnding(turtle, 'turtle')).toEqual({ complete: true, records: 303, leftOutCount: 0, leftOut: [] });
+    const trig = [
+      '<urn:ythril:export-report:0b9b7cc6>', '    a ythril:ExportReport ;', '    dcterms:hasPart <http://b358-app:3361/ld/rdf-on/> ;',
+      '    ythril:complete "true"^^xsd:boolean ;', '    ythril:leftOutCount "0"^^xsd:integer ;', '    ythril:recordCount "303"^^xsd:integer .', '', '}',
+      `# ythril-export: 303 records; complete, nothing is left; 0 property values left out; shapes: ${shapes}`, '',
+    ].join('\n');
+    expect(rdfExportEnding(trig, 'trig')).toEqual({ complete: true, records: 303, leftOutCount: 0, leftOut: [] });
   });
 });

@@ -9,6 +9,8 @@ import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, vi } from 'vitest';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
+import { SpacesStore } from './spaces-store.service';
+import { AdminApi } from '../../core/admin-api.service';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getTranslocoModule } from '../../testing/transloco-testing';
@@ -37,7 +39,7 @@ const vote = (networkId: string, yes: number): VoteRound => ({
   rebase: { base: NEW, vocab: `${NEW}vocab/`, epoch: 1 },
 });
 
-interface Opts { space?: Partial<Space>; networks?: unknown[]; rounds?: Record<string, VoteRound[]>; admin?: boolean; confirm?: boolean; update?: () => unknown }
+interface Opts { space?: Partial<Space>; networks?: unknown[]; networksFail?: boolean; rounds?: Record<string, VoteRound[]>; admin?: boolean; confirm?: boolean; update?: () => unknown; publicUrl?: string }
 
 async function setup(o: Opts = {}) {
   const updateSpace = vi.fn(o.update ?? (() => of({ space: { id: 'platform', label: 'Platform', meta: { rdf: { enabled: true, base: KIEL, baseEpoch: 0 } } } })));
@@ -47,9 +49,10 @@ async function setup(o: Opts = {}) {
     imports: [SpaceRdfCardComponent, getTranslocoModule({ translation: { en } })],
     providers: [
       provideRouter([]),
-      SpaceSettingsState,
+      SpaceSettingsState, SpacesStore,
       { provide: SpacesApi, useValue: { updateSpace, getSpaceStats: () => of({ spaceId: 'platform' }) } },
-      { provide: NetworksApi, useValue: { listNetworks: () => of({ networks: o.networks ?? [] }), listVotes: (id: string) => of({ rounds: o.rounds?.[id] ?? [] }) } },
+      { provide: NetworksApi, useValue: { listNetworks: () => (o.networksFail ? throwError(() => ({ status: 403 })) : of({ networks: o.networks ?? [] })), listVotes: (id: string) => of({ rounds: o.rounds?.[id] ?? [] }) } },
+      { provide: AdminApi, useValue: { getAbout: () => of({ ...(o.publicUrl ? { publicUrl: o.publicUrl } : {}) }) } },
       { provide: AuthApi, useValue: { verifyToken: () => of({ id: 't', name: 't', rights: { instanceAdmin: o.admin ?? true, createSpaces: false, floor: null, perSpace: {} } }) } },
       { provide: ConfirmDialogService, useValue: { confirm } },
     ],
@@ -77,7 +80,7 @@ describe('RDF names card, off', () => {
   });
 
   it('switched on, it shows the base and the vocabulary with what each means and the advice to use a persistent address', async () => {
-    const { fixture, q, state } = await setup();
+    const { fixture, q, state } = await setup({ publicUrl: 'https://ld.acme.example/' });
     (q('rdf-switch') as HTMLInputElement).click();
     fixture.detectChanges();
     await fixture.whenStable();
@@ -86,7 +89,7 @@ describe('RDF names card, off', () => {
     expect(q('rdf-base')).not.toBeNull();
     expect(q('rdf-vocab')).not.toBeNull();
     expect(q('rdf-persistent')?.textContent).toContain('w3id.org');
-    expect(q('rdf-persistent')?.textContent).toContain('/ld/platform/');
+    expect(q('rdf-persistent')?.textContent).toContain('https://ld.acme.example/ld/platform/');
     // The save sends the switch and the typed base (the dialog's own Save).
     state.rdfForm.base = BASE;
     expect(state.buildMeta().rdf).toEqual({ enabled: true, base: BASE });
@@ -186,6 +189,137 @@ describe('RDF names card, shared with a vote and an offer', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(q('rdf-refusal')?.textContent).toContain(en['rdf.refusal.forbidden']);
+  });
+});
+
+describe('RDF names card, when the networks cannot be read (L2.1, L3.1)', () => {
+  const VOTE_ANSWER = { status: 'vote_pending', rounds: [{ networkId: 'acme', networkLabel: 'Acme partners', roundId: 'r1' }], message: 'pending' };
+
+  async function change(o: Opts) {
+    const r = await setup({ space: ON, ...o });
+    (r.q('rdf-change') as HTMLButtonElement).click();
+    r.fixture.detectChanges();
+    const input = r.q('rdf-new-base') as HTMLInputElement;
+    input.value = NEW;
+    input.dispatchEvent(new Event('input'));
+    r.fixture.detectChanges();
+    (r.q('rdf-change-go') as HTMLButtonElement).click();
+    await r.fixture.whenStable();
+    r.fixture.detectChanges();
+    return r;
+  }
+
+  it('says the networks could not be read, instead of drawing a space in no network', async () => {
+    const { q, el } = await setup({ space: ON, networksFail: true });
+    expect(q('rdf-networks-unread')?.textContent).toContain(en['rdf.card.networksUnread']);
+    expect(el.textContent).toContain(en['rdf.card.changeWhatUnknown']);
+  });
+
+  it('draws no such line when the networks were read', async () => {
+    const { q } = await setup({ space: ON });
+    expect(q('rdf-networks-unread')).toBeNull();
+  });
+
+  it('words the confirm of a base change neutrally: it does not say "at once" for a change the server may turn into a vote', async () => {
+    const { confirm } = await change({ networksFail: true, update: () => of(VOTE_ANSWER) });
+    const asked = confirm.mock.calls[0]![0] as { message: string };
+    expect(asked.message).toBe(en['rdf.card.changeConfirmUnknown'].replace('{{base}}', NEW));
+    expect(asked.message).not.toBe(en['rdf.card.changeConfirm'].replace('{{base}}', NEW));
+  });
+
+  it('takes the notice from the server\'s answer: a 202 vote_pending says the vote is open, whatever the card believed', async () => {
+    const { q } = await change({ networksFail: true, update: () => of(VOTE_ANSWER) });
+    expect(q('rdf-notice')?.textContent).toContain(en['rdf.card.voteOpened']);
+    expect(q('rdf-notice')?.textContent).not.toContain(en['rdf.card.changed']);
+  });
+
+  it('a change the server applied says so, even on a space the card drew as shared', async () => {
+    const { q } = await change({ networks: [{ ...SHARED_NETS[1], rdfBaseConflicts: undefined }], update: () => of({ space: { id: 'platform', label: 'Platform', meta: { rdf: { enabled: true, base: NEW, baseEpoch: 1 } } } }) });
+    expect(q('rdf-notice')?.textContent).toContain(en['rdf.card.changed']);
+  });
+});
+
+describe('RDF names card, the default base the server will store (D2)', () => {
+  async function switchedOn(o: Opts) {
+    const r = await setup(o);
+    (r.q('rdf-switch') as HTMLInputElement).click();
+    r.fixture.detectChanges();
+    await r.fixture.whenStable();
+    r.fixture.detectChanges();
+    return r;
+  }
+
+  it('is the instance\'s public address, /ld/ and the space id, never the address of the browser tab', async () => {
+    const { q } = await switchedOn({ publicUrl: 'https://ld.acme.example' });
+    expect(q('rdf-persistent')?.textContent).toContain('https://ld.acme.example/ld/platform/');
+    expect((q('rdf-base') as HTMLInputElement).placeholder).toBe('https://ld.acme.example/ld/platform/');
+    expect(q('rdf-persistent')?.textContent).not.toContain(location.origin);
+  });
+
+  it('names no address when the instance says none: the server then refuses an empty base, and the card does not promise one', async () => {
+    const { q } = await switchedOn({});
+    expect(q('rdf-persistent')?.textContent).not.toContain(location.origin);
+    expect(q('rdf-persistent')?.textContent).toContain(en['rdf.card.persistentNoDefault']);
+    expect((q('rdf-base') as HTMLInputElement).placeholder).toBe('');
+  });
+});
+
+describe('RDF names card, a link to it (L4.1, D1)', () => {
+  it('takes focus once: a card built again after the signal was answered does not take it', async () => {
+    const first = await setup({ space: ON });
+    document.body.appendChild(first.el);
+    first.state.rdfFocus.update(n => n + 1);
+    first.fixture.detectChanges();
+    await new Promise(r => setTimeout(r, 0));
+    expect(document.activeElement?.id).toBe('rdf-card-focus');
+    expect(first.state.rdfFocus()).toBe(0);
+    (document.activeElement as HTMLElement).blur();
+    first.fixture.destroy();
+    first.el.remove();
+    // The Settings tab is built again each time it is shown (`@if` in the dialog): the same state, a new card.
+    const state = first.state;
+    const fixture = TestBed.createComponent(SpaceRdfCardComponent);
+    document.body.appendChild(fixture.nativeElement);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await new Promise(r => setTimeout(r, 0));
+    expect(state.rdfFocus()).toBe(0);
+    expect(document.activeElement?.id).not.toBe('rdf-card-focus');
+    fixture.nativeElement.remove();
+  });
+
+  it('a signal raised before the card exists still brings it into focus when it is built', async () => {
+    TestBed.resetTestingModule();
+    const r0 = await setup({ space: ON });
+    r0.fixture.destroy();
+    r0.state.showRdfNames();
+    expect(r0.state.settingsTab()).toBe('settings');
+    const fixture = TestBed.createComponent(SpaceRdfCardComponent);
+    document.body.appendChild(fixture.nativeElement);
+    fixture.detectChanges();
+    await new Promise(r => setTimeout(r, 0));
+    expect(document.activeElement?.id).toBe('rdf-card-focus');
+    fixture.nativeElement.remove();
+  });
+
+  it('scrolls the card into view inside the container that scrolls (the dialog\'s body), not only the page', async () => {
+    const { fixture, el, state } = await setup({ space: ON });
+    const box = document.createElement('div');
+    box.style.overflowY = 'auto';
+    box.appendChild(el);
+    document.body.appendChild(box);
+    const scrollTo = vi.fn();
+    (box as unknown as { scrollTo: unknown }).scrollTo = scrollTo;
+    box.getBoundingClientRect = () => ({ top: 100, bottom: 1248, height: 1148, left: 0, right: 800, width: 800, x: 0, y: 100, toJSON: () => ({}) });
+    el.getBoundingClientRect = () => ({ top: 1272, bottom: 1900, height: 628, left: 0, right: 800, width: 800, x: 0, y: 1272, toJSON: () => ({}) });
+    state.rdfFocus.update(n => n + 1);
+    fixture.detectChanges();
+    await new Promise(r => setTimeout(r, 0));
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    const top = (scrollTo.mock.calls[0]![0] as { top: number }).top;
+    expect(top).toBeGreaterThan(1000);
+    expect(top).toBeLessThanOrEqual(1172);
+    box.remove();
   });
 });
 
