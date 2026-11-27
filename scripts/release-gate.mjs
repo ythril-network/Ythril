@@ -38,6 +38,8 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { changelogSection, sectionContentLines, headingFor } from './changelog-section.mjs';
+import { changelogMechanisms, describeMechanisms } from './_changelog-mechanisms.mjs';
+import { codeSurfaces } from './_changelog-surfaces.mjs';
 import { tagMatchesVersion, releaseTagOf } from './_shared/release-tags.mjs';
 import { releaseDateProblem } from './_shared/release-date.mjs';
 
@@ -176,6 +178,12 @@ function checkChangelog(version) {
     fail('changelog', `the ${version} section has ${contentLines.length} content line(s). An empty release section `
       + 'claims nothing changed, which is a stronger and falser statement than saying nothing at all.');
   }
+
+  // (b2) the text it publishes names no internal mechanism (Q-975). The release notes are cut from this section, so what the
+  //      rule refuses must not get as far as the tag. It holds `[Unreleased]` and every release after 6.5.7, so a mid-cycle run
+  //      checks the entries before the cut, and a released section up to 6.5.7 stays as published.
+  const mechanisms = changelogMechanisms(text, codeSurfaces());
+  if (mechanisms.length > 0) fail('changelog', describeMechanisms(mechanisms));
 
   // (c) [Unreleased] has been emptied into it — but ONLY at release time.
   //

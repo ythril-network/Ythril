@@ -17,6 +17,8 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { changelogSection, sectionContentLines, releaseBody, abridgeForRelease, RELEASE_BODY_MAX } from './changelog-section.mjs';
+import { changelogMechanisms, describeMechanisms } from './_changelog-mechanisms.mjs';
+import { codeSurfaces } from './_changelog-surfaces.mjs';
 
 const version = process.argv[2];
 const outPath = process.argv[3];
@@ -26,10 +28,23 @@ if (!version) {
   process.exit(2);
 }
 
-const section = changelogSection(readFileSync('CHANGELOG.md', 'utf8'), version);
+const changelogText = readFileSync('CHANGELOG.md', 'utf8');
+const section = changelogSection(changelogText, version);
 if (!section) {
   console.error(`No dated CHANGELOG section for ${version}. Expected a line like "## [${version}] — YYYY-MM-DD".`);
   console.error('The tag was pushed without closing [Unreleased] into a dated heading, so there are no notes to publish.');
+  process.exit(1);
+}
+
+/*
+ * The notes are public text. A section that names an internal mechanism (a collection, a source path, a data-structure term,
+ * a function) is refused here, as the preflight and the release gate refuse it, so the Releases page carries only what the
+ * rule passed (Q-975). The rule holds `[Unreleased]` and releases after 6.5.7; an older section is never examined.
+ */
+const mechanisms = changelogMechanisms(changelogText, codeSurfaces()).filter(o => o.section === `[${version}]`);
+if (mechanisms.length > 0) {
+  console.error(describeMechanisms(mechanisms));
+  console.error(`The ${version} CHANGELOG section would publish how the server works inside. Fix the lines, then cut the notes again.`);
   process.exit(1);
 }
 

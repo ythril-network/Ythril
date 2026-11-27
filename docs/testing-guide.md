@@ -590,6 +590,29 @@ documents sync validates a push with, that helper is `testing/_shared/incoming-s
 instead of handing a loop an empty set. A gate that asserts something of the incoming schemas calls it; never count them in a test or in
 prose, because a hand-written list is how a gate once reported clean about a document it never checked.
 
+## The changelog rules
+
+`CHANGELOG.md` and the release notes cut from it are public, so they are held by gates, not by review alone. A shipped-code change needs a
+line under `[Unreleased]` (`scripts/check-changelog.mjs`, the `changelog` job). The text is held by two standalone files that run in the
+static preflight:
+
+- `the-changelog-is-written-for-its-reader` holds the form: an entry is one or two lines and 300 characters, opens with a bold subject,
+  carries no internal id and no narration of how it was found, says what changed and not why, and stays under the size ceilings, which
+  only go down.
+- `a-changelog-entry-names-no-internal-mechanism` holds the content: an entry says what the reader can now do or what changed for them,
+  and names how the server does it nowhere. Over `[Unreleased]` and every release after 6.5.7 (the released sections up to it stay as
+  published), a line names none of: a source path (`server/src/...`, a `.ts` file), a collection the server keeps (`<space>_rdf_quads`),
+  a term of the mechanism list in `scripts/_changelog-mechanisms.mjs` (a data structure or algorithm, each with its reason), or a
+  camelCase, snake_case or PascalCase name in a code span that no tool, parameter, config key, code, metric or route parameter carries.
+  Routes, tools and their parameters, config keys, environment variables, codes, metrics and headers are public and welcome: they are
+  read from the code on every run (`scripts/_changelog-surfaces.mjs`), never listed, so a rename in the code is followed without an edit.
+  Add a row to the mechanism list, with its reason, when an entry slips a word through.
+
+The same rule runs where the text is published: `scripts/release-gate.mjs` fails the `changelog` gate on it before a tag, and
+`scripts/release-notes.mjs` refuses to cut the notes of a section that breaks it (`a-release-cut-holds-the-mechanism-rule`). It cannot tell
+an idea written in plain words from an outcome; the term list is the net for the words we know, and a reviewer reads each entry as an
+outsider would.
+
 ## How a new test file reaches CI
 
 A test file that no job runs is not a test. Two derived checks hold that, one on what CI selects and one on what actually
