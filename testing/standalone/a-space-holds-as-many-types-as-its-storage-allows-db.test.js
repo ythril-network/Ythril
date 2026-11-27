@@ -24,6 +24,7 @@ import { execFileSync } from 'node:child_process';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { tempInstanceDir, callRoute } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const dir = tempInstanceDir('ythril-types-storage-');
 const skip = await mongoSkipReason();
@@ -134,7 +135,7 @@ describe('a space holds as many types as its storage allows', { skip, timeout: 6
 
   it('source check: no count cap on types is left in the server, the schema package or the client', () => {
     const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    const files = execFileSync('git', ['ls-files', 'server/src', 'schema/src', 'client/src'], { cwd: root, encoding: 'utf8' }).split('\n').filter(f => /\.(ts|mjs|js|html)$/.test(f));
+    const files = execFileSync('git', ['ls-files', ...SERVER_CODE_ROOTS, 'client/src'], { cwd: root, encoding: 'utf8' }).split('\n').filter(f => /\.(ts|mjs|js|html)$/.test(f));
     const hits = [];
     for (const f of files) {
       const text = fs.readFileSync(path.join(root, f), 'utf8');
