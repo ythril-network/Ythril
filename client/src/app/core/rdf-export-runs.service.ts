@@ -70,8 +70,6 @@ export class RdfExportRuns {
   /** Every subject's run, by space or view id. */
   readonly runs = signal<Readonly<Record<string, RdfExportRun>>>({});
 
-  runOf(id: string): RdfExportRun | undefined { return this.runs()[id]; }
-
   private put(id: string, run: RdfExportRun): void { this.runs.update(all => ({ ...all, [id]: run })); }
 
   /** Export the records of `id` (a space, or the caller's own view) and save the file; the run's state is in {@link runs}. */

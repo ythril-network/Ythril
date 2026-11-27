@@ -258,7 +258,7 @@ interface SpaceView {
            tell which of eight views they were on: the state was visible and unannounced. -->
       <div class="tabs" role="tablist" [attr.aria-label]="'brain.tabsAriaLabel' | transloco">
         <button class="tab" type="button" role="tab" [class.active]="activeTab() === 'overview'" [attr.aria-selected]="activeTab() === 'overview'" (click)="setTab('overview')">
-          <ph-icon name="chart-bar" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.overview' | transloco }}@if (activeTab() !== 'overview' && links.rdfRunning(); as mb) {<span class="tab-count" data-testid="overview-rdf-running" [attr.title]="'rdf.export.tabRunning' | transloco">{{ 'rdf.export.tabCount' | transloco: { mb } }}</span>}
+          <ph-icon name="chart-bar" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.overview' | transloco }}@if (activeTab() !== 'overview' && links.rdfRunning(); as mb) {<span class="tab-count" data-testid="overview-rdf-running" [attr.title]="'rdf.export.tabRunning' | transloco">{{ mb }} MB</span>}
         </button>
         <button class="tab" type="button" role="tab" [class.active]="activeTab() === 'query'" [attr.aria-selected]="activeTab() === 'query'" (click)="setTab('query')">
           <ph-icon name="magnifying-glass" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.query' | transloco }}
