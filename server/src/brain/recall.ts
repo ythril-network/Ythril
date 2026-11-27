@@ -157,7 +157,7 @@ export type { RecallKnowledgeType, RecallBase, RecallMemory, RecallEntity, Recal
  * (then it is a no-op), so no text query is left scoring a space for a caller who has gone.
  */
 export async function recall(
-  spaceId: string, query: string, topK = 10, tags?: string[], types?: RecallKnowledgeType[],
+  spaceId: string, query: string, topK?: number, tags?: string[], types?: RecallKnowledgeType[],
   minPerType?: Partial<Record<RecallKnowledgeType, number>>, minScore?: number, filter?: RecallFilter,
   opts?: Parameters<typeof recallSpace>[8],
 ): Promise<RecallResult[]> {
