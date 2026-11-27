@@ -109,9 +109,14 @@ test('a second write to the same name throws and leaves the earlier file as it w
 });
 
 const LIMITS = { timeoutMs: 300000, maxRecordsRead: 10000000, maxResults: 100000 };
+// What a Ythril query carries beside the client's wall time: the door's total and the engine's own time per measured run, and their summaries.
+const timing = (n = 20) => ({
+  door: { median: 2, p95: 3 }, engine: { median: 1, p95: 2 },
+  perRun: Array.from({ length: n }, () => ({ wallMs: 2.5, doorMs: 2, engineMs: 1 })),
+});
 const judged = {
-  Q1: { median: 2.5, p95: 4, n: 20, errors: 0, comparable: true },
-  Q2: { median: 9, p95: 12, n: 20, errors: 0, comparable: false, reason: 'data-not-held' },
+  Q1: { median: 2.5, p95: 4, n: 20, errors: 0, ...timing(), comparable: true },
+  Q2: { median: 9, p95: 12, n: 20, errors: 0, ...timing(), comparable: false, reason: 'data-not-held' },
 };
 const ythril = (over = {}) => input({ engine: 'ythril', sparqlLimits: LIMITS, queries: judged, ...over });
 
@@ -128,8 +133,28 @@ test('a Ythril record carries the three SPARQL limits it ran under, and the queu
   assert.throws(() => buildRecord(ythril({ queries: { Q1: { median: 2, p95: 3, n: 20, errors: 0 } } })), /Q1 has no comparable/);
 });
 
+test('a Ythril query carries the door\'s total and the engine\'s own time per measured run, so a comparison reads like for like', () => {
+  const q = { median: 2.5, p95: 4, n: 20, errors: 0, comparable: true };
+  const rec = buildRecord(ythril({ queries: { Q1: { ...q, ...timing() } } }));
+  assert.deepEqual(rec.queries.Q1.door, { median: 2, p95: 3 });
+  assert.deepEqual(rec.queries.Q1.engine, { median: 1, p95: 2 });
+  assert.equal(rec.queries.Q1.perRun.length, 20);
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: q } })), /Q1.*door/);
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, ...timing(), door: undefined } } })), /Q1.*door/);
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, ...timing(), engine: { median: 1 } } } })), /Q1.*engine/);
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, ...timing(), engine: { median: NaN, p95: 2 } } } })), /Q1.*engine/);
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, ...timing(), perRun: undefined } } })), /Q1.*perRun/);
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, ...timing(19) } } })), /Q1.*perRun/);
+  const holed = timing(); holed.perRun[3] = { wallMs: 2, doorMs: 2 };
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, ...holed } } })), /Q1.*perRun/);
+  // A query that only has an error has no times to carry; an Oxigraph record has no door.
+  const failed = { error: { code: 404, message: 'Not Found' }, n: 0, errors: 23, comparable: true };
+  assert.doesNotThrow(() => buildRecord(ythril({ queries: { Q1: failed } })));
+  assert.doesNotThrow(() => buildRecord(input()));
+});
+
 test('a Ythril query is judged one by one: comparable, or one reason from the fixed list', () => {
-  const q = { median: 2, p95: 3, n: 20, errors: 0 };
+  const q = { median: 2, p95: 3, n: 20, errors: 0, ...timing() };
   const rec = buildRecord(ythril({ queries: { Q1: { ...q, comparable: true }, Q2: { ...q, comparable: false, reason: 'data-not-held' } } }));
   assert.equal(rec.queries.Q2.reason, 'data-not-held');
   assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, comparable: false } } })), /Q1.*reason/);
@@ -138,7 +163,7 @@ test('a Ythril query is judged one by one: comparable, or one reason from the fi
 });
 
 test('valid agrees with the queries: false exactly when one is rows-differ', () => {
-  const q = { median: 2, p95: 3, n: 20, errors: 0 };
+  const q = { median: 2, p95: 3, n: 20, errors: 0, ...timing() };
   const differing = [{ query: 'Q1', oxigraph: 5, ythril: 6 }];
   const named = { Q1: { ...q, comparable: false, reason: 'system-statements' }, Q2: { ...q, comparable: false, reason: 'data-not-held' } };
   assert.doesNotThrow(() => buildRecord(ythril({ queries: named })));
@@ -155,7 +180,7 @@ test('a record says whether it is valid: a Ythril run whose row counts differ fr
   const rowsDiffer = { comparable: false, reason: 'rows-differ' };
   const bad = buildRecord(ythril({
     valid: false, invalidQueries: differing,
-    queries: { Q1: { median: 2.5, p95: 4, n: 20, errors: 0, ...rowsDiffer }, Q2: { error: { code: 404, message: 'Not Found' }, n: 0, errors: 23, ...rowsDiffer } },
+    queries: { Q1: { median: 2.5, p95: 4, n: 20, errors: 0, ...timing(), ...rowsDiffer }, Q2: { error: { code: 404, message: 'Not Found' }, n: 0, errors: 23, ...rowsDiffer } },
   }));
   assert.equal(bad.valid, false);
   assert.deepEqual(bad.invalidQueries, differing);
