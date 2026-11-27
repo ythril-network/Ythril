@@ -1,5 +1,5 @@
 /**
- * CI runs the pure standalone files (the ones that need no service, the text-only files apart) as two shard jobs, every pure file in
+ * CI runs the pure standalone files (the ones that need no service, the text-only files apart) as `PURE_SHARDS` shard jobs, every pure file in
  * exactly one shard, the files packed by their recorded seconds; the text-only files still run once, first, in the first shard only
  * (bundle-356, Q-947).
  *
@@ -131,7 +131,7 @@ describe('the pure kind cut into shards', () => {
   it('the runner refuses a wrong shard argument before it runs or clears anything', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pure-shard-refusal-'));
     try {
-      for (const args of [['--only=pure', '--shard=3/2'], ['--only=pure', '--shard=1/3'], ['--only=pure', '--shard=abc'],
+      for (const args of [['--only=pure', '--shard=3/2'], ['--only=pure', '--shard=1/4'], ['--only=pure', '--shard=abc'],
         ['--only=text', '--shard=1/2'], ['--only=db', '--shard=1/2'], ['--shard=1/2'], ['--only=pure', '--shard=1/2', '--shard=2/2']]) {
         const r = spawnSync(process.execPath, [RUNNER, ...args, '--allow-stale'], {
           cwd: REPO_ROOT, encoding: 'utf8', timeout: 60_000, env: testChildEnv({ YTHRIL_TEST_RESULTS_DIR: dir }),

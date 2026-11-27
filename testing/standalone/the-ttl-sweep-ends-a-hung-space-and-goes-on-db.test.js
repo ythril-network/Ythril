@@ -34,6 +34,12 @@
  * cost nothing to THIS read: it measured 161 ms against a 3 s stall. The test passes the sweep's filter as `readerFilter`, so the
  * fixture's guard reads with it, and expired documents as `seed`, so each one the sweep's filter lets through pays the sleep.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 41 s (measured 2026-11-27). Two runs on an idle booking took 40.8 s and 40.9 s. Most of that is the stall the cases
+ * wait out on purpose. A recorded CI run reads 60 s: the file shares its shard's Mongo, held to one CPU (`YTHRIL_TEST_MONGO_CPUS`), with
+ * three other files. A shorter stall would stop the sweep's bound from being what ends it, so the file is kept and the crowd is spread over more shards.
+ *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/the-ttl-sweep-ends-a-hung-space-and-goes-on-db.test.js
  * (requires a prior `npm run build:server`)

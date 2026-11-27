@@ -659,10 +659,10 @@ The authoritative description is the comment at the top of `.github/workflows/ci
 - **Jobs that start at once** because they need nothing from the image: the client tests and build (`client-tests`), the
   standalone files that need only `server/dist` (`standalone-pure`), the standalone files that need only the test MongoDB
   (`standalone-db`, one job per shard of the plan), and `prepare`. Each waits for `reuse` and **stands down** (is skipped)
-  when `reuse` named a Full run. `standalone-pure` is a matrix of two shard jobs, each running
-  `npm run test:standalone:pure -- --shard=<k>/2`: the runner packs the pure files by the seconds recorded in
+  when `reuse` named a Full run. `standalone-pure` is a matrix of three shard jobs, each running
+  `npm run test:standalone:pure -- --shard=<k>/3`: the runner packs the pure files by the seconds recorded in
   `testing/_shared/pure-file-seconds.json`, each shard uploads `test-results-standalone-pure-<k>-<attempt>` and writes
-  `standalone-pure-<k>of2-<batch>.jsonl`, and the text-only step runs in shard 1 only.
+  `standalone-pure-<k>of3-<batch>.jsonl`, and the text-only step runs in shard 1 only.
   `ci-runs-every-standalone-pure-shard-exactly-once` holds that every pure file runs in exactly one shard. Without `--shard`
   the script runs every pure file, as it does locally and in the preflight.
 - **`prepare`** runs the docs lint and the one build of the test image, written as an archive other jobs load. It only
