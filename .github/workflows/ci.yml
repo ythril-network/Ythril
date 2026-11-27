@@ -237,10 +237,10 @@ jobs:
     if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' }}
     runs-on: ubuntu-latest
     # The offline files that need no database. As one job it was the job a run waited for once Integration and Sync were split
-    # (nine batches one after another, 545 s of tests, Q-947), so the pure kind runs as three shard jobs (two left the first at 990 s against a budget of 725 s once bundles 270 to 272 added
-    # 535 s of files, Q-977), the files packed by their
-    # recorded seconds (`run-standalone.mjs --shard`, `testing/_shared/pure-file-seconds.json`). `fail-fast` is off so one red shard
-    # does not hide the other's verdict; `Build & Test` fails when either failed (a matrix job's result is the worst of its jobs).
+    # (nine batches one after another, 545 s of tests, Q-947), so the pure kind runs as three shard jobs (two left the first at 990 s
+    # against a budget of 725 s once bundles 270 to 272 added 535 s of files, Q-977), the files packed by their recorded seconds
+    # (`run-standalone.mjs --shard`, `testing/_shared/pure-file-seconds.json`). `fail-fast` is off so one red shard does not hide
+    # another's verdict; `Build & Test` fails when any failed (a matrix job's result is the worst of its jobs).
     # The matrix must be exactly 1 to the count the runner plans, and the text-only step runs in shard 1 only (held by
     # `ci-runs-every-standalone-pure-shard-exactly-once` and `the-npm-scripts-and-ci-run-every-standalone-kind-once`).
     # 30 minutes is a hung file, not a slow one.
@@ -297,7 +297,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          # The shard is in the name: uploads from both shards under one name would be refused, or overwrite each other.
+          # The shard is in the name: uploads from several shards under one name would be refused, or overwrite each other.
           name: test-results-standalone-pure-${{ matrix.shard }}-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: error

@@ -114,6 +114,21 @@ export function jobRunning(doc, script) {
 /** The value an env var has where a step runs: the step's own, else its job's. One reading, so no rule looks at the step and forgets the job. */
 export const stepEnv = (job, step, name) => step?.env?.[name] ?? job.env?.[name];
 
+/** The value an env var has where the database job runs `DB_SHARD_SCRIPT`: the one reading of that job's shard env, for every gate that asks. */
+export const dbStepEnv = (job, name) => stepEnv(job, stepsOf(job).find((s) => shellOf(s).includes(DB_SHARD_SCRIPT)), name);
+
+/**
+ * The shard count the database job sets for the runner (`YTHRIL_TEST_DB_SHARDS`), as a whole number, read from the workflow and never
+ * written in a test. A value that is not a whole number (an expression, nothing) throws: a plan asked for "NaN shards" answers nothing.
+ */
+export function ciDbShardCount(ci = loadCi()) {
+  const { job } = jobRunning(ci, DB_SHARD_SCRIPT);
+  const raw = dbStepEnv(job, 'YTHRIL_TEST_DB_SHARDS');
+  const count = Number(raw);
+  if (!Number.isInteger(count)) throw new Error(`the database job sets YTHRIL_TEST_DB_SHARDS to ${JSON.stringify(raw)}, not a whole number`);
+  return count;
+}
+
 /**
  * `[{ id, name, job }]` of the jobs whose display name is the one the ruleset requires (`MERGE_GATE_NAME`). The one reading
  * of "which job is the merge gate": every caller answers its own question about the result (none, exactly one, more than

@@ -180,7 +180,9 @@ the plan (`dbFilesThisProcessRuns` in `testing/_shared/db-shard-plan.mjs`) again
 non-zero: it never falls back to every file or to none. Each job uploads `test-results-standalone-db-<i>-<attempt>`, and its
 results files are named by shard and unit (`dbBatchLabel`), so the merged download holds every shard's. You can run one the
 same way against your own MongoDB. `ci-runs-every-db-shard-exactly-once` holds that the matrix is exactly the plan's indices
-(every database-backed file runs once) and `a-db-runner-runs-one-shard-of-n` holds the runner's side.
+(every database-backed file runs once) and `a-db-runner-runs-one-shard-of-n` holds the runner's side. Every standalone shard is planned inside a time
+budget of recorded seconds (1 876 s a database shard, 725 s a pure shard; `a-planned-shard-stays-inside-its-time-budget`): when a new file tips a shard
+over, add a shard or cut better, and regenerate the committed tables with `node testing/_init/record-shard-seconds.mjs <file-times-all.json>`, never raise a budget.
 
 To print how many files each kind holds, and how many files a stack suite selects:
 

@@ -31,20 +31,20 @@ import { join } from 'node:path';
 import { splitStandalone, pureShardFiles, PURE_SHARDS, loadPureFileSeconds } from '../_shared/standalone-split.mjs';
 import { planDbShards, loadDbFileSeconds, DB_SHARDS_MAX } from '../_shared/db-shard-plan.mjs';
 import { shardsOverBudget, plannedShardSeconds, DB_SHARD_BUDGET_S, PURE_SHARD_BUDGET_S } from '../_shared/shard-budget.mjs';
-import { textOnlyFiles } from '../_shared/text-only-test.mjs';
-import { loadCi, jobRunning, stepsOf, shellOf, stepEnv, DB_SHARD_SCRIPT } from '../_shared/ci-workflow.mjs';
+import { shardTableFiles } from '../_shared/shard-table-files.mjs';
 import * as ciWorkflow from '../_shared/ci-workflow.mjs';
+import { secondsTableProblems } from './_ci-shard-matrix.mjs';
 import { REPO_ROOT } from './_sources.mjs';
 
 const split = splitStandalone({ root: REPO_ROOT });
-const path = (f) => `testing/standalone/${f}`;
 
-/** The shard count CI's database job sets for the runner, read from the workflow and never written here. */
+/** What to do when a table is wrong, stale or missing; named in every message that refuses one. */
+const REMEDY = 'regenerate the tables from a recorded run: `node testing/_init/record-shard-seconds.mjs <file-times-all.json>` (the snapshot is `test-results/file-times-all.json`, written by `node scripts/test-times.mjs --preflight-costs`)';
+
+/** The shard count CI's database job sets for the runner, read from the workflow (`ci-workflow.mjs`) and never written here. */
 function ciDbShardCount() {
-  const ci = loadCi();
-  const { job } = jobRunning(ci, DB_SHARD_SCRIPT);
-  const count = Number(stepEnv(job, stepsOf(job).find((s) => shellOf(s).includes(DB_SHARD_SCRIPT)), 'YTHRIL_TEST_DB_SHARDS'));
-  assert.ok(Number.isInteger(count) && count > 1 && count <= DB_SHARDS_MAX, `CI's database job sets ${count} shards`);
+  const count = ciWorkflow.ciDbShardCount();
+  assert.ok(count > 1 && count <= DB_SHARDS_MAX, `CI's database job sets ${count} shards`);
   return count;
 }
 
@@ -74,7 +74,7 @@ describe('the budget check asks the modules that already answer (Q-977)', () => 
   const self = readFileSync(new URL(import.meta.url), 'utf8');
   it('reads the workflow\'s database shard count from ci-workflow.mjs, which the database gate reads too', () => {
     assert.equal(typeof ciWorkflow.ciDbShardCount, 'function', 'ci-workflow.mjs exports no ciDbShardCount');
-    assert.equal(ciWorkflow.ciDbShardCount(), ciDbShardCount());
+    assert.ok(Number.isInteger(ciWorkflow.ciDbShardCount()));
   });
   it('takes the pure kind from shardTableFiles and the table check from secondsTableProblems, rebuilding neither', () => {
     assert.doesNotMatch(self, new RegExp('offlinePure' + '\\.map'), 'the pure kind is rebuilt here, not read from shardTableFiles');
@@ -88,15 +88,15 @@ describe('the budget check asks the modules that already answer (Q-977)', () => 
 
 describe('the committed tables of recorded seconds', () => {
   it('the database table names only database files that exist, at least half of them, and carries a median for a file it does not name', () => {
-    const table = JSON.parse(readFileSync(join(REPO_ROOT, 'testing/_shared/db-file-seconds.json'), 'utf8'));
+    const db = JSON.parse(readFileSync(join(REPO_ROOT, 'testing/_shared/db-file-seconds.json'), 'utf8'));
     const names = new Set(split.offlineDb);
-    assert.deepEqual(Object.keys(table.seconds).filter((f) => !names.has(f)), [], 'db-file-seconds.json names files that are not database-backed standalone files: regenerate it with testing/_init/record-shard-seconds.mjs');
-    assert.ok(Object.keys(table.seconds).length >= names.size / 2, `only ${Object.keys(table.seconds).length} of ${names.size} database files have a recorded time`);
-    assert.ok(table.median > 0, 'the database table has no median for a file it does not name');
+    assert.deepEqual(secondsTableProblems(db, names, 'the database kind'), [], `db-file-seconds.json is wrong: ${REMEDY}`);
+    assert.ok(Object.keys(db.seconds).length >= names.size / 2, `only ${Object.keys(db.seconds).length} of ${names.size} database files have a recorded time: ${REMEDY}`);
+    assert.ok(db.median > 0, `the database table has no median for a file it does not name: ${REMEDY}`);
   });
   it('the pure table carries what the text-only files add to the first shard', () => {
-    assert.ok(loadPureFileSeconds().median > 0);
-    assert.ok(JSON.parse(readFileSync(join(REPO_ROOT, 'testing/_shared/pure-file-seconds.json'), 'utf8')).textSeconds > 0, 'pure-file-seconds.json has no textSeconds');
+    assert.ok(loadPureFileSeconds().median > 0, `pure-file-seconds.json has no median: ${REMEDY}`);
+    assert.ok(JSON.parse(readFileSync(join(REPO_ROOT, 'testing/_shared/pure-file-seconds.json'), 'utf8')).textSeconds > 0, `pure-file-seconds.json has no textSeconds: ${REMEDY}`);
   });
 });
 
@@ -105,17 +105,17 @@ describe('the plans CI runs stay inside their budgets of recorded seconds', () =
     const count = ciDbShardCount();
     const { seconds, median } = loadDbFileSeconds();
     const shards = planDbShards(split.offlineDb, count);
-    assert.deepEqual(shardsOverBudget(shards, seconds, { budget: DB_SHARD_BUDGET_S, who: `the database plan (${count} shards)`, unnamed: median }), []);
+    assert.deepEqual(shardsOverBudget(shards, seconds, { budget: DB_SHARD_BUDGET_S, who: `the database plan (${count} shards)`, unnamed: median }), [],
+      `add a shard or cut the files better; if the table is stale, ${REMEDY}`);
   });
 
   it(`every pure shard is planned at ${PURE_SHARD_BUDGET_S} s or less, the first with the text-only files that run there`, () => {
     const table = loadPureFileSeconds();
-    const text = new Set(textOnlyFiles(split, { root: REPO_ROOT }));
-    const pure = split.offlinePure.map(path).filter((f) => !text.has(f));
+    const { pureKind: pure } = shardTableFiles({ root: REPO_ROOT });
     const shards = Array.from({ length: PURE_SHARDS }, (_, i) => pureShardFiles(pure, { index: i + 1, count: PURE_SHARDS }));
     const textSeconds = JSON.parse(readFileSync(join(REPO_ROOT, 'testing/_shared/pure-file-seconds.json'), 'utf8')).textSeconds;
     assert.deepEqual(shardsOverBudget(shards, { ...table.seconds, [TEXT_STEP]: textSeconds }, {
       budget: PURE_SHARD_BUDGET_S, who: `the pure plan (${PURE_SHARDS} shards)`, unnamed: table.median, extra: [[TEXT_STEP]],
-    }), []);
+    }), [], `add a shard or cut the files better; if the table is stale, ${REMEDY}`);
   });
 });

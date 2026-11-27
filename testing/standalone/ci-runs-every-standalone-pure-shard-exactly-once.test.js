@@ -7,7 +7,7 @@
  *
  * Once Integration and Sync were split, the job with no services was the one a run waited for: it ended 805 s into Full run
  * 44706741831 while every other job ended by 569 s, nine `node --test` batches one after another (545 s of tests in main run
- * 44694257707). It becomes a matrix of two jobs. A file that silently runs in neither is the failure nobody would see:
+ * 44694257707). It became a matrix of shard jobs (two, then `PURE_SHARDS`). A file that silently runs in no shard is the failure nobody would see:
  *
  *  - **A shard dropped from the matrix, repeated, or past the count**, or a planner that is not a partition: half the pure files
  *    run nowhere, or twice, and every job is green.
@@ -17,16 +17,16 @@
  *  - **Two shards writing one results file or uploading under one name.** The gate merges every `test-results-*` artifact into one
  *    folder, so one shard's evidence would replace the other's and `executed-tests` would read half the files as all of them.
  *  - **A seconds table naming a file that is gone.**
- *  - **A runner that, given a wrong shard, runs everything or nothing** (`3/2`, `1/3`, a shard of the text or db kind).
- *  - **A recorder that loses the pure job**: both shards must be recorded under the standalone suite, and the file-times snapshot
- *    the preflight orders its slowest pure files by must read both shards' records, not only the job name the unsplit job had.
+ *  - **A runner that, given a wrong shard, runs everything or nothing** (`3/2`, `1/4`, a shard of the text or db kind).
+ *  - **A recorder that loses the pure job**: every shard must be recorded under the standalone suite, and the file-times snapshot
+ *    the preflight orders its slowest pure files by must read every shard's records, not only the job name the unsplit job had.
  *
  * ## How it is written
  *
  * The workflow rule is `shardJobProblems` of `_ci-shard-matrix.mjs`, the one copy the Integration and Sync gate calls too. The
- * files the shards must cover are read from git (`trackedTestFiles`, the top level of `testing/standalone`) less the files of the
- * three other kinds, and the shards are the runner's own selection (`pureShardFiles`): a planner that drops or repeats a file
- * leaves the two apart. The functions the change creates are asked for inside the cases, so each case fails on its own rule first.
+ * files the shards must cover are `shardTableFiles`'s pure kind, held to git (`trackedTestFiles`, the top level of `testing/standalone`)
+ * by a sum: with the three other kinds they are every tracked file once. The shards are the runner's own selection (`pureShardFiles`): a planner that drops or repeats a file
+ * leaves the two lists apart. The functions the change creates are asked for inside the cases, so each case fails on its own rule first.
  *
  * Run: node --test testing/standalone/ci-runs-every-standalone-pure-shard-exactly-once.test.js
  */
@@ -37,7 +37,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as splitModule from '../_shared/standalone-split.mjs';
-import { textOnlyFiles } from '../_shared/text-only-test.mjs';
+import { shardTableFiles } from '../_shared/shard-table-files.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 import { loadCi, parseWorkflow, jobRunning, stepsOf, shellOf, expressionOf } from '../_shared/ci-workflow.mjs';
 import { shardJobProblems, artifactNames, artifactPatternOf, downloadPatterns, matrixJobGateProblems, secondsTableProblems } from './_ci-shard-matrix.mjs';
@@ -61,18 +61,18 @@ function pureShardApi() {
 
 let kindsMemo;
 /**
- * The pure files, read from git: every tracked top-level standalone test file less the database, instance and text-only ones, and
- * those three kinds, so a case can say the four together are every tracked file.
+ * The pure files as `shardTableFiles` lists them (the one place the kinds are classified), and the other three kinds, so a case can say the
+ * four together are every tracked top-level standalone test file read from git.
  */
 function kinds() {
   if (kindsMemo) return kindsMemo;
   const split = splitModule.splitStandalone({ root: REPO_ROOT });
   const tracked = trackedTestFiles({ root: REPO_ROOT, dirs: ['testing/standalone'] })
     .filter((f) => f.endsWith('.test.js') && !f.slice('testing/standalone/'.length).includes('/'));
-  const db = new Set(split.offlineDb.map(path));
+  const { pureKind: pure, textKind, dbKind } = shardTableFiles({ root: REPO_ROOT });
+  const db = new Set(dbKind);
   const instance = new Set(split.needsInstance.map(path));
-  const text = new Set(textOnlyFiles(split, { root: REPO_ROOT }));
-  const pure = tracked.filter((f) => !db.has(f) && !instance.has(f) && !text.has(f));
+  const text = new Set(textKind);
   kindsMemo = { split, tracked, db, instance, text, pure };
   return kindsMemo;
 }
