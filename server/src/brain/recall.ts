@@ -270,11 +270,26 @@ export async function recall(
   // as one per knowledge type; it is one per SPACE, which is why the fix lives at the fan-out and not in the
   // per-type search. A 1-wide request fits where an N-wide burst does not.
   // Kept per (text, model) for a while (`query-embedding-cache.ts`): a repeated query costs no model call.
-  const embResult = opts?.embedded ?? await timePhase('embed', () => embedQuery(query));
-
   const activeTypes: RecallKnowledgeType[] = (types && types.length > 0)
     ? types
     : [...RECORD_TYPES];
+
+  // With a reranker configured, cast a WIDER net first. A cross-encoder can only re-order what the
+  // vector search already found, so reranking exactly the results you would have returned anyway buys
+  // nothing — the over-fetch is the whole mechanism.
+  const reranking = rerankConfigured() && opts?.rerank !== false;
+  // Bounded absolutely as well as by `topK`. The over-fetch IS the reranking mechanism, so the multiplier
+  // stays — but `topK` has no ceiling of its own since `P-34`, and a per-type fetch that scales without
+  // one is how an oversized request becomes an oversized query rather than a slow answer.
+  const perTypeK = perTypeFetch(topK, reranking ? candidateMultiplier() : 1.5);
+
+  // The text (lexical) queries need the query text and the recall's own predicate and nothing the vector side finds, so they are sent NOW
+  // and the store runs them while the query is embedded and the vector searches and the fresh scan run (bundle-378, Q-976 S3): the text
+  // search was the largest phase of a recall (about 150 ms of 180 at BSBM 1 000), paid after everything else. Only the fusion below
+  // waits for them. `lexicalSearch` never rejects, so a recall that fails before the fusion leaves nothing unhandled.
+  const lexicalAsked = hybridSearchEnabled() ? askLexical(spaceId, query, activeTypes, perTypeK, tags, filter) : null;
+
+  const embResult = opts?.embedded ?? await timePhase('embed', () => embedQuery(query));
 
   /*
    * WHICH PATH the filter took, observed across every collection this call searches.
@@ -309,16 +324,7 @@ export async function recall(
     }
   }
 
-  // Phase 2: run the global unrestricted search for all active types.
-  //
-  // With a reranker configured, cast a WIDER net first. A cross-encoder can only re-order what the
-  // vector search already found, so reranking exactly the results you would have returned anyway buys
-  // nothing — the over-fetch is the whole mechanism.
-  const reranking = rerankConfigured() && opts?.rerank !== false;
-  // Bounded absolutely as well as by `topK`. The over-fetch IS the reranking mechanism, so the multiplier
-  // stays — but `topK` has no ceiling of its own since `P-34`, and a per-type fetch that scales without
-  // one is how an oversized request becomes an oversized query rather than a slow answer.
-  const perTypeK = perTypeFetch(topK, reranking ? candidateMultiplier() : 1.5);
+  // Phase 2: run the global unrestricted search for all active types, `perTypeK` each (set above, beside the text queries).
   const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags, filter, pathObs, budget));
   const perTypeResults = await timePhase('search', () => settleSearches(searches, noteDegraded));
   const allResults = perTypeResults.flat();
@@ -361,8 +367,8 @@ export async function recall(
   const endLexical = beginPhase('lexical');
   let fused: boolean;
   try {
-    fused = hybridSearchEnabled()
-      && await applyLexicalFusion(spaceId, query, embResult.vector, activeTypes, perTypeK, allResults, guaranteed, tags, filter,
+    fused = lexicalAsked !== null
+      && await applyLexicalFusion(spaceId, lexicalAsked, embResult.vector, activeTypes, perTypeK, allResults, guaranteed, tags, filter,
         opts?.observeLexical);
   } finally { endLexical(); }
 
@@ -397,6 +403,23 @@ export async function recall(
 }
 
 /**
+ * Send the text (lexical) query of each active type now, and answer the per-type rankings when they arrive, timed as `text`.
+ *
+ * THE predicate `recallByType` applies, from the one function that builds it, so the two channels agree on eligibility. It was assembled
+ * a second time once by spreading the filter over the tag clause, so a filter naming `tags` replaced the caller's `tags` in this channel
+ * even after the vector path stopped doing so. Per type, for the reason given at the fresh-write scan: the predicate carries the file
+ * clause, and the type is what selects it. Never rejects: `lexicalSearch` answers `[]` for every failure.
+ */
+function askLexical(
+  spaceId: string, query: string, activeTypes: readonly RecallKnowledgeType[], perTypeK: number, tags?: string[], filter?: RecallFilter,
+): Promise<LexicalHit[][]> {
+  const limit = perTypeK * LEXICAL_LIMIT_MULTIPLIER;
+  return timePhase('text', () => Promise.all(
+    activeTypes.map(t => lexicalSearch(spaceId, t, query, limit, recallPredicate(tags, filter, t) ?? {})),
+  ));
+}
+
+/**
  * Fuse a lexical ranking into the candidate pool's order, in place.
  *
  * **It reorders; it does not introduce.** Only records the vector search already returned are affected.
@@ -415,7 +438,8 @@ export async function recall(
  */
 async function applyLexicalFusion(
   spaceId: string,
-  query: string,
+  /** The per-type text rankings `askLexical` was asked for when the recall began, in `activeTypes` order. */
+  lexicalAsked: Promise<LexicalHit[][]>,
   queryVector: number[],
   activeTypes: RecallKnowledgeType[],
   perTypeK: number,
@@ -428,16 +452,7 @@ async function applyLexicalFusion(
   observeLexical?: (lexicalPerType: string[][]) => void,
 ): Promise<boolean> {
   if (pool.length === 0) return false;
-
-  // THE predicate `recallByType` applies, from the one function that builds it, so the two channels agree on
-  // eligibility. It was assembled here a second time by spreading the filter over the tag clause, so a filter
-  // naming `tags` replaced the caller's `tags` in this channel even after the vector path stopped doing so.
-  // Per type, for the reason given at the fresh-write scan: the predicate carries the file clause, and the type is
-  // what selects it.
-  const limit = perTypeK * LEXICAL_LIMIT_MULTIPLIER;
-  const perType = await Promise.all(
-    activeTypes.map(t => lexicalSearch(spaceId, t, query, limit, recallPredicate(tags, filter, t) ?? {})),
-  );
+  const perType = await lexicalAsked;
   // Each type stays in its own order (`lexicalSearch` sorts by its collection's text score): the hits of different
   // types are never compared by raw score, whose scale is each collection's own (`Q-159`, see `stampFusion`).
   const lexical = perType.flat();
@@ -455,9 +470,9 @@ async function applyLexicalFusion(
     const type = activeTypes[i]!;
     const hits = perType[i] ?? [];
     if (hits.length === 0) continue;
-    const introduced = await introduceLexicalOnly(
+    const introduced = await timePhase('introduce', () => introduceLexicalOnly(
       spaceId, type, hits, queryVector, inPool, recallPredicate(tags, filter, type) ?? {}, perTypeK,
-    );
+    ));
     for (const rec of introduced) {
       pool.push(rec);
       inPool.set(rec._id, rec);

@@ -57,6 +57,8 @@ import { takeBackEdgesToGoneEntities, takeBackLinksToGoneEntities } from '../gon
 import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
 import { mapLimit } from '../../util/map-limit.js';
 import { EndpointRemoved, ENDPOINT_REMOVED } from '../../util/errors.js';
+import { timePhase } from '../../http/phase-timer.js';
+import { withSettlesJoined } from '../../util/position-clock.js';
 import type { AuthorRef, EdgeDoc, LinkDoc, TombstoneDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
@@ -71,6 +73,15 @@ import { admitSpaceWrite, admitSpaceWriteUnit, assertSpaceTakesWrites, isSpaceNo
  */
 export async function commitPlans(
   spaceId: string, plans: readonly WritePlan[], opts: { somethingLanded?: boolean } = {},
+): Promise<CommitOutcome[]> {
+  // The triple index follows each stage's write while the work after it (link rows, embedding jobs) runs, and the commit returns only once
+  // both are done (`withSettlesJoined`, bundle-378 Q-976 S3): every record door and kind saves through here.
+  return withSettlesJoined(() => commitInOrder(spaceId, plans, opts));
+}
+
+/** {@link commitPlans}' stages, in `COMMIT_ORDER`. */
+async function commitInOrder(
+  spaceId: string, plans: readonly WritePlan[], opts: { somethingLanded?: boolean },
 ): Promise<CommitOutcome[]> {
   for (const p of plans) {
     if (p.spaceId !== spaceId) {
@@ -111,7 +122,7 @@ export async function commitPlans(
     } finally {
       leaveWriteUnit();
     }
-    landed.push(...await afterStage(spaceId, plans, stageLanded, outcomes));
+    landed.push(...await timePhase('after', () => afterStage(spaceId, plans, stageLanded, outcomes)));
   }
 
   await runAfterCommit(spaceId, { dupeRules: landed.map(i => plans[i]!).filter(p => p.dupeRules) });
@@ -150,7 +161,7 @@ export async function writeStage(
   if (deleted) throw new Error(`writeStage: the ${kind} '${deleted.id}' is planned as a delete, which only a write group's removal writes`);
   const coll = col<{ _id: string; seq?: number }>(spaceCollection(spaceId, PLAN_KINDS[kind].collection));
   // Versions first, then the position block and the write under its hold (`withLandingStamp`): a version needs no hold, a position does.
-  const rows = await versionsForRows(spaceId, plans.map(p => p.id), { parts: [PLAN_KINDS[kind].collection], ...(session ? { session } : {}) });
+  const rows = await timePhase('version', () => versionsForRows(spaceId, plans.map(p => p.id), { parts: [PLAN_KINDS[kind].collection], ...(session ? { session } : {}) }));
   const sent: number[] = [];
   const stamps: VersionAllocation[] = [];
   rows.forEach((row, k) => { if (!('refused' in row)) { sent.push(k); stamps.push(row); } });
@@ -160,8 +171,8 @@ export async function writeStage(
   if (sent.length > 0) {
     await withLandingStamp(spaceId, stamps.map(s => localRow(s.version)), async (patches) => {
       try {
-        const res = await coll.bulkWrite(asBulk(sent.map((i, k) => opFor(plans[i]!, stamps[k]!, patches[k]!))),
-          { ordered: false, ...(session ? { session } : {}) });
+        const res = await timePhase('write', () => coll.bulkWrite(asBulk(sent.map((i, k) => opFor(plans[i]!, stamps[k]!, patches[k]!))),
+          { ordered: false, ...(session ? { session } : {}) }));
         matched = res.matchedCount;
         inserted = res.insertedCount;
       } catch (error) {

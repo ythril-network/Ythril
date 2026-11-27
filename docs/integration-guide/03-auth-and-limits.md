@@ -230,7 +230,9 @@ inside it and may overlap. The phases a door names:
 | SPARQL query (REST and MCP `sparql_query`) | `parse`, `members`, `schema` (only when the schema checks were computed, not read from their cache), `verdict`, `plan`, `run`, `render`; `scope` on a view |
 | SPARQL Update | `members`, `schema`, `plan` and `run` as the query names them |
 | RDF export, Linked Data, a SPARQL view's CONSTRUCT | `members`, `schema`, `verdict`; `scope` on a view |
-| Recall, filter, traverse, record reads and writes, files, sync | `scope` on a view |
+| Recall (REST and MCP `recall`) | `embed`, `search`, `fresh`, `text` (the text search, run beside `embed`, `search` and `fresh`), `lexical` (its fusion, with `introduce`), `rerank`, `hydrate`; `scope` on a view |
+| Record writes (every kind, REST and MCP) | `links`, `read`, `decide`, `version`, `write`, `index` (the triple index taking the write), `after` (link rows and the embedding job, run beside `index`) |
+| Filter, traverse, record reads, files, sync | `scope` on a view |
 
 On MCP the same figures ride in each tool result's `_meta` under `ythril/server-timing`, as `{ "<phase>": { "dur": <ms>, "count": <n> } }`:
 an MCP answer is a stream whose HTTP headers leave before the tool runs, so its header names only `auth` and `rate`. A JSON-RPC error

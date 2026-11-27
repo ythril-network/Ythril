@@ -277,8 +277,14 @@ describe('introduction is gated on evidence', () => {
   it('the whole path stays behind the hybrid kill switch', () => {
     // Every call of the fusion step is guarded by the switch, in either spelling of the guard.
     const calls = [...src.matchAll(/applyLexicalFusion\(/g)].length - 1; // minus the declaration
-    const guarded = [...src.matchAll(/hybridSearchEnabled\(\)\s*(?:&&\s*await\s+|\)\s*\{\s*await\s+)applyLexicalFusion\(/g)].length;
+    // Since bundle-378 S3 the text queries are sent when the recall begins (`askLexical`), so the switch guards that send, and the fusion
+    // runs only on what was sent: `lexicalAsked !== null && await applyLexicalFusion(lexicalAsked, ...)`.
+    const guarded = [...src.matchAll(/hybridSearchEnabled\(\)\s*(?:&&\s*await\s+|\)\s*\{\s*await\s+)applyLexicalFusion\(/g)].length
+      + [...src.matchAll(/lexicalAsked\s*!==\s*null\s*&&\s*await\s+applyLexicalFusion\(/g)].length;
     assert.ok(calls >= 1, 'the fusion step is never called — re-point this gate');
     assert.equal(guarded, calls, 'a fusion call runs without the hybrid kill switch');
+    const sends = [...src.matchAll(/askLexical\(/g)].length - 1; // minus the declaration
+    const sendsGuarded = [...src.matchAll(/hybridSearchEnabled\(\)\s*\?\s*askLexical\(/g)].length;
+    assert.equal(sendsGuarded, sends, 'a text query is sent without the hybrid kill switch');
   });
 });

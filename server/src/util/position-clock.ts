@@ -40,7 +40,8 @@
  *    (`positions_clock_unusable`) instead of handing out a position a peer's carried mark already covers.
  *
  *  - **A settled write runs the stream's hook** ({@link onSettled}) before it returns (the records stream's triple index, bundle-273), and a stamp
- *    inside a floor of its space leaves it to the floor, whose transaction commits later. Its failure never fails the write.
+ *    inside a floor of its space leaves it to the floor, whose transaction commits later. Its failure never fails the write. Inside a
+ *    {@link withSettlesJoined} scope the hook runs while the scope goes on, and the scope returns only after it ended.
  *
  * `last` is per space and per process. Tests set the wall clock through {@link setPositionClockSourceForTest}.
  */
@@ -50,6 +51,7 @@ import { log, peerText } from './log.js';
 import { warnOnce, SAY_ONCE_WINDOW_MS } from './warn-once.js';
 import { MAX_SYNC_SEQ } from './seq.js';
 import { PositionClockUnusable, PositionsSeedUnavailable } from './errors.js';
+import { timePhase } from '../http/phase-timer.js';
 
 /** The unit a stream counts in: microseconds are a number (the records), milliseconds an ISO instant (the file tombstones). */
 export type PositionUnit = 'microseconds' | 'milliseconds';
@@ -194,7 +196,7 @@ async function afterSettled<P extends number | string>(stream: PositionStream<P>
   if (hook === undefined) return;
   if (floorsHeld.getStore()?.some(f => f.stream === (stream as PositionStream) && f.spaceId === spaceId)) return;
   try {
-    await hook.after(spaceId, () => settledPositionCap(stream, spaceId));
+    await timePhase('index', () => hook.after(spaceId, () => settledPositionCap(stream, spaceId)));
   } catch (err) {
     settleFailures(`${stream.name}\0${spaceId}`, () => log.warn(
       `${peerText(stream.name)}: the work after a settled write of space '${peerText(spaceId)}' failed; the write stands and the next one runs it again: ${peerText(String(err))}`));
@@ -276,8 +278,37 @@ export async function withPositionHeld<P extends number | string, T>(
   const holds = stream.holds;
   const hold = holds.enter(spaceId, stream.encode(first), holder);
   const result = await heldWhile(holds, spaceId, hold, () => write(stream.encode(first)));
-  await afterSettled(stream, spaceId);
+  const settling = afterSettled(stream, spaceId);
+  const owed = settlesOwed.getStore();
+  if (owed) owed.push(settling); else await settling;
   return result;
+}
+
+/** The settled hooks a {@link withSettlesJoined} scope started and has not yet waited for. */
+const settlesOwed = new AsyncLocalStorage<Promise<void>[]>();
+
+/**
+ * Run `fn`, letting the settled hook of each write it holds ({@link withPositionHeld}) run while `fn` goes on, and return only once every
+ * one of those hooks has ended, whether `fn` returned or threw (bundle-378, Q-976 S3).
+ *
+ * ## What it is for
+ *
+ * The records stream's hook is the triple index's follower, the largest part of a record save (about 84 ms of 130 at BSBM 1 000). The work a
+ * commit owes after its write (the link rows, the embedding job) needs the landed write and not the follower, so a commit
+ * (`brain/write-plan/commit.ts`) runs it inside this scope and the two overlap.
+ *
+ * ## What it prevents
+ *
+ * **An answer before the index has the write.** The wait is in the `finally` of the scope itself, so no caller can return from the scope with
+ * a hook still running; a hook never rejects ({@link afterSettled} logs its own failure), so the wait cannot replace `fn`'s own outcome.
+ */
+export async function withSettlesJoined<T>(fn: () => Promise<T>): Promise<T> {
+  const owed: Promise<void>[] = [];
+  try {
+    return await settlesOwed.run(owed, fn);
+  } finally {
+    await Promise.all(owed);
+  }
 }
 
 /**
