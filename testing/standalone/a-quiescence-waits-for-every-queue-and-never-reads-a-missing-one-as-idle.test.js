@@ -20,6 +20,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { untilQuiescentOf, busyQueues, serverQueues, backgroundJobsInSource, COVERED_BY_QUEUES, UNAWAITED_BACKGROUND, QUEUE_NAMES } from './_quiescence.mjs';
 
+/** The default bound before main CI run 46071083951 showed it too short for one space wipe on a loaded runner. */
+const OLD_DEFAULT_TURNS = 4000;
+/** A wait that never ends must give up well inside a test's own timeout: this many seconds at most, on a runner as slow as a loaded CI one. */
+const MOST_SECONDS_TO_GIVE_UP = 40;
+
 /** A queue that holds `n` items and loses one per turn it is read after `start()` — the work that keeps sending after the call returned. */
 function drainingQueue(n) {
   let left = n;
@@ -60,6 +65,21 @@ describe('quiescence waits for every queue, then holds', () => {
     assert.equal(ended, false, 'it returned while the sync-cycle queue was still busy');
     await waiting;
     assert.equal(busy.left(), 0, 'it returned before the busy queue drained');
+  });
+
+  it('a slow drain that keeps progressing is waited for: a queue busy for longer than the old bound, then idle, does not throw (main CI 46071083951, finding 15)', async () => {
+    // The wipe of a closed network's space took 1.36 s on a loaded runner and the wait gave up after 1.2 s. The queue below is read busy for
+    // twice the turns the old default allowed, then idle: a drain that is slow, not a drain that is stuck.
+    const busy = drainingQueue(OLD_DEFAULT_TURNS * 2);
+    await untilQuiescentOf({ notify: () => 0, cycles: () => 0, runner: busy.read });
+    assert.equal(busy.left(), 0, 'it returned before the slow queue drained');
+  });
+
+  it('a queue that never drains still throws at the default bound, naming it, in seconds and not minutes', async () => {
+    const started = Date.now();
+    await assert.rejects(untilQuiescentOf({ notify: () => 0, cycles: () => 1, runner: () => 0 }), /never went quiescent[\s\S]*cycles/);
+    const seconds = (Date.now() - started) / 1000;
+    assert.ok(seconds < MOST_SECONDS_TO_GIVE_UP, `it took ${seconds} s to give up on a queue that never drains: a stuck instance must fail fast enough for the test's own timeout to name it`);
   });
 
   it('throws, naming the queue, when the instance never goes idle — it does not return', async () => {
