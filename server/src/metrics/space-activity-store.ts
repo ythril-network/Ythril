@@ -173,7 +173,32 @@ export async function purgeSpaceActivity(spaceId: string): Promise<number> {
 export async function undoOfActivityMove(fromId: string, toId: string): Promise<() => Promise<void>> {
   const c = col<ActivityDoc>(ACTIVITY_COLLECTION);
   const rows = await c.find(asFilter<ActivityDoc>({ space: fromId }), { projection: { _id: 1, bucket: 1 } }).toArray();
-  return snapshotKeyedMove(c, rows.map(r => [r._id, activityDocId(toId, r.bucket)] as const));
+  return snapshotKeyedMove(c, rows.map(r => [r._id, activityDocId(toId, r.bucket)] as const), undefined, addedUsage);
+}
+
+/**
+ * What the put-back writes at a bucket's old key when a flush counted calls there while the rename ran (Q-978): the bucket as it was, plus what the flush
+ * added. A flush upserts `$inc`s on `<oldId>:<hour>`, and after the move deleted the old row that upsert made a new row holding only what was counted since,
+ * so `current` is the added count and `before` the bucket read before the move. (A bucket the move had not deleted yet, that was also flushed to, counts its
+ * old calls twice: the one case this cannot tell apart, and a usage gauge that reads a little high there is the lesser loss.)
+ */
+function addedUsage(current: ActivityDoc, before: ActivityDoc): ActivityDoc {
+  const calls: ActivityDoc['calls'] = {};
+  for (const cls of new Set([...Object.keys(before.calls ?? {}), ...Object.keys(current.calls ?? {})]) as Set<CallClass>) {
+    const a = before.calls?.[cls];
+    const b = current.calls?.[cls];
+    calls[cls] = {
+      n: (a?.n ?? 0) + (b?.n ?? 0),
+      answered: (a?.answered ?? 0) + (b?.answered ?? 0),
+      sumTopScore: (a?.sumTopScore ?? 0) + (b?.sumTopScore ?? 0),
+      sumMs: (a?.sumMs ?? 0) + (b?.sumMs ?? 0),
+      // A maximum is not additive (see `flushSpaceActivity`).
+      maxMs: Math.max(a?.maxMs ?? 0, b?.maxMs ?? 0),
+      over1s: (a?.over1s ?? 0) + (b?.over1s ?? 0),
+    };
+  }
+  const lastUsedAt = current.lastUsedAt && before.lastUsedAt && current.lastUsedAt > before.lastUsedAt ? current.lastUsedAt : (before.lastUsedAt ?? current.lastUsedAt);
+  return { ...before, calls, lastUsedAt };
 }
 
 /**

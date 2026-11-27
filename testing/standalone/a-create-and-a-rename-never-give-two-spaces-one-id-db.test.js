@@ -30,6 +30,7 @@ import { randomUUID } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 for (const k of ['SKIP_GLOBAL_RATE_LIMIT', 'SKIP_AUTH_RATE_LIMIT', 'SKIP_SYNC_RATE_LIMIT']) process.env[k] = 'true';
@@ -37,7 +38,6 @@ process.env['YTHRIL_RATE_LIMIT_PER_MINUTE'] ??= '1000000';
 
 const CASES = ['a', 'b', 'c', 'd', 'e'];
 const idOf = (c) => `cr-${c}`;
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 let door, base, adminKey, server, getConfig, mutateConfig, db, collProto;
 
@@ -84,10 +84,7 @@ function holdRenameOf(prefix) {
   return { release: () => release(), restore: () => { collProto.rename = real; }, reached: () => reached };
 }
 
-async function until(what, fn) {
-  for (let i = 0; i < 100; i++) { if (fn()) return; await sleep(50); }
-  assert.fail(`never reached: ${what}`);
-}
+const until = (what, fn) => waitFor(fn, 10_000, 50, `never reached: ${what}`);
 
 describe('a create and a rename never give two spaces one id', { skip }, () => {
   before(async () => {

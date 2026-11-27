@@ -302,6 +302,12 @@ export async function ensureVectorSearchIndex(
       definition,
     }));
   } catch (err) {
+    // A collection that is not there has no index to build, and nothing to be unavailable: its space's collections moved away while this
+    // ran (a rename moves them under the new id, a refused one moves them back). Said at debug; the reconcile that follows reads what stands (Q-978).
+    if ((await db.listCollections({ name: coll.collectionName }, { nameOnly: true }).toArray().catch(() => [{}])).length === 0) {
+      log.debug(`Vector search index ${peerText(indexName)} was not created: the collection no longer stands (${peerText(err)})`);
+      return 'failed';
+    }
     log.warn(`Failed to create vector search index ${peerText(indexName)}: ${peerText(err)}. Semantic recall will be unavailable.`);
     return 'failed';
   }

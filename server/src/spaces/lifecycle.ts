@@ -26,6 +26,7 @@ import {
   type SpaceActRequest, type SpaceRoundSettled, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from './space-act-runner.js';
 import { moveSpaceData, applySpaceRenameToConfig, isRenameTarget } from './rename.js';
+import { withIdClaimedForCreate } from './space-id-claim.js';
 import { configuredSpaceIds } from './space-lookup.js';
 import { assertNotRetiredSpaceId, unknownSpaceSentence } from './unknown-space.js';
 import { dropSpaceFromViews } from '../config/views.js';
@@ -496,16 +497,7 @@ export interface SpaceCreator { tokenId: string | null }
  * Create a new space and persist to config. The creating token is made admin of it in the same config write
  * (`grantCreatorAdmin`), and the grant is audited — owner, 2026-09-28: *"Creator of a space gets space admin."*
  */
-export async function createSpace(opts: {
-  id: string;
-  label: string;
-  folders?: string[];
-  maxGiB?: number;
-  /** The initial meta, parsed (`Q-216`): a space is stored with the schema it was created with, so it is a store like the others. */
-  meta?: ParsedSpaceMeta;
-  /** Face descriptor width for this space. Create-only — see `SpaceConfig.faceDescriptorDims`. */
-  faceDescriptorDims?: number;
-}, creator: SpaceCreator): Promise<SpaceConfig> {
+export async function createSpace(opts: CreateSpaceOptions, creator: SpaceCreator): Promise<SpaceConfig> {
   const cfg = getConfig();
   // A pre-6.0 proxy's id stays reserved until an instance admin purges what it still holds: a new space under it would meet that data.
   assertNotRetiredSpaceId(opts.id);
@@ -521,6 +513,27 @@ export async function createSpace(opts: {
   if (isRenameTarget(getConfig(), opts.id)) {
     throw new Error(`Space '${opts.id}' already exists as the new name of a rename that is owed or running; create it once that rename has ended`);
   }
+  // The id is held from here, in the same step as the checks above (no await between them), until the space is configured or the create fails:
+  // a rename to it, or a second create of it, is refused meanwhile (`space-id-claim.ts`), so the config never holds the id twice.
+  return withIdClaimedForCreate(
+    opts.id, () => new Error(`Space '${opts.id}' already exists: it is being created right now`), () => createClaimedSpace(opts, creator),
+  );
+}
+
+/** What `createSpace` is asked for. */
+export interface CreateSpaceOptions {
+  id: string;
+  label: string;
+  folders?: string[];
+  maxGiB?: number;
+  /** The initial meta, parsed (`Q-216`): a space is stored with the schema it was created with, so it is a store like the others. */
+  meta?: ParsedSpaceMeta;
+  /** Face descriptor width for this space. Create-only — see `SpaceConfig.faceDescriptorDims`. */
+  faceDescriptorDims?: number;
+}
+
+/** The create after its checks, run holding the claim on its id. */
+async function createClaimedSpace(opts: CreateSpaceOptions, creator: SpaceCreator): Promise<SpaceConfig> {
   const space: SpaceConfig = {
     id: opts.id,
     label: opts.label,
@@ -563,6 +576,14 @@ export async function createSpace(opts: {
   // record looked up before the await. The dangerous version is holding a reference INTO the config
   // (one entry out of `cfg.spaces`) across an await and then mutating it; see `renameSpace` and
   // `reconcilePendingSpaceOp`, which both re-resolve by id inside the write for that reason.
+  //
+  // Asked again here, after every await: the claim keeps a rename and a second create away, but whatever else configured the id meanwhile
+  // (a path that does not know the claim) must not leave the config holding it twice.
+  const cfg = getConfig();
+  assertNotRetiredSpaceId(opts.id, cfg);
+  if (cfg.spaces.some(s => s.id === opts.id) || isRenameTarget(cfg, opts.id)) {
+    throw new Error(`Space '${opts.id}' already exists`);
+  }
   cfg.spaces.push(space);
   const grant = grantCreatorAdmin(cfg, creator.tokenId, opts.id);
   saveConfig(cfg);
