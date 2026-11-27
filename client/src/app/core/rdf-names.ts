@@ -28,6 +28,14 @@ export interface RdfSetting {
   baseEpoch?: number;
 }
 
+/**
+ * `meta.rdf` on the client's `SpaceMeta`, declared here with the module that reads it (Q-748): off, or on with the base every address starts
+ * with; `rebase: true` is the write-only flag of a deliberate base change.
+ */
+declare module './api.types' {
+  interface SpaceMeta { rdf?: RdfSetting & { rebase?: true } }
+}
+
 /** A base conflict as `GET /api/networks` answers it per space (`NetworkConfig.rdfBaseConflicts`, the schema package's `RdfBaseConflict`). */
 export interface RdfBaseConflict {
   held: { base: string; vocab?: string; epoch: number };

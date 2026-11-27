@@ -246,8 +246,6 @@ export interface SpaceMeta {
   whenDuePasses?: 'overdue' | 'nothing';
   /** Space-wide CEL rules, by name (F-46): each applies to the kinds it names, or to every kind. Replaced WHOLE by a write that sends the map. */
   rules?: Record<string, SpaceSchemaRule>;
-  /** The space's RDF names (Q-748): off, or on with the base every address starts with. The base moves only by a deliberate rebase. */
-  rdf?: import('./rdf-names').RdfSetting & { rebase?: true };
   updatedAt?: string;
 }
 

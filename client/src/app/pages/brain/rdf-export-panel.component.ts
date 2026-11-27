@@ -23,7 +23,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import type { Space } from '../../core/api.types';
 import { RdfExportRuns, type RdfExportRun } from '../../core/rdf-export-runs.service';
-import { RDF_EDGE_DETAILS, RDF_SPACE_FORMATS, RDF_VIEW_FORMATS, rdfIsOn, type RdfEdgeDetails, type RdfRecordFormat } from '../../core/rdf-names';
+import { RDF_SPACE_FORMATS, RDF_VIEW_FORMATS, rdfIsOn, type RdfEdgeDetails, type RdfRecordFormat } from '../../core/rdf-names';
 import { rdfRefusalText } from '../../core/rdf-refusal';
 
 /** Megabytes with one decimal, as the panel says a size. */
@@ -94,7 +94,8 @@ const mb = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(1);
         </select></div>
       <div class="field"><label for="rdf-export-edges">{{ 'rdf.export.edges' | transloco }}</label>
         <select id="rdf-export-edges" data-testid="rdf-export-edges" [disabled]="!!run()?.running || chosenFormat() === 'jsonld'" (change)="edgeChoice.set(valueOf($event))">
-          @for (e of edgeKinds; track e) { <option [value]="e" [selected]="e === edges()">{{ 'rdf.export.edge.' + e | transloco }}</option> }
+          <option value="rdf12" [selected]="edges() === 'rdf12'">{{ 'rdf.export.edge.rdf12' | transloco }}</option>
+          <option value="reification" [selected]="edges() === 'reification'">{{ 'rdf.export.edge.reification' | transloco }}</option>
         </select></div>
     </div>
     @if (run()?.running) {
@@ -155,7 +156,6 @@ export class RdfExportPanelComponent {
   /** "Open RDF names" for a space: the host opens its settings on the RDF names card. */
   readonly openNames = output<Space>();
 
-  readonly edgeKinds = RDF_EDGE_DETAILS;
   readonly format = signal<RdfRecordFormat | ''>('');
   readonly edgeChoice = signal<RdfEdgeDetails>('rdf12');
 
