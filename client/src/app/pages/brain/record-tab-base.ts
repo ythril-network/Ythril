@@ -6,7 +6,6 @@ import { RecordListState } from './record-list-state.service';
 import type { ListSort } from '../../core/brain-api.service';
 import { LatestWins } from '../../core/latest-wins';
 import { injectIsView } from '../../core/views.store';
-import { httpErrorReason } from '../../core/http-error';
 import type { WireRow } from '../../core/refusal-text';
 import { splitWriteWarnings } from '../../core/write-warnings';
 import type { DefinitionLanding } from './definition-landing';
@@ -152,7 +151,7 @@ export abstract class RecordTabBase {
         // A server that refuses the definition filter (older: no `sameAs:`) is not a failed list: the landing drops the filter and
         // says so, and the list is read again by its type alone, after this request has finished.
         if (this.landing.refuse(e)) { queueMicrotask(() => this.load()); return; }
-        this.recordList.loadError.set(httpErrorReason(e));
+        this.recordList.failLoad(e);
       },
       // Superseded: the newer request owns the indicator now, so it stays on.
       finally: (superseded) => { if (!superseded) this.recordList.loading.set(false); },
