@@ -187,7 +187,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Spaces:** a space rename the database refused part-way no longer leaves the space split across two names: what it moved is moved back and the space stands whole under its old name, and the same rename can be repeated. A rename whose documents could not be rewritten to the new name is refused instead of finishing with them invisible; if what moved cannot be moved back, the answer or the server log names what stays under the new name.
 - **Audit:** a request to a brain route of a space called `files`, `facts`, `entities`, `edges` or `chrono` was recorded under another route's operation (the records export of such a space left no entry with read logging off); the audit rules read the one path form the server serves.
 - **Brain:** a `$ref:` key in a bulk item's link field is refused saying a key is resolved only at an edge's `from` or `to`: save the record first and pass its id, or connect the records by an edge. `save_bulk` and the guides no longer say a link field takes a key.
 - **RDF:** `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` and `PUT /api/spaces/:id/schema` refuse a type that would give two terms of the space one RDF address (`422 rdf_term_clash`), as `PATCH /api/spaces/:id` and `schema_update` do; they stored it.
@@ -203,6 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spaces:** a search-index readiness check stops within a second when its database connection closes, instead of asking the closed connection for up to a minute.
 - **Spaces:** MCP `space_stats` answers `embedQueue` (`pending`, `processing`, `failed`: records not searchable yet) as REST stats does; the doors that count a space's records read one function and answer one number.
 - **Spaces:** `update_space` refused for a face width the space's stored descriptors rule out answers 409 and `Error: <sentence>` on MCP and `POST /api/update_space`, as `PATCH /api/spaces/:id` does; it read `Error: Error (409): …` with status 400.
+- **Spaces:** a refused space rename moves back what it moved, so the space stays whole; repeat it to finish.
 - **Housekeeping:** a space set aside after a slow answer is checked again once its pause ends, even when its last check found it still building its positions. Before, no background task, the media queue included, checked that space again until a restart.
 - **Media:** a file whose run was cut short by, or met throughout, an unavailable embedder waits without spending an attempt, and no file is started until a probe finds the embedder back; counted by `ythril_media_jobs_handed_back_total` and `ythril_media_embedder_probes_total`.
 - **Media:** a file whose analysis becomes due at the moment the queue is looking is picked up at once. Before, a replaced or retried file could wait up to 30 seconds for the queue's next full look, and an embedding job the same way.
