@@ -177,7 +177,7 @@ describe('a space delete and a search-index call', { skip }, () => {
     let created;
     try {
       const { planSpaceCreate, applySpaceCreate } = await import('../../server/dist/spaces/space-create.js');
-      const plan = planSpaceCreate({ id, label: id });
+      const plan = await planSpaceCreate({ id, label: id });
       assert.equal(plan.ok, true, 'fixture: the create body was refused');
       created = await applySpaceCreate(plan.plan, { tokenId: null });
       assert.equal(created.outcome, 'retry', `a create over a running drop answered ${JSON.stringify(created)}`);

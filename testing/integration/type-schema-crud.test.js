@@ -9,7 +9,7 @@
  *  - 404 for unknown space, unknown knowledge type, unknown type name
  *  - 400 for invalid payload (Zod rejection)
  *  - 400 for invalid knowledgeType
- *  - Max 200 types per knowledge type enforced
+ *  - No count cap: a kind holds as many types as the space's storage allows (the old limit of 200 is gone)
  *
  * Run: node --test testing/integration/type-schema-crud.test.js
  */
@@ -346,11 +346,11 @@ describe('DELETE /api/spaces/:id/meta/typeSchemas/:kt/:typeName', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  Max 200 types per knowledge type limit
+//  No count cap on the types of one kind (bundle-382, Q-981)
 // ═════════════════════════════════════════════════════════════════════════════
-describe('PUT — max 200 types per knowledge type', () => {
+describe('PUT — a kind holds more types than the old limit', () => {
   before(async () => {
-    // Pre-populate 200 entity types via full PATCH
+    // Pre-populate as many entity types as the old limit held, via full PATCH
     const entityTypes = {};
     for (let i = 0; i < 200; i++) {
       entityTypes[`type_${i}`] = {};
@@ -360,11 +360,11 @@ describe('PUT — max 200 types per knowledge type', () => {
 
   after(async () => { await resetMeta(); });
 
-  it('rejects a 201st entity type with 400', async () => {
-    const r = await put(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta/typeSchemas/entity/type_overflow`, {});
-    assert.equal(r.status, 400, `Expected 400 when exceeding 200 types, got ${r.status}: ${JSON.stringify(r.body)}`);
-    assert.ok(r.body?.error?.toLowerCase().includes('200') || r.body?.error?.toLowerCase().includes('max') || r.body?.error?.toLowerCase().includes('limit'),
-      `Error should mention limit: ${JSON.stringify(r.body)}`);
+  it('accepts a type beyond the old limit, and holds it', async () => {
+    const r = await put(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta/typeSchemas/entity/type_beyond`, {});
+    assert.equal(r.status, 200, `A type past the old count limit was refused, got ${r.status}: ${JSON.stringify(r.body)}`);
+    const held = await get(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta/typeSchemas/entity/type_beyond`);
+    assert.equal(held.status, 200, `the accepted type is not held: ${JSON.stringify(held.body)}`);
   });
 
   it('allows updating an existing type (no count increase)', async () => {

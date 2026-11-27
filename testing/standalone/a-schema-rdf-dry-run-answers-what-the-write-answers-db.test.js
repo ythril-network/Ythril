@@ -10,6 +10,8 @@
  * - While an RDF import holds the space, a build and a dry run are both refused 409 `space_being_rdf_imported`.
  * - A space whose schema changed between the door's reading of it and its write is refused 412 `schema_rdf_changed` (the door writes with
  *   the version it read as `ifMatch`), and the change made meanwhile stands.
+ * - A schema the space has no room for (the storage hard limit reached, or past the bound a peer takes a snapshot of) is refused by the dry run
+ *   as by the build: 422 `schema_rdf_refused`, the reason `storage_exceeded` or `schema_too_large` in it, and nothing is stored.
  *
  * Run: node --test testing/standalone/a-schema-rdf-dry-run-answers-what-the-write-answers-db.test.js (server build and the test MongoDB)
  */
@@ -18,6 +20,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { seedActEntry, clearActEntries } from './_space-act-harness.mjs';
 import { openSchemaRdfImportDoors, spaceWith, baseOf, knobs, actModule } from './_schema-rdf-import-doors.mjs';
+import { typesOfSize } from './_schema-near-bound.mjs';
 
 const skip = await mongoSkipReason();
 const YTHRIL = 'https://w3id.org/ythril/ns#';
@@ -28,6 +31,9 @@ const SAME = { rest: 'srdfdrysamer', mcp: 'srdfdrysamem' };
 const HOLD = 'srdfdryhold';
 const CHANGED = { rest: 'srdfdrychr', mcp: 'srdfdrychm' };
 const CLASH_SRC = 'srdfdryclsrc';
+/** Spaces the room check refuses: one at the storage limit, one whose stored schema sits at the bound (a build grows it past it). */
+const FULL = { rest: 'srdfdryfr', mcp: 'srdfdryfm' };
+const BIG = { rest: 'srdfdrybr', mcp: 'srdfdrybm' };
 const SOURCE_TYPES = { entity: { Mine: { propertySchemas: { size: { type: 'number' } } } } };
 /** An outside address two spaces give two types: the file's `Mine` and the target's stored `Theirs`. */
 const TAKEN = 'https://e.example/terms/Thing';
@@ -42,7 +48,7 @@ describe('a dry run of the schema-from-RDF door answers what its write answers (
         spaceWith(SRC, SOURCE_TYPES),
         spaceWith(CLASH_SRC, { entity: { Mine: { iri: TAKEN } } }),
         ...Object.values(CLASH).map(id => spaceWith(id, theirsAt())),
-        ...[...Object.values(DANGLING), ...Object.values(SAME), HOLD, ...Object.values(CHANGED)].map(id => spaceWith(id, undefined)),
+        ...[...Object.values(DANGLING), ...Object.values(SAME), HOLD, ...Object.values(CHANGED), ...Object.values(FULL), ...Object.values(BIG)].map(id => spaceWith(id, undefined)),
       ],
     });
     admin = await d.mint('schema-rdf-dry-admin', {}, { admin: true });
@@ -123,5 +129,30 @@ describe('a dry run of the schema-from-RDF door answers what its write answers (
       assert.deepEqual(d.heldTypes(id), {}, `${door}: the stale build was written`);
       assert.equal(d.heldMeta(id).purpose, 'changed meanwhile', `${door}: the change made meanwhile was lost`);
     }
+  });
+
+  it('a schema that would not fit is refused by the dry run as by the build: 507 at the storage limit and 413 past the bound, both 422 schema_rdf_refused with the reason', async () => {
+    const { schemaTextOf } = await import('../../server/dist/spaces/schema-stamp.js');
+    const { SCHEMA_SNAPSHOT_MAX_BYTES } = await import('../../server/dist/spaces/schema-snapshot.js');
+    const refusedWith = async (spaces, reason, what) => {
+      const before = Object.fromEntries(Object.values(spaces).map(id => [id, structuredClone(d.heldMeta(id))]));
+      for (const dryRun of [true, false]) {
+        const { rest, mcp } = await d.both(admin.key, [spaces.rest, spaces.mcp], file, params({ mode: 'expand', dryRun }));
+        assert.equal(rest.status, 422, `${what}, dryRun ${dryRun}, REST: ${rest.text.slice(0, 300)}`);
+        assert.equal(rest.code, 'schema_rdf_refused', `${what}, dryRun ${dryRun}, REST`);
+        assert.match(rest.text, new RegExp(`"code":"${reason}"`), `${what}, dryRun ${dryRun}: the refusal names no reason ${reason}`);
+        assert.equal(mcp.isError, true, `${what}, dryRun ${dryRun}, MCP: ${mcp.text.slice(0, 300)}`);
+        assert.equal(mcp.code, 'schema_rdf_refused', `${what}, dryRun ${dryRun}, MCP`);
+        assert.match(JSON.stringify(mcp.body ?? null), new RegExp(`"code":"${reason}"`), `${what}, dryRun ${dryRun}, MCP: the refusal names no reason ${reason}: ${mcp.text.slice(0, 200)}`);
+      }
+      for (const id of Object.values(spaces)) assert.deepEqual(d.heldMeta(id), before[id], `${what}: ${id} was written`);
+    };
+    d.loader.mutateConfig(cfg => { cfg.storage = { brain: { softLimitGiB: 0, hardLimitGiB: 0 } }; });
+    try {
+      await refusedWith(FULL, 'storage_exceeded', 'at the storage limit');
+    } finally { d.loader.mutateConfig(cfg => { delete cfg.storage; }); }
+    const near = typesOfSize(schemaTextOf, SCHEMA_SNAPSHOT_MAX_BYTES - 3);
+    for (const id of Object.values(BIG)) d.loader.mutateConfig(cfg => { const s = cfg.spaces.find(x => x.id === id); s.meta = { ...s.meta, typeSchemas: structuredClone(near) }; });
+    await refusedWith(BIG, 'schema_too_large', 'past the bound');
   });
 });

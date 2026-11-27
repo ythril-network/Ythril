@@ -155,6 +155,16 @@ describe('the Overview pencil on a type of the data model', () => {
     expect(mount({ rights: null }).pen('person'), 'rights nobody could read').toBeNull();
   });
 
+  it('has its own accessible name on every type, naming the type, so a screen reader can tell a thousand pens apart', () => {
+    const m = mount();
+    const nameOf = (type: string): string => m.pen(type)!.getAttribute('aria-label') ?? '';
+    expect(nameOf('person')).toContain('person');
+    expect(nameOf('ghost')).toContain('ghost');
+    expect(nameOf('person')).not.toBe(nameOf('ghost'));
+    expect(nameOf('person'), 'a declared type is edited').toBe(`${EN['brain.overview.er.editSchema']} person`);
+    expect(nameOf('ghost'), 'an undeclared type is declared').toBe(`${EN['brain.overview.er.declareSchema']} ghost`);
+  });
+
   it('clicking it opens the settings pop-up on the Schema tab with that type selected (it was dead)', () => {
     const m = mount();
     expect(m.c.spaceSettings.settingsSpace()).toBeNull();
