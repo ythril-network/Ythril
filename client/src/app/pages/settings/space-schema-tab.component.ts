@@ -52,6 +52,7 @@ import { PluralText } from '../../core/plural-text.service';
 import { escapeHtml } from '../../shared/escape-html';
 import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { SchemaRdfExportComponent } from './schema-rdf-export.component';
+import { saveSchemaJson } from './schema-json-export';
 
 /** A kind's rows as the tab holds them: answered, answered by a server that cannot (no echo), or failed. */
 type KindRows = { s: 'ready'; answer: TypeListAnswer } | { s: 'unsupported' } | { s: 'failed' };
@@ -1063,16 +1064,7 @@ export class SpaceSchemaTabComponent implements OnInit {
 
   exportSchema(): void {
     const space = this.state.settingsSpace();
-    if (!space) return;
-    const meta = this.state.buildMeta();
-    const payload = {
-      spaceId:     space.id,
-      spaceLabel:  space.label,
-      exportedAt:  new Date().toISOString(),
-      typeSchemas: meta.typeSchemas ?? {},
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    saveBlob(blob, `${space.id}_schemas.json`);
+    if (space) saveSchemaJson(space, this.state.buildMeta());
   }
 
   triggerImportSchema(): void {

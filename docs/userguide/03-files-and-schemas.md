@@ -483,4 +483,12 @@ validation mode, rules) are never taken from the file. Run it with a dry run fir
 statement of the file it could not read, and why. RDF must be switched on for the space, and a space shared in a network is
 refused, because there a schema change is the network's vote: the refusal hands back the types to propose instead.
 
+
+## Where RDF lives in the screens
+
+- **RDF names** is a card on the space's **Settings** tab, after Limits. Its switch gives the space RDF names; on first use you choose the base address every record address starts with (a w3id.org or purl.org address, or a domain you own, outlives the instance; left empty, the instance's own address is used) and, optionally, the vocabulary address. Once given out, the base is shown as an address, not a field: switching off keeps it. On a space in no network, **Change base…** moves it at once; on a shared space, **Propose base change…** opens a vote, one at a time. The card lists every base in one list: the one in use, any base a network offers in its place (with the network and member that hold it, and **Accept this base…**, which takes it here at once with no vote), and any base a vote proposes (with each network's tally and a link to the Networks page). Accepting and changing need the schema administrator right on the space.
+- **Export RDF** sits beside **Export JSON** on the **Schema** tab, with its format (Turtle or JSON-LD): it saves the stored schema as an OWL ontology with SHACL shapes. With RDF names off it is disabled and links to the card.
+- **RDF export** is a panel on a space's **Overview**, beside Indexing and Networks, and on a personal view's Overview under its card. Choose the format and how edge details are written, then **Export RDF**; the file is saved to your downloads. While it runs the panel shows the size so far and **Stop export**, and the Overview tab shows it while you use another tab; closing the browser tab stops it. When it ends the panel names the file, the records, and every value it left out with why. A view whose spaces have no RDF names lists each with **Open RDF names**.
+- When a network offers another base, the Overview's **Networks** panel says so in one line, with **Open RDF names**.
+
 ---

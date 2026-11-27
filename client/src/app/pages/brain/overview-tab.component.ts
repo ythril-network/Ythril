@@ -16,9 +16,10 @@
  * fetches nothing itself' until 2026-08-08; it is corrected rather than left to be discovered.
  * The token-access panel is a later slice (admin-gating).
  */
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, untracked } from '@angular/core';
-import { RdfConflicts } from '../../core/rdf-conflicts.service';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import { RdfConflictLineComponent } from './rdf-conflict-line.component';
 import { RdfExportPanelComponent } from './rdf-export-panel.component';
+import { networkStatusOf, networkVariantOf } from './overview-network-status';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { StatusPillComponent, StatusVariant } from '../../shared/status-pill.component';
@@ -43,7 +44,7 @@ import { PluralText } from '../../core/plural-text.service';
   selector: 'app-overview-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RdfExportPanelComponent, ErModelPanelComponent, ReindexNotesComponent, TranslocoPipe, PhIconComponent, StatusPillComponent, SkeletonLinesComponent, RouterLink, InstantComponent, InstantPipe],
+  imports: [RdfConflictLineComponent, RdfExportPanelComponent, ErModelPanelComponent, ReindexNotesComponent, TranslocoPipe, PhIconComponent, StatusPillComponent, SkeletonLinesComponent, RouterLink, InstantComponent, InstantPipe],
   styles: [`
     :host { display: block; }
 
@@ -57,7 +58,6 @@ import { PluralText } from '../../core/plural-text.service';
     /* The summary spans the full row — it is the heaviest card (six tiles + the storage bar) and
        reads as the page's headline rather than one tile among equals. */
     .panel.span-all { grid-column: 1 / -1; }
-    .rdf-conflict { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; font-size: 12.5px; color: var(--warning); }
 
     /* A card is a column: header, then a body that FILLS the stretched height. Without the filling
        body a short card's content floats against a tall border box. */
@@ -547,10 +547,7 @@ import { PluralText } from '../../core/plural-text.service';
               }
             </ul>
             <!-- Q-942: a network contests this space's RDF base; said in one line, the way in is the RDF names card. -->
-            @if (rdfConflict()) {
-              <p class="rdf-conflict" data-testid="overview-rdf-conflict"><ph-icon name="warning" [size]="13"/>{{ 'rdf.overview.conflict' | transloco }}
-                <button type="button" class="comp-go" data-testid="overview-rdf-open" (click)="openRdfNames.emit()">{{ 'rdf.export.openNames' | transloco }}</button></p>
-            }
+            <app-rdf-conflict-line [spaceId]="space().id" (openNames)="openRdfNames.emit()" />
           } @else {
             <span class="muted">{{ 'brain.overview.noNetworks' | transloco }}</span>
           }
@@ -659,13 +656,6 @@ export class OverviewTabComponent {
   openTab = output<CollectionTab>();
   /** "Open RDF names": the shell opens the space's settings on the RDF names card (Q-942). */
   openRdfNames = output<void>();
-  private readonly rdfConflicts = inject(RdfConflicts);
-  /** A network contests this space's RDF base: the Networks panel says so in one line (Q-942). */
-  readonly rdfConflict = computed(() => this.rdfConflicts.has(this.space().id));
-  constructor() {
-    // The networks are asked again for each space shown: whether one contests its base.
-    effect(() => { const id = this.space().id; untracked(() => this.rdfConflicts.load(id)); });
-  }
 
   reindex = output<void>();
   /** Emitted so the shell re-queues every failed embedding job and reloads the queue (fetch-free tab). */
@@ -760,19 +750,9 @@ export class OverviewTabComponent {
   /** Networks this space belongs to (F8 data, already on the space payload — no extra fetch). */
   networks = computed(() => this.space().networks ?? []);
 
-  /** Aggregate sync/governance status; defaults to 'idle' when connected but unreported. */
-  netStatus(): 'idle' | 'syncing' | 'degraded' | 'vote' {
-    return this.space().networkStatus ?? 'idle';
-  }
-
-  netVariant(): StatusVariant {
-    switch (this.space().networkStatus) {
-      case 'degraded': return 'error';
-      case 'syncing': return 'pending';
-      case 'vote': return 'warn';   // a governance vote is awaiting this instance — needs attention
-      default: return 'ok';         // idle = connected and healthy
-    }
-  }
+  /** The Networks panel's status and its pill colour (`overview-network-status.ts`). */
+  readonly netStatus = networkStatusOf(this.space);
+  readonly netVariant = networkVariantOf(this.space);
 
   /** Running vote tallies for the Governance panel. */
   tallyYes(v: VoteRound): number { return voteTally(v).yes; }
