@@ -6,8 +6,8 @@
  *
  * - F1: a class the inference does not take (too few subjects, no name) never refuses a strict import at the default settings: the subjects
  *   typed only by it, and the label groups that describe it, are left out and counted `not-inferred`, and the rest lands.
- * - F2: naming many classes or keys of one local part costs a constant number of probes per name, and a file whose classes pass the type cap
- *   is refused as soon as they do, not after the whole file was named.
+ * - F2: naming many classes or keys of one local part costs a constant number of probes per name, and a file of more than 200 classes of one
+ *   kind is written whole: no count of types refuses a schema (Q-981).
  * - F3: a derived address and a foreign one never get one edge name or property key: the derived term keeps its name, the foreign one is numbered.
  * - F4: a predicate the space holds as a property is not also inferred as an edge label: it is named `term-clash` and its statements are left out.
  * - F5: a type the space stores as a library reference takes no inferred property: the pair is named `library-reference` and left out.
@@ -96,19 +96,17 @@ describe('an RDF import inferring a schema holds what its review found (real rou
     assert.equal(r.body.notTaken?.['not-inferred'], 1, JSON.stringify(r.body.notTaken));
   });
 
-  it('F2: classes of one local part refuse at the type cap as soon as they pass it, each name costing a constant number of probes', async () => {
+  it('F2: 300 classes of one local part are all inferred and written, each name costing a constant number of probes', async () => {
     const file = ttl(Array.from({ length: 300 }, (_, i) => people(2, { cls: `<http://x.example/${i}/Item>`, prefix: `i${i}x` })).flat());
     let claims = 0;
     let probes = 0;
     schemaAct.setSchemaRdfImportKnobsForTest({ hooks: { afterNameClaim: (n) => { claims += 1; probes += n; } } });
     let r;
     try { r = await rest(id('2a'), file); } finally { schemaAct.setSchemaRdfImportKnobsForTest(null); }
-    assert.equal(r.status, 422, r.text.slice(0, 400));
-    assert.equal(r.body?.reasons?.[0]?.code, 'type-cap', r.text.slice(0, 400));
-    assert.ok(claims > 0, 'the premise: names were claimed');
-    assert.ok(claims <= 205, `the inference stopped near the cap, not after all 300 classes: ${claims} names claimed`);
+    assert.equal(r.status, 200, r.text.slice(0, 400));
+    assert.ok(claims >= 300, `every class was named: ${claims} names claimed`);
     assert.ok(probes <= 4 * claims, `a name costs a constant number of probes: ${probes} probes for ${claims} names`);
-    assert.deepEqual(d.heldTypes(id('2a')), {}, 'nothing was written');
+    assert.equal(Object.keys(d.heldTypes(id('2a')).entity ?? {}).length, 300, 'the 300 inferred entity types were written');
   });
 
   it('F2: property keys of one local part on one type cost a constant number of probes each', async () => {
