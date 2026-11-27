@@ -35,6 +35,7 @@ import { Collection } from 'mongodb';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { queryAxis, unitAt, startStubEmbedder, createSpaceCollections } from './_vector-harness.mjs';
 import { patchVectorSearch } from './_mongot-refusals.mjs';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -98,9 +99,8 @@ describe('recall asks its text search beside its vector search', { skip }, () =>
     let textBeforeVector = null;
     // The vector index answers nothing (it has not taken the records): the fresh scan supplies them, as for a write just made.
     const held = patchVectorSearch(() => async (_real, cursor) => {
-      const until = Date.now() + HOLD_MS;
-      while (finds.seen.length === 0 && Date.now() < until) await new Promise(r => setTimeout(r, 10));
-      if (textBeforeVector === null) textBeforeVector = finds.seen.length > 0;
+      const sent = await holdsWithin(() => finds.seen.length > 0, HOLD_MS, 10, { what: 'the text query to be sent' });
+      if (textBeforeVector === null) textBeforeVector = sent;
       await cursor.close();
       return [];
     });

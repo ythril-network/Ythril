@@ -76,57 +76,52 @@ export async function commitPlans(
 ): Promise<CommitOutcome[]> {
   // The triple index follows each stage's write while the work after it (link rows, embedding jobs) runs, and the commit returns only once
   // both are done (`withSettlesJoined`, bundle-378 Q-976 S3): every record door and kind saves through here.
-  return withSettlesJoined(() => commitInOrder(spaceId, plans, opts));
-}
-
-/** {@link commitPlans}' stages, in `COMMIT_ORDER`. */
-async function commitInOrder(
-  spaceId: string, plans: readonly WritePlan[], opts: { somethingLanded?: boolean },
-): Promise<CommitOutcome[]> {
-  for (const p of plans) {
-    if (p.spaceId !== spaceId) {
-      throw new Error(`commitPlans: a plan decided for space '${p.spaceId}' was handed to a commit for '${spaceId}'`);
-    }
-    if (p.op === 'delete') throw new Error(`commitPlans: the ${p.kind} '${p.id}' is planned as a delete, which only a write group commits`);
-  }
-  const outcomes = new Array<CommitOutcome | undefined>(plans.length);
-  const landed: number[] = [];
-  const landedBefore = opts.somethingLanded === true;
-
-  for (const kind of COMMIT_ORDER) {
-    const ready: number[] = [];
-    for (let i = 0; i < plans.length; i++) {
-      if (plans[i]!.kind !== kind) continue;
-      const failedDep = (plans[i]!.dependsOn ?? []).map(d => outcomes[d]).find(o => o !== undefined && !o.ok);
-      if (failedDep && !failedDep.ok) {
-        outcomes[i] = { ok: false, reason: dependencyFailed(failedDep.reason) };
-      } else {
-        ready.push(i);
+  return withSettlesJoined(async () => {
+    for (const p of plans) {
+      if (p.spaceId !== spaceId) {
+        throw new Error(`commitPlans: a plan decided for space '${p.spaceId}' was handed to a commit for '${spaceId}'`);
       }
+      if (p.op === 'delete') throw new Error(`commitPlans: the ${p.kind} '${p.id}' is planned as a delete, which only a write group commits`);
     }
-    if (ready.length === 0) continue;
-    // Asked per STAGE: a long write admitted before a deletion or wipe registered stops at its next stage. Before anything
-    // landed the refusal is the request's answer (409); after, it is this stage's items' outcome, and the caller is told what
-    // landed — a stored record reported failed would invite a duplicating resend.
-    let leaveWriteUnit: () => void;
-    try {
-      leaveWriteUnit = admitSpaceWriteUnit(spaceId, PLAN_KINDS[kind].collection);
-    } catch (err) {
-      if ((landed.length === 0 && !landedBefore) || !isSpaceNotWritable(err)) throw err;
-      for (const i of ready) outcomes[i] = { ok: false, reason: err.message };
-      continue;
-    }
-    let stageLanded: number[];
-    try {
-      stageLanded = await stageOutcomes(spaceId, kind, plans, ready, outcomes, landed.length > 0 || landedBefore);
-    } finally {
-      leaveWriteUnit();
-    }
-    landed.push(...await timePhase('after', () => afterStage(spaceId, plans, stageLanded, outcomes)));
-  }
+    const outcomes = new Array<CommitOutcome | undefined>(plans.length);
+    const landed: number[] = [];
+    const landedBefore = opts.somethingLanded === true;
 
-  await runAfterCommit(spaceId, { dupeRules: landed.map(i => plans[i]!).filter(p => p.dupeRules) });
-  return outcomes.map(o => o ?? { ok: false, reason: 'not written' });
+    for (const kind of COMMIT_ORDER) {
+      const ready: number[] = [];
+      for (let i = 0; i < plans.length; i++) {
+        if (plans[i]!.kind !== kind) continue;
+        const failedDep = (plans[i]!.dependsOn ?? []).map(d => outcomes[d]).find(o => o !== undefined && !o.ok);
+        if (failedDep && !failedDep.ok) {
+          outcomes[i] = { ok: false, reason: dependencyFailed(failedDep.reason) };
+        } else {
+          ready.push(i);
+        }
+      }
+      if (ready.length === 0) continue;
+      // Asked per STAGE: a long write admitted before a deletion or wipe registered stops at its next stage. Before anything
+      // landed the refusal is the request's answer (409); after, it is this stage's items' outcome, and the caller is told what
+      // landed — a stored record reported failed would invite a duplicating resend.
+      let leaveWriteUnit: () => void;
+      try {
+        leaveWriteUnit = admitSpaceWriteUnit(spaceId, PLAN_KINDS[kind].collection);
+      } catch (err) {
+        if ((landed.length === 0 && !landedBefore) || !isSpaceNotWritable(err)) throw err;
+        for (const i of ready) outcomes[i] = { ok: false, reason: err.message };
+        continue;
+      }
+      let stageLanded: number[];
+      try {
+        stageLanded = await stageOutcomes(spaceId, kind, plans, ready, outcomes, landed.length > 0 || landedBefore);
+      } finally {
+        leaveWriteUnit();
+      }
+      landed.push(...await timePhase('after', () => afterStage(spaceId, plans, stageLanded, outcomes)));
+    }
+
+    await runAfterCommit(spaceId, { dupeRules: landed.map(i => plans[i]!).filter(p => p.dupeRules) });
+    return outcomes.map(o => o ?? { ok: false, reason: 'not written' });
+  });
 }
 
 /** What one kind's stage write did (`writeStage`). Indexes are into the plans it was handed. */
