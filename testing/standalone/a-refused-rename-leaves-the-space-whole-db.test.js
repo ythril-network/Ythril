@@ -87,6 +87,16 @@ async function mcp(tool, args) {
 
 const underPrefix = async (p) => (await db.listCollections({}, { nameOnly: true }).toArray())
   .map(c => c.name).filter(n => n.startsWith(`${p}_`)).map(n => n.slice(p.length + 1)).sort();
+/**
+ * The collection of `id` that a rename moves LAST: the order `moveSpaceData` walks is the store's own listing, which is catalog order and not name order,
+ * and it ends at the first collection the store refuses (a store failure is never collected). A fault armed on the name-sorted last collection moved
+ * nothing before it whenever the listing put that one first, and the rename then had nothing to move back and cleared its marker: the case asserted a
+ * marker that had no reason to stand (Full run 46061778730, Q-978's case 'the store refuses the move and the move back').
+ */
+const movedLast = async (id) => {
+  const names = (await db.listCollections({}, { nameOnly: true }).toArray()).map(c => c.name).filter(n => n.startsWith(`${id}_`));
+  return names[names.length - 1];
+};
 const dirOf = (id) => path.join(process.env['DATA_ROOT'], 'files', id);
 
 /** What the space holds, planted so that every step of the rename has something to move. */
@@ -194,7 +204,7 @@ describe('a refused rename leaves the space whole', { skip }, () => {
     const collections = await underPrefix(id);
     assert.ok(collections.length >= 2, `${id} has ${collections.length} collections: a rename of one proves nothing about the others`);
     const token = `fired-${randomUUID()}`;
-    await plant(newId, collections, token);
+    await plant(newId, collections, token, await movedLast(id));
     const ask = () => (via === 'REST' ? rest('PATCH', `/api/spaces/${id}/rename`, { newId }) : mcp('space_rename', { space: id, newId }));
     const { result: a, lines } = await logLinesDuring(ask);
     return { id, newId, collections, ask, a, lines, where: await whereIs(id, newId) };
@@ -220,8 +230,8 @@ describe('a refused rename leaves the space whole', { skip }, () => {
   }
 
   const storeCases = [
-    ['collection', 'the last collection of the space refuses its move, the others already moved', (newId, cols, token) => {
-      const name = `${idOf('collection')}_${cols[cols.length - 1]}`;
+    ['collection', 'the last collection of the space refuses its move, the others already moved', (newId, cols, token, last) => {
+      const name = last;
       faults.fail('rename', name, failure(token));
       return [['rename', name]];
     }],
@@ -245,7 +255,7 @@ describe('a refused rename leaves the space whole', { skip }, () => {
   for (const [c, what, arm] of storeCases) {
     it(`${what}: the space is whole under its old name, the answer is 503, and the retry completes`, async () => {
       let armed;
-      const r = await refused(c, (newId, cols, token) => { armed = arm(newId, cols, token); });
+      const r = await refused(c, (newId, cols, token, last) => { armed = arm(newId, cols, token, last); });
       assertStoreAnswer(c, r, armed);
       assertWhole(c, r.where, { home: r.id, away: r.newId, collections: r.collections });
       assert.deepEqual(standing(r.id), { marker: null, act: null }, `${c}: a rename moved fully back still stands as an act or a marker`);
@@ -256,8 +266,8 @@ describe('a refused rename leaves the space whole', { skip }, () => {
 
   it('MCP: the same refusal leaves the space whole too', async () => {
     let armed;
-    const r = await refused('mcp', (newId, cols, token) => {
-      const name = `${idOf('mcp')}_${cols[cols.length - 1]}`;
+    const r = await refused('mcp', (newId, cols, token, last) => {
+      const name = last;
       faults.fail('rename', name, failure(token));
       armed = [['rename', name]];
     }, { via: 'MCP' });
@@ -336,8 +346,8 @@ describe('a refused rename leaves the space whole', { skip }, () => {
 
   it('the store refuses the move and the move back: it answers as the store (503), the marker stays, and the repeated rename completes', async () => {
     let armed;
-    const r = await refused('split', (newId, cols, token) => {
-      const forward = `${idOf('split')}_${cols[cols.length - 1]}`;
+    const r = await refused('split', (newId, cols, token, last) => {
+      const forward = last;
       faults.fail('rename', forward, failure(token));
       for (const c of cols) faults.fail('rename', `${newId}_${c}`, failure(`back-${c}`));
       armed = [['rename', forward]];
