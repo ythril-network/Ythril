@@ -67,6 +67,7 @@ import type { AuthorRef } from '../config/types.js';
 import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import type { EdgeInput as EdgeWriteInput } from './write-plan/plan-edge.js';
 import { MAX_TAGS, MAX_LINKS_PER_KIND, MAX_INLINE_EDGES, countError, tagsError } from '../util/request-bounds.js';
+import { beginPhase } from '../http/phase-timer.js';
 
 /**
  * The write field for each kind — declared beside the kind vocabulary and re-exported here.
@@ -551,20 +552,23 @@ export async function assertConnections(
   subject: EdgeSubject | null,
   body: unknown,
 ): Promise<void> {
-  const malformed = connectionInputError(body, fromKind, { strict: isStrictLinkage(spaceId) });
-  if (malformed) throw new ReferenceRefusal(malformed);
-  const desired = desiredLinksFrom(body, fromKind);
-  if (desired) await assertDesiredLinks(spaceId, fromKind, desired);
+  const endLinks = beginPhase('links');
+  try {
+    const malformed = connectionInputError(body, fromKind, { strict: isStrictLinkage(spaceId) });
+    if (malformed) throw new ReferenceRefusal(malformed);
+    const desired = desiredLinksFrom(body, fromKind);
+    if (desired) await assertDesiredLinks(spaceId, fromKind, desired);
 
-  const edges = edgeInputsFrom(body);
-  if (edges === null || edges.length === 0) return;
-  if (!subject) throw new Error('assertConnections: the body carries edges and no subject — build it with connectionSubject');
-  const asked = connectionsOf(body, subject.id, fromKind).edges;
-  const view = new ReadSet(spaceId);
-  await view.load(mergeWants(asked.map(e => edgeWant(spaceId, e, subject))));
-  // A refusal only: nothing is stamped from this read, the planner reads its own pair when it plans each edge.
-  const write = readMetaForWrite(spaceId);
-  refuseEachEdge(asked, (edge, passed) => { edgeRefusal(spaceId, edge, view, subject, passed, write); });
+    const edges = edgeInputsFrom(body);
+    if (edges === null || edges.length === 0) return;
+    if (!subject) throw new Error('assertConnections: the body carries edges and no subject — build it with connectionSubject');
+    const asked = connectionsOf(body, subject.id, fromKind).edges;
+    const view = new ReadSet(spaceId);
+    await view.load(mergeWants(asked.map(e => edgeWant(spaceId, e, subject))));
+    // A refusal only: nothing is stamped from this read, the planner reads its own pair when it plans each edge.
+    const write = readMetaForWrite(spaceId);
+    refuseEachEdge(asked, (edge, passed) => { edgeRefusal(spaceId, edge, view, subject, passed, write); });
+  } finally { endLinks(); }
 }
 
 /**
@@ -597,6 +601,7 @@ export async function applyConnections(
   author: AuthorRef,
   actor?: WebhookActor,
 ): Promise<{ links: number; edges: number; warnings: SchemaViolation[] }> {
+  const endLinks = beginPhase('links');
   const asked = connectionsOf(body, from, fromKind);
   const landed: string[] = [];
   // What a `warn` space says about the inline edges that landed — each row naming its edge (`edges[1].properties.k`) — so a door can
@@ -618,6 +623,8 @@ export async function applyConnections(
     return { links, edges: landed.length, warnings };
   } catch (err) {
     throw new ConnectionsNotWritten(writtenRecord(fromKind, from, landed), err);
+  } finally {
+    endLinks();
   }
 }
 

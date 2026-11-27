@@ -23,6 +23,7 @@ import { WriteConflict, type CommitOutcome, type WritePlan } from './types.js';
 import { RecordVersionAtCeiling, RECORD_VERSION_AT_CEILING } from '../write-precondition.js';
 import { EndpointRemoved, RequestRefusal } from '../../util/errors.js';
 import { plannedSizeError, type PlannedInput } from '../record-checks.js';
+import { timePhase } from '../../http/phase-timer.js';
 
 /**
  * A single-record door's one size question, asked of the planner input before anything is planned or embedded: the bound the bulk import
@@ -63,8 +64,8 @@ export async function planAndCommit<R extends { plan: WritePlan }>(
   let healed = false;
   for (let attempt = 1; ; attempt++) {
     const view = new ReadSet(spaceId);
-    await view.load(want);
-    const planned = await planOne(view);
+    await timePhase('read', () => view.load(want));
+    const planned = await timePhase('decide', () => planOne(view));
     const [outcome] = await commitPlans(spaceId, [planned.plan]);
     if (outcome!.ok || !outcome!.stale) return { planned, outcome: outcome! };
     const guard = guardOf(planned.plan);

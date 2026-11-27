@@ -38,7 +38,8 @@ const p95 = (xs) => percentile(xs, PERCENTILE);
 
 /** The phases a header names, in the order the table lists them (the server's own order, `http/phase-timer.ts`). */
 const PHASES = ['total', 'auth', 'rate', 'scope', 'door', 'parse', 'members', 'schema', 'verdict', 'plan', 'run', 'render',
-  'embed', 'search', 'fresh', 'lexical', 'rerank', 'hydrate'];
+  'embed', 'search', 'fresh', 'lexical', 'text', 'introduce', 'rerank', 'hydrate',
+  'links', 'read', 'decide', 'version', 'write', 'index', 'after'];
 /** The `_meta` key an MCP tool result carries its figures under. */
 const MCP_TIMING_META = 'ythril/server-timing';
 
