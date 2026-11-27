@@ -16,7 +16,7 @@ import { listTokens } from '../../auth/tokens.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { updateFileMeta, getFileMeta } from '../../files/file-meta.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
-import { writeWarningFields, connectionRefusalAnswer } from '../../brain/write-validation.js';
+import { writeWarningFields } from '../../brain/write-validation.js';
 import { linkTargetRemovedWarnings } from '../../brain/gone-entity-references.js';
 import { linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 import { applyJudgment } from './_judged-write.js';
@@ -323,17 +323,9 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   // A file is keyed in the links collection by its stored path.
   const editAudit = await readEditAudit(spaceId, mid => getFileMeta(mid, path), toDocId(path), req.body, 'file');
   let linksTakenBack: readonly string[] = [];
-  let updated;
-  try {
-    updated = await findFirstAcrossMembers([spaceId],
-      mid => updateFileMeta(mid, path, { description, tags, properties, ...linkFieldsFrom(req.body, 'file') }, dfPaths, ids => { linksTakenBack = ids; }));
-  } catch (err) {
-    // An edit that missed the row's version on every attempt: `409 write_race_lost` with its code and id, as every record route answers it. Answered
-    // here and not left to the app's final handler, which words any error that carries a `status` as `{ error }` alone (bundle-378, Q-976).
-    const refused = connectionRefusalAnswer(err, 'update');
-    if (refused) { res.status(refused.status).json(refused.body); return; }
-    throw err;
-  }
+  // An edit that missed the row's version on every attempt is the app's final handler's: `409 write_race_lost` with its code and id (`api/final-error-handler.ts`).
+  const updated = await findFirstAcrossMembers([spaceId],
+    mid => updateFileMeta(mid, path, { description, tags, properties, ...linkFieldsFrom(req.body, 'file') }, dfPaths, ids => { linksTakenBack = ids; }));
   if (updated) {
     req.auditSnapshots = editAudit.snapshots(updated);
     // A `linkEntities` link whose entity was deleted while the write ran was taken back and the file stays written: the answer says which (Q-305).

@@ -32,8 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Operations:** every answer carries `Server-Timing` per phase; MCP tool results carry it in `_meta` under `ythril/server-timing`.
+- **Operations:** every answer carries `Server-Timing` per phase, one refused before routing (a body that is not JSON, one over the size limit) too; MCP tool results carry it in `_meta` under `ythril/server-timing`.
+- **Operations:** new metrics `ythril_cache_lookups_total{cache,result}` and `ythril_cache_entries{cache}` count the lookups and entries of the recall query-vector, SPARQL planning-count and RDF schema caches.
 - **Operations:** `ythril_write_group_aborts_total{reason}` counts SPARQL Update write groups that landed nothing; a delete still referenced is refused whole (`referenced`).
+- **Performance:** a recall repeated by the same token within ten minutes no longer calls the embedding model again; the saved query vector is private to that token, and no token can tell from its timing what another searched.
 - **Schema:** every schema violation row carries a stable `code` and its `params` beside its `reason` on every REST door and MCP tool, and the web app words it in your language; a bulk warning row gains `warning`. The integration guide lists the codes; an older unconverted item has none.
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.
 - **Schema:** the schema versions a space uses are kept privately on this instance, named by their fingerprint, with what each was built from (own types, network layers). A database backup carries them.
@@ -145,35 +147,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** the size check fails a tracked file that grows past its limit unless an entry in its allow file names the file, its decomposing ticket and a review date.
 - **Testing:** the tests that read metric declarations find every module that declares a metric; a test fails a scanner that reads only the registry.
 - **Testing:** the local preflight runs its source gates first, then the builds, then the test suites, and stops at the first failing stage, naming the stages it did not run.
-- **Testing:** within each of those, the preflight runs first the stage whose failure is cheapest to find, from the recorded stage times (`test-results/stage-costs.json`, refreshed after each recorded run), never before a stage it reads; with no snapshot it keeps the listed order.
+- **Testing:** within each of those, the preflight runs first the stage whose failure is cheapest to find, from the recorded stage times (`test-results/stage-costs.json`), never before a stage it reads; with no snapshot it keeps the listed order.
 - **Testing:** the local preflight runs several standalone batches at once, never more than 8 test files together, parses test files in parallel, and ends a batch that never exits at a time bound.
 - **Testing:** the static preflight and the release gate refuse a changelog entry that names a source path, an internal storage name, an algorithm term or an identifier no caller can meet.
 - **Testing:** a client gate fails a refusal sentence no caller can show, and a page that stores a failed load without wording it in the reader's language.
-- **Testing:** a standalone gate refuses a public or protected member of a client component, service or directive that no template and no non-spec source reads; the dead ones were removed and the spec-only ones are listed with reasons.
+- **Testing:** a standalone gate refuses a public or protected member of a client component, service or directive that no template and no non-spec source reads; the dead ones were removed.
 - **Testing:** the schema-layers panel no longer throws NG0950 when an effects pass runs before its `spaceId` is bound, which failed the client suite at random under load.
-- **Testing:** the local preflight starts the pure test files that took 15 s or more in recent CI runs first, each alone (times in `test-results/file-times.json`, kept beside the stage costs); with no snapshot it cuts by path length as before.
+- **Testing:** the local preflight starts the pure test files that took 15 s or more in recent CI runs first, each alone (times in `test-results/file-times.json`).
 - **Testing:** every local preflight run records a `Preflight-Run` with each stage's time and outcome (kept in `test-results/unrecorded` without an instance); `node scripts/test-times.mjs --preflight-trend` prints the stage times over runs.
 - **Testing:** the CI-run recorder lists main's runs without GitHub's `status=completed` filter and keeps the completed ones itself; a run that filter still lacked is now found.
-- **Testing:** `--preflight-costs` also writes `test-results/file-times-all.json`, the per-file times of every CI test job on main (a rerun counts as one run), for a slow-file check the development flow runs after a merge; written only when every job has times.
-- **Testing:** CI runs the pure standalone files as two jobs (`test:standalone:pure -- --shard=<k>/2`); `test-results/file-times.json` reads both shard jobs' records, a run's shards as one run. No change to what ships.
-- **Testing:** `--record-ci` records every attempt of a run and reads a run's artifact listing to its end; a record cut for size keeps every failed test's name and every file name, and says what it left out. Times still count a run once.
+- **Testing:** `--preflight-costs` also writes `test-results/file-times-all.json`, the per-file times of every CI test job on main (a rerun counts once), only when every job has times.
+- **Testing:** CI runs the pure standalone files as two jobs (`test:standalone:pure -- --shard=<k>/2`); `test-results/file-times.json` reads both shard jobs' records, a run's shards as one run.
+- **Testing:** `--record-ci` records every attempt of a run and reads a run's artifact listing to its end; a record cut for size keeps every failed test's name and every file name, and says what it left out.
 - **Testing:** `--record-ci` also records pull request runs of this repository's branches and Full runs, each record saying its kind (`runKind`); a fork's pull request is refused. Recorded times count only green full runs of pushes to main.
-- **Testing:** a local preflight also records the tests it ran, every failed test by name, as `Test-Run` records of kind `preflight` (only results that run wrote), kept and sent like its stage times; a recording problem never changes its verdict, and they never enter a time baseline.
+- **Testing:** a local preflight also records the tests it ran, every failed test by name, as `Test-Run` records of kind `preflight` (only results that run wrote), kept and sent like its stage times; a recording problem never changes its verdict.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
 - **Testing:** the standalone harness no longer changes `setTimeout` after a close; it worked around the search-index check fixed below.
 - **Testing:** a test that waits on the media worker and times out says what the worker logged during the wait, and whether the queue was still checking the job's space or had set it aside.
 - **Testing:** the database-backed test files can run sharded from inside a container, on shard databases its host started. A run that cannot reach Docker and has no shard count stops and says so, instead of running every file on one database.
 - **Testing:** tests that could only restate a constant's value are removed or rewritten to drive the behaviour the value controls, and a gate refuses new ones.
 - **Testing:** a preflight writes, clears and reads its timing results only in the checkout it runs in, and the CI recorder leaves a stray `preflight-*` result out of a run's record, saying so, instead of failing it.
-- **Testing:** the local preflight runs the standalone tests that read only tracked text before it builds anything, found from each test's imports and not from a list; CI runs them first in its pure job, before the install, and each file still runs once.
-- **Testing:** the deleter audit gate builds its call-graph edges once (91 s down to 2 s), and the entry-module load gate is cut into shard files that share a compile cache and end a module that never settles at its time bound.
-- **Testing:** CI pulls the BuildKit image, the test database image and the test image's build, and every `npm ci`, through `scripts/retry-on-registry-failure.mjs`: a call the registry did not answer is run again, at most twice; any other failure fails at once.
-- **Testing:** the stalled-read fixture reads again, up to four times, when a busy database answers its deadline-bound read with an interrupt or only after the stall; it still accepts only code 50 before the stall is over.
+- **Testing:** the local preflight runs the standalone tests that read only tracked text before it builds anything, found from each test's imports; CI runs them first in its pure job, before the install, and each file still runs once.
+- **Testing:** the deleter audit gate builds its call-graph edges once (91 s down to 2 s), and the entry-module load gate runs as shard files and ends a module that never settles.
+- **Testing:** CI pulls the BuildKit image, the test database image and the test image's build, and every `npm ci`, through `scripts/retry-on-registry-failure.mjs`: a call the registry did not answer is run again, at most twice.
+- **Testing:** the stalled-read fixture reads again, up to four times, when a busy database answers its deadline-bound read with an interrupt or only after the stall.
 - **Testing:** the export round trip now covers fork marks on facts, entities, edges and chrono entries and a file row's expiry and sync base, and a gate fails when a record interface leaves out a field the store keeps.
 - **Testing:** two flow-check probes (`tools/flow-checks`) answer whether an operator can export their data and whether each documented error message still exists in the source, instead of "cannot answer".
 - **Testing:** 17 more flow-check probes (`tools/flow-checks`) decide the docs, security, deployment, interface, architecture and licence lens checks from the code, instead of "cannot answer".
 - **Testing:** a flow-check probe can run against its own booked scratch stack (`tools/flow-checks/_stack.mjs`, never the owner's instance); the readiness check is the first, and nine deep checks now decide from the code.
-- **Testing:** a standalone test fails a tracked .js, .mjs or .ts file with two blank lines in a row outside a template literal; `node scripts/collapse-blank-lines.mjs` removes them, and the files that had them were swept.
+- **Testing:** a standalone test fails a tracked .js, .mjs or .ts file with two blank lines in a row outside a template literal; `node scripts/collapse-blank-lines.mjs` removes them.
 - **Testing:** `npm run test:down` leaves a test-stack container another session holds (hold files in `YTHRIL_TEST_STACK_HOLDS_DIR`), `test:up` refuses to start beside one, and `npm run test:down:all` ignores holds; `test:down:clean` no longer passes `--rmi local`.
 - **Testing:** `node testing/_init/db-shard-stack.mjs own-up <label>` starts one test database of your own and prints its name and port; `own-list` lists them and `own-down <name>` removes one; a start refuses when 8 exist.
 - **Tooling:** `machine:free -Wipe` asks every refusal of the wipe (data guard, pending record, free space, registries) before it removes the test stack or prunes; the workstation guide names what the guard cannot see.
@@ -189,6 +191,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Recall:** a recall that fails or finds nothing to rank no longer leaves its text search running, and the text search ends at the recall's own `maxTimeMS`.
 - **Audit:** a request to a brain route of a space called `files`, `facts`, `entities`, `edges` or `chrono` was recorded under another route's operation (the records export of such a space left no entry with read logging off); the audit rules read the one path form the server serves.
 - **Brain:** a `$ref:` key in a bulk item's link field is refused saying a key is resolved only at an edge's `from` or `to`: save the record first and pass its id, or connect the records by an edge. `save_bulk` and the guides no longer say a link field takes a key.
 - **RDF:** `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` and `PUT /api/spaces/:id/schema` refuse a type that would give two terms of the space one RDF address (`422 rdf_term_clash`), as `PATCH /api/spaces/:id` and `schema_update` do; they stored it.
@@ -196,8 +199,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** a peer can no longer push a space's base epoch to the maximum: an epoch above half of it is refused as an offer, as a shared space's first enable (no base adopted) and as a `space_rebase` round's epoch.
 - **Schema library:** a group named like a built-in object member (for example `constructor` or `__proto__`) behaves as any other, and a group's namespace goes with its last entry instead of staying hidden and holding its prefix.
 - **Web:** the Brain Overview's pencil on a type opens the space's settings on that type for a token with the schema right; it was never drawn, and neither was the Usage panel's "Reset usage", which shows to the same tokens now.
-- **Web:** a property is "Eigenschaft" in German and "właściwość" in Polish in the schema tab, where they said "Eigentum" and "Neuer Immobilienname" (real estate) and "nieruchomość"; Polish words written without their accents ("wedlug", "wyslij", among others) are corrected.
-- **Web:** a document-processing setting an environment variable pins is shown locked on the Media processing page, and a save no longer sends it. Before, one pinned setting made every save on the page fail with no reason shown.
+- **Web:** a property is "Eigenschaft" in German and "właściwość" in Polish in the schema tab, not "Eigentum" and "nieruchomość" (real estate); Polish words written without accents ("wedlug", "wyslij") are corrected.
+- **Web:** a document-processing setting an environment variable pins is shown locked on the Media processing page, and a save no longer sends it; one pinned setting used to fail every save silently.
 - **Web:** a screen reader reads the token hint on the login page, and the password hint and mismatch message on the setup page, with their fields.
 - **Records:** `entityName`, `fromName` and `toName` on `POST /api/filter` and MCP `filter` narrow the caller's `filter` instead of replacing its `_id`, `$or`, `from` or `to`; the web client's fact list by ids and an entity name now answers their intersection.
 - **Records:** an edge update that changes its label no longer deletes a write that landed after the edge was read: it answers `412`, as a moved version does elsewhere. Before, the newer write was lost with a `200`.
@@ -205,7 +208,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spaces:** MCP `space_stats` answers `embedQueue` (`pending`, `processing`, `failed`: records not searchable yet) as REST stats does; the doors that count a space's records read one function and answer one number.
 - **Spaces:** `update_space` refused for a face width the space's stored descriptors rule out answers 409 and `Error: <sentence>` on MCP and `POST /api/update_space`, as `PATCH /api/spaces/:id` does; it read `Error: Error (409): …` with status 400.
 - **Spaces:** a refused rename leaves the space whole; of a create and a rename to one id, the second gets `409`.
-- **Housekeeping:** a space set aside after a slow answer is checked again once its pause ends, even when its last check found it still building its positions. Before, no background task, the media queue included, checked that space again until a restart.
+- **Housekeeping:** a space set aside after a slow answer is checked again after its pause, even while it builds its positions; before, nothing checked it until a restart.
 - **Media:** a file whose run was cut short by, or met throughout, an unavailable embedder waits without spending an attempt, and no file is started until a probe finds the embedder back; counted by `ythril_media_jobs_handed_back_total` and `ythril_media_embedder_probes_total`.
 - **Media:** a file whose analysis becomes due at the moment the queue is looking is picked up at once. Before, a replaced or retried file could wait up to 30 seconds for the queue's next full look, and an embedding job the same way.
 - **Embeddings:** an embed job whose call could not reach its HTTP endpoint keeps its attempts and waits with back-off, and the worker pauses until the embedder answers; `ythril_embed_jobs_handed_back_total` counts each hand-back.
@@ -220,8 +223,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** a resumed import whose spool cannot be read is retried, not failed and deleted; the at-rest file pass names an unreadable folder and goes on.
 - **Files:** a delete, move or space wipe that waits for a media job's write waits half a second longer than that write may take; before, it could fail with a store timeout while the write was finishing.
 - **Database:** a transaction the write bound ends after it retried a write conflict always keeps that conflict as the timeout's cause; before, it was lost when the bound ended an attempt instead of the pause between two.
-- **Database:** a transaction the database ends at the write bound's deadline answers the bound's timeout, not the database's raw time-limit error.
-- **Database:** that holds too when the database ends a write or a single-document read inside a transaction and answers a moment before Ythril's own clock reads the deadline.
+- **Database:** a transaction the database ends at the write bound's deadline, or a moment before Ythril's clock reads it (a write or a single-document read), answers the bound's timeout, not the database's raw time-limit error.
 - **Workstation:** `npm run local-connector:dev` builds the schema package it imports first and starts the local connector from a fresh clone, as the guide says.
 - **Testing:** the source-hygiene gates read the schema package's source with the server's, and the standalone runner refuses a schema build older than its source or missing.
 - **Sync:** a member that joins a club, closed or democratic network holds each joined space with the network's types and validation mode as that network's layer; one without them, or with only a passed vote's changed fields, takes them from its admitter on its next cycle.

@@ -112,7 +112,7 @@ describe('no door answers with the driver\'s text', () => {
   }
 
   it('the REST error handler logs nothing of its own for a store failure — the one answer logs it once', () => {
-    const app = stripComments(readFileSync('server/src/app.ts', 'utf8'));
+    const app = stripComments(readFileSync('server/src/api/final-error-handler.ts', 'utf8'));
     const at = app.indexOf('storeFailureAnswer(err');
     assert.ok(at > 0, 'the REST error handler no longer answers through storeFailureAnswer — re-anchor');
     const block = app.slice(at, app.indexOf('return;', at));

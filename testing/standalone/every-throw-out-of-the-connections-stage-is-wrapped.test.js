@@ -94,7 +94,7 @@ describe('applyConnections wraps every throw as ConnectionsNotWritten', () => {
 
 describe('both shared mappers answer ConnectionsNotWritten as what it is', () => {
   const mappers = [
-    { what: 'the global express error handler', re: /app\.use\(\(err\b/ },
+    { what: 'the global express error handler', re: /export function finalErrorHandler\(/ },
     { what: 'the MCP callTool dispatch', re: /export async function callTool\(/ },
   ];
   for (const { what, re } of mappers) {

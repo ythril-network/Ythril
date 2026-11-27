@@ -1,9 +1,5 @@
-import { writeRefusalAnswer } from './brain/write-validation.js';
-import { ConnectionsNotWritten } from './brain/connections-not-written.js';
-import { storeFailureAnswer } from './brain/store-failure.js';
-import { spaceActAnswer } from './spaces/space-act-answer.js';
-import { sendCaughtFailure, sendStoreFailure, sendConnectionsNotWritten, sendEdgeIdentityBuilding } from './api/send-failure.js';
-import { EdgeIdentityBuilding } from './util/errors.js';
+import { sendCaughtFailure, sendStoreFailure } from './api/send-failure.js';
+import { finalErrorHandler } from './api/final-error-handler.js';
 import express from 'express';
 import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
@@ -639,81 +635,8 @@ export function createApp() {
   });
 
   // ── Global error handler ─────────────────────────────────────────────────
-  app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    // Propagate HTTP-level errors from body-parser (e.g. 413 Payload Too Large)
-    if (err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number') {
-      const httpErr = err as { status: number; message: string };
-      const s = httpErr.status;
-      const status = (s >= 400 && s < 600) ? s : 500;
-      res.status(status).json({ error: httpErr.message ?? 'Request error' });
-      return;
-    }
-    /*
-     * A REFERENCE REFUSAL IS THE CALLER'S FAULT, and it reaches here rather than a route.
-     *
-     * The existence check for a link moved from the seven write doors into the writers — which is what
-     * made it true of `linkEntities` as well as of the 4.x arrays it guarded. Express 5 forwards a
-     * rejected handler here, so a caller naming a record that does not exist got **500 Internal server
-     * error** where they used to get a `400` naming the id. A refusal that reads as a server fault is
-     * worse than the silent write it replaced: there is nothing in it to act on.
-     *
-     * Answered HERE and not per door on purpose. Seven branches are seven chances for the next door to
-     * be written without one, and the symptom is a 500 on the path nobody exercised.
-     */
-    /*
-     * THE RECORD LANDED and its connections did not (`Q-170`) — matched before everything below, because the cause it
-     * wraps is a conflict, a refusal or a store failure, and each of those answered as itself tells the caller the
-     * write did not happen. It answers what happened: the cause's status, `written`, and not retryable.
-     */
-    if (err instanceof ConnectionsNotWritten) {
-      // Audited as a write of the record too, which a create's path cannot name (`sendConnectionsNotWritten`).
-      sendConnectionsNotWritten(res, err, `${req.method} ${routeLabel(req)}`);
-      return;
-    }
-    /*
-     * A write a space's standing act refused (`409` with the act's code: a restore, a deletion, a wipe, a rename, a migration), or an
-     * act refused because shutdown closed the runner (`503`). The writers raise it from the write gate, and a route that does not catch
-     * reaches here: without this branch sixteen REST record routes answered `500` for a documented `409` while the MCP door and the
-     * routes that catch answered it right (Q-560). The same function `sendCaughtFailure` and `callTool` ask.
-     */
-    // A restore page of fork edges into a space still rebuilding its edge identity index (`sync/space-import.ts`): the same `503 edge_identity_building` the push doors answer.
-    if (err instanceof EdgeIdentityBuilding) {
-      sendEdgeIdentityBuilding(res, err);
-      return;
-    }
-    const actAnswer = spaceActAnswer(err);
-    if (actAnswer) {
-      res.status(actAnswer.status).json(actAnswer.body);
-      return;
-    }
-    // A refusal (a reference that names nothing, a schema refusal) or a conflict (another write kept moving the record:
-    // nothing was written and a retry is the remedy) — the status and body every shared mapper gives them.
-    const refused = writeRefusalAnswer(err, 'update');
-    if (refused) {
-      res.status(refused.status).json(refused.body);
-      return;
-    }
-    /*
-     * The STORE's condition is the store's on every door (bundle-30, `R1`). A write the bound ended, a step-down, a
-     * dropped socket: retryable, `503` — the classification the MCP door and the read routes already answer from,
-     * so a REST write and the same write through a tool no longer disagree (this answered `500` while the tool
-     * door answered `503`). An unrecognised driver error is answered there too, as a `500` in our words and logged
-     * with its stack; everything else stays the `500` below.
-     */
-    // Named by method and path (never the query, which can carry a file path), as a route's own catch names itself.
-    const store = storeFailureAnswer(err, `${req.method} ${routeLabel(req)}`);
-    if (store) {
-      sendStoreFailure(res, store);
-      return;
-    }
-    /*
-     * The id is no longer spelled out here: every line emitted during a request carries it now, so writing it
-     * again produced it twice on the one line that already had it. The error is the META argument, so the line
-     * keeps its stack and bounds its message (`fmt`) — interpolated, the stack was dropped (bundle-30 I6, C16).
-     */
-    log.error('Unhandled error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  });
+  // Its rule and the order of its answers: `api/final-error-handler.ts`.
+  app.use(finalErrorHandler);
 
   void globalRateLimit; // imported for side-effect registration reference
 
