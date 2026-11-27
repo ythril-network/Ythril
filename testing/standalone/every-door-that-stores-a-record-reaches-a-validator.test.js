@@ -186,7 +186,7 @@ const EXEMPT = {
   'server/src/brain/write-plan/commit.ts:clearStaleWriteGuard':
     'builds the edges\' write-guard index and `$unset`s `_functionalGuard`, a local-only field (`WRITE_GUARD_FIELDS`), on edges '
     + 'already held; no property is written',
-  'server/src/spaces/_shared.ts:repairStaleSpaceIds':
+  'server/src/spaces/_shared.ts:repairStaleSpaceIdsReporting':
     'space creation reached from membership gossip repairs a stale `spaceId` on records already stored: one field, no property',
   'server/src/sync/positions-owed.ts:carryRows':
     'the first carry: the carry and the repair of a space\'s positions (bundle-81): `pos`, `posAtSeq` and `writtenHere` on rows already held, local-only fields no peer overwrites; no property is written and no row is created',

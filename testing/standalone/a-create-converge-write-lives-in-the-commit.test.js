@@ -115,7 +115,7 @@ const EXEMPT = {
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones': 'sync: a peer\'s tombstones delete their records',
   'server/src/brain/candidate-prune.ts:pruneCandidateCollection': 'prunes candidate rows; the collection name is computed',
   'server/src/spaces/lifecycle.ts:wipeSpaceUnqueued': 'the space wipe (its body, run by the space-act runner)',
-  'server/src/spaces/_shared.ts:repairStaleSpaceIds': 'repair: rewrites a stale spaceId field in every collection',
+  'server/src/spaces/_shared.ts:repairStaleSpaceIdsReporting': 'repair: rewrites a stale spaceId field in every collection',
   // sync ingest and import: the receiver stores what a peer or a restore sent, through ONE writer (`Q-107` part 1;
   // y-flows convention `convention-ythril-an-arrival-is-stored-by-one-writer`). It replaced `ingestBrainDoc` (push, import) and the pull's
   // `batchUpsertBySeq`, and the routes' inline `$setOnInsert`, which is why the docs.ts orphan exemption is gone.

@@ -89,7 +89,7 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
   };
   const { repaired, failures } = await repairStaleSpaceIdsReporting(spaceId);
   // Never let a repair failure block startup — the space is still usable.
-  for (const { what, err } of failures) log.warn(`Stale-spaceId repair: ${what}: ${swallowed(err)}`);
+  for (const { what, err } of failures) log.warn(`Stale-spaceId repair: ${peerText(what)}: ${swallowed(err)}`);
   return repaired;
 }
 
