@@ -4,9 +4,16 @@
  * reads them all here, so a door added to the list is read by every such suite and none can leave one out.
  */
 
-/** A statement of an N-Quads text without its graph, as a sorted line list. */
+/**
+ * An N-Quads document without its ending, the statements of its report graph and its closing comment (what every RDF export closes with):
+ * the ending is the export's own, not what the CONSTRUCT made, so a comparison with the other doors reads the document without it.
+ */
+export const withoutReportGraph = (text) => text.split('\n')
+  .filter(l => !/ <urn:ythril:export-report:[0-9a-f]+> \.\s*$/.test(l) && !l.startsWith('# ythril-export: ')).join('\n');
+
+/** A statement of an N-Quads text without its graph, as a sorted line list (the report graph's statements are not among them). */
 export function triplesOfNQuads(text) {
-  return text.split('\n').map(l => l.trim()).filter(Boolean)
+  return withoutReportGraph(text).split('\n').map(l => l.trim()).filter(Boolean)
     // `<s> <p> <o> .` or `<s> <p> <o> <g> .`: the graph is dropped, whichever door wrote it.
     .map(l => l.replace(/ <[^<>]*> \.$/, ' .').replace(/ \.$/, ''))
     .sort();
