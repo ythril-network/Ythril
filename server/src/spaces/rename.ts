@@ -10,12 +10,13 @@ import { moveVersionMark } from '../util/version-mark.js';
 import { moveScanCursors } from '../brain/scan-cursor.js';
 import path from 'path';
 import { getDb } from '../db/mongo.js';
-import { getConfig, saveConfig, getDataRoot, mutateConfig } from '../config/loader.js';
+import { getConfig, saveConfig, getDataRoot, mutateConfig, reloadConfig } from '../config/loader.js';
 import { log, peerText, refusalOfParse } from '../util/log.js';
 import type { Config, SpaceConfig } from '../config/types.js';
 import { moveEveryMark } from '../sync/receive-marks.js';
 import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
-import { repairStaleSpaceIds } from './_shared.js';
+import { repairStaleSpaceIdsReporting } from './_shared.js';
+import { RenameLedger } from './rename-ledger.js';
 import { forgetHeld } from './schema-stamp.js';
 import {
   runSpaceAct, registerSpaceAct, releaseSpaceActWaiter, defineSpaceActBody, spaceActStands, SpaceActsClosedError,
@@ -26,7 +27,7 @@ import { assertNotRetiredSpaceId, ReservedSpaceIdError, unknownSpaceSentence } f
 import { renameSpaceInViews } from '../config/views.js';
 import { builtInRefusal } from './built-in-space.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
-import { refusalText } from '../brain/store-failure.js';
+import { refusalText, isStoreSide } from '../brain/store-failure.js';
 import { SPACE_ACT_KINDS, isInstanceWide } from '../config/types-space-acts.js';
 import { SpaceNotWritableError, spaceWriteClosedAnswer, type SpaceWriteClosedCode } from './space-write-gate.js';
 import { moveTree } from '../files/remove-tree.js';
@@ -54,11 +55,18 @@ function stepFailed(what: string, err: unknown, errors: string[]): void {
  * part-way — and never reads its sentence, which holds every failed step's words, for a refusal's.
  */
 class RenameIncompleteError extends Error {
-  constructor(spaceId: string, errors: string[]) {
+  /**
+   * `left` is what the refused rename could not move back, named (empty: everything is back under the old name, nothing is split).
+   * Either way the answer says which, and how to finish, so a space never stands split across two names with no word of it (Q-978).
+   */
+  constructor(spaceId: string, newId: string, errors: string[], left: string[]) {
     super(
-      `Space '${spaceId}' rename incomplete (${errors.length} error(s)). ` +
-      `Rename will be resumed on retry or next restart. ` +
-      `Errors: ${errors.join('; ')}`,
+      left.length === 0
+        ? `Space '${spaceId}' was not renamed (${errors.length} error(s)): what had moved was moved back, and the space stands whole under '${spaceId}'. ` +
+          `Errors: ${errors.join('; ')}`
+        : `Space '${spaceId}' was not renamed, and what moved could not all be moved back: ${left.join('; ')} stay under '${newId}'. ` +
+          `Repeat the same rename to finish it; it is also resumed at the next restart. ` +
+          `Errors: ${errors.join('; ')}`,
     );
     this.name = 'RenameIncompleteError';
   }
@@ -70,6 +78,11 @@ class RenameIncompleteError extends Error {
  *  completes it. Returns hard errors (empty on full success). */
 export async function moveSpaceData(
   oldId: string, newId: string, fileTree: <T>(fn: () => Promise<T>) => Promise<T> = (fn) => fn(),
+  /**
+   * Every step that moves something records it here with the call that moves it back (`rename-ledger.ts`): the caller that ends a
+   * rename which did not commit moves it all back. A caller that only finishes a rename (the boot resume) passes none and never undoes.
+   */
+  ledger: RenameLedger = new RenameLedger(),
 ): Promise<string[]> {
   const db = getDb();
   const errors: string[] = [];
@@ -88,6 +101,7 @@ export async function moveSpaceData(
     const newName = `${newId}_${suffix}`;
     try {
       await db.collection(coll.name).rename(newName);
+      ledger.did(`collection ${newName}`, async () => { await db.collection(newName).rename(coll.name); });
       log.debug(`Renamed collection ${peerText(coll.name)} → ${peerText(newName)}`);
     } catch (err) {
       stepFailed(`Could not rename collection ${coll.name} → ${newName}`, err, errors);
@@ -105,12 +119,24 @@ export async function moveSpaceData(
   //
   // Idempotent, and safe on a partial re-run: a document living in `{newId}_*` belongs to
   // `newId` by definition, so we only touch the ones that disagree.
+  //
+  // A failure of the rewrite stops the rename like any other step (Q-978): it used to be swallowed, so a rename could commit with its
+  // documents under the new name still carrying the old one. Recorded BEFORE the failures are read, since a rewrite that failed on one
+  // collection has rewritten the others. Moved back while the collections still stand under `newId` (the ledger undoes the last step first).
+  let rewrite: Awaited<ReturnType<typeof repairStaleSpaceIdsReporting>> | undefined;
   try {
-    const repaired = await repairStaleSpaceIds(newId);
-    if (repaired > 0) log.debug(`Rewrote spaceId on ${repaired} document(s) for renamed space ${peerText(newId)}`);
+    rewrite = await repairStaleSpaceIdsReporting(newId);
   } catch (err) {
     stepFailed(`Could not rewrite spaceId field for renamed space ${newId}`, err, errors);
   }
+  if (rewrite && (rewrite.repaired > 0 || rewrite.failures.length > 0)) {
+    ledger.did(`spaceId of the documents of ${newId}`, async () => {
+      const back = await repairStaleSpaceIdsReporting(oldId, newId);
+      if (back.failures[0]) throw back.failures[0].err;
+    });
+  }
+  if (rewrite && rewrite.repaired > 0) log.debug(`Rewrote spaceId on ${rewrite.repaired} document(s) for renamed space ${peerText(newId)}`);
+  for (const f of rewrite?.failures ?? []) stepFailed(`Could not rewrite spaceId field for renamed space ${newId} (${f.what})`, f.err, errors);
 
   // The schema snapshots moved with the collections: what is known held under either id is asked of the store again.
   forgetHeld(oldId);
@@ -121,6 +147,7 @@ export async function moveSpaceData(
   try {
     const { renameReindexRun } = await import('../brain/reindex.js');
     await renameReindexRun(oldId, newId);
+    ledger.did(`reindex run of ${newId}`, () => renameReindexRun(newId, oldId, newId));
   } catch (err) {
     stepFailed(`Could not move the reindex run from ${oldId} to ${newId}`, err, errors);
   }
@@ -130,6 +157,7 @@ export async function moveSpaceData(
   try {
     const { renameSpillsForSpace } = await import('../brain/read-spill-store.js');
     await renameSpillsForSpace(oldId, newId);
+    ledger.did(`read spills of ${newId}`, () => renameSpillsForSpace(newId, oldId));
   } catch (err) {
     stepFailed(`Could not move read spills from ${oldId} to ${newId}`, err, errors);
   }
@@ -154,11 +182,13 @@ export async function moveSpaceData(
   // Its own step: a config.json save that fails is reported as itself and does not skip the counter move.
   try {
     moveVersionMark(oldId, newId);
+    ledger.did(`version mark of ${newId}`, async () => { moveVersionMark(newId, oldId); });
   } catch (err) {
     stepFailed(`Could not move the version mark in config.json ${oldId} → ${newId}`, err, errors);
   }
   try {
     const moved = await moveCounterDoc(oldId, newId);
+    ledger.did(`counter document of ${newId}`, async () => { await moveCounterDoc(newId, oldId); });
     if (moved) log.debug(`Migrated the counter document ('ythril_counters') ${peerText(oldId)} → ${peerText(newId)} (seq=${moved.seq})`);
   } catch (err) {
     stepFailed(`Could not migrate the counter document ('ythril_counters') ${oldId} → ${newId}`, err, errors);
@@ -168,6 +198,7 @@ export async function moveSpaceData(
   // cursor from before the rename stays as valid as it was.
   try {
     await moveFileFeedFloor(oldId, newId);
+    ledger.did(`file change feed floor of ${newId}`, () => moveFileFeedFloor(newId, oldId));
   } catch (err) {
     stepFailed(`Could not migrate the file change feed floor ('${FILE_FEED_FLOORS}') ${oldId} → ${newId}`, err, errors);
   }
@@ -177,6 +208,7 @@ export async function moveSpaceData(
   // move it across rather than stranding it.
   try {
     await moveScanCursors(oldId, newId);
+    ledger.did(`dupe-scan cursors of ${newId}`, () => moveScanCursors(newId, oldId));
   } catch (err) {
     // Non-fatal: worst case the renamed space re-scans for duplicates from scratch.
     log.warn(`Could not migrate the dupe-scan cursor ${peerText(oldId)} → ${peerText(newId)}: ${peerText(err)}`);
@@ -199,6 +231,7 @@ export async function moveSpaceData(
   try {
     // Bounded when an act runs it (`fileTree`): a stuck mount fails the attempt instead of holding the lane.
     if (await fileTree(() => moveTree(oldDir, newDir, { replaceDestination: 'if-empty' })) === 'moved') {
+      ledger.did(`files directory of ${newId}`, async () => { await fileTree(() => moveTree(newDir, oldDir, { replaceDestination: 'if-empty' })); });
       log.debug(`Moved files directory ${peerText(oldDir)} → ${peerText(newDir)}`);
     }
   } catch (err) {
@@ -213,7 +246,10 @@ export async function moveSpaceData(
     if (moved === 'replaced') {
       log.warn(`Removed leftover chunked-upload staging of '${peerText(newId)}' (no configured space owns it) to move the chunk uploads of '${peerText(oldId)}' into its place`);
     }
-    if (moved !== 'absent') log.debug(`Moved chunk uploads directory ${peerText(oldChunks)} → ${peerText(newChunks)}`);
+    if (moved !== 'absent') {
+      ledger.did(`chunk uploads directory of ${newId}`, async () => { await fileTree(() => moveTree(newChunks, oldChunks, { replaceDestination: 'staging' })); });
+      log.debug(`Moved chunk uploads directory ${peerText(oldChunks)} → ${peerText(newChunks)}`);
+    }
   } catch (err) {
     stepFailed(`Could not move chunk uploads directory ${oldId} → ${newId}`, err, errors);
   }
@@ -223,6 +259,7 @@ export async function moveSpaceData(
   try {
     const { renameRdfImportsOfSpace } = await import('./rdf-import-files.js');
     await renameRdfImportsOfSpace(oldId, newId);
+    ledger.did(`RDF imports of ${newId}`, () => renameRdfImportsOfSpace(newId, oldId));
   } catch (err) {
     stepFailed(`Could not move the RDF imports of ${oldId} to ${newId}`, err, errors);
   }
@@ -233,6 +270,7 @@ export async function moveSpaceData(
   try {
     const { renameSpaceActivity } = await import('../metrics/space-activity-store.js');
     const moved = await renameSpaceActivity(oldId, newId);
+    ledger.did(`usage history of ${newId}`, async () => { await renameSpaceActivity(newId, oldId); });
     if (moved > 0) log.debug(`Moved ${moved} activity bucket(s) from '${peerText(oldId)}' to '${peerText(newId)}'`);
   } catch (err) {
     // Non-fatal: a rename that otherwise succeeded must not fail over its usage history.
@@ -520,13 +558,58 @@ async function renameSpaceInner(
     saveConfig(cfg);
   }
 
-  const errors = await moveSpaceData(oldId, newId, fileTree);
-  if (errors.length > 0) {
-    // Keep the marker — the rename is incomplete but idempotent, so a retry or the
-    // next boot resumes it. Config still points at the old id until it commits.
-    throw new RenameIncompleteError(oldId, errors);
+  const ledger = new RenameLedger();
+  let errors: string[] = [];
+  let failure: { err: unknown } | undefined;
+  try {
+    errors = await moveSpaceData(oldId, newId, fileTree, ledger);
+    if (errors.length === 0) return await commitRename(oldId, newId);
+  } catch (err) {
+    failure = { err };
   }
+  // Refused: a step failed (collected, or thrown as the store's failure), or the commit did. Whichever, and at whichever step, what
+  // moved is moved back before the answer (Q-978): the one place a rename that did not commit ends.
+  throw await refusedRenameEnd(oldId, newId, ledger, errors, failure);
+}
 
+/**
+ * The end of a rename that did not commit: move back what it moved, then say how it ended. Returns the error to throw.
+ *
+ * Everything back: the marker is cleared (the space stands whole under its old name, and a retry starts over), and a failure thrown by a
+ * step or by the commit is answered as it always was (the store's own answer, the commit's own refusal). A failure our steps collected
+ * says `was not renamed` and that the space is whole. What could not be moved back keeps the marker, is named in the log, and a
+ * collected failure's answer names it; the store's failure stays the store's answer, which every door words alike (`brain/store-failure.ts`),
+ * and a retry of the same rename finishes what is left.
+ */
+async function refusedRenameEnd(
+  oldId: string, newId: string, ledger: RenameLedger, errors: string[], failure: { err: unknown } | undefined,
+): Promise<unknown> {
+  const left = await ledger.moveBack();
+  // The schema snapshots moved with the collections: what is known held under either id is asked of the store again.
+  forgetHeld(oldId);
+  forgetHeld(newId);
+  if (left.length === 0) clearRenameMarker(oldId, newId);
+  else log.error(`Rename of space '${peerText(oldId)}' to '${peerText(newId)}' was refused and could not all be moved back; ${peerText(left.join('; '))} stay under '${peerText(newId)}'. The marker is kept: repeating the same rename finishes it.`);
+  if (!failure) return new RenameIncompleteError(oldId, newId, errors, left);
+  if (left.length > 0 && !isStoreSide(failure.err)) return new RenameIncompleteError(oldId, newId, [refusalText(failure.err)], left);
+  return failure.err;
+}
+
+/** Clear the marker of a rename whose data is whole under the old name. A save that fails leaves it, which a retry or the next start resumes. */
+function clearRenameMarker(oldId: string, newId: string): void {
+  try {
+    mutateConfig(cfg => {
+      const op = cfg.pendingSpaceOp;
+      if (op?.type === 'rename' && op.spaceId === oldId && op.newId === newId) delete cfg.pendingSpaceOp;
+    });
+  } catch (err) {
+    log.warn(`Could not clear the marker of the refused rename of '${peerText(oldId)}' to '${peerText(newId)}'; a retry or the next start resumes it: ${peerText(err)}`);
+    try { reloadConfig(); } catch { /* the next write reloads it */ }
+  }
+}
+
+/** The commit of a rename whose data moved. */
+async function commitRename(oldId: string, newId: string): Promise<SpaceConfig> {
   // Commit: physical move done — apply the logical config change and clear the marker in one
   // atomic write.
   //

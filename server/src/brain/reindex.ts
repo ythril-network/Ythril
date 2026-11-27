@@ -471,11 +471,14 @@ export async function reindexRunFlags(spaceId: string): Promise<boolean> {
  * After a rename moved the run document to the new space's collection, make its `members` name the new id. A resumed
  * run walks `members`; left at the old id it would walk a space that no longer exists, and never end. `spaceId` is
  * already rewritten by `repairStaleSpaceIds`, the step of the rename that fixes it in every moved collection.
+ *
+ * `inCollectionsOf` is the space whose run collection holds the document (default `newId`, where a rename just moved it). A
+ * refused rename that moves back asks for `renameReindexRun(newId, oldId, newId)` while the collection still stands under `newId`.
  */
-export async function renameReindexRun(oldId: string, newId: string): Promise<void> {
-  const doc = await runs(newId).findOne(asFilter<ReindexRunDoc>({ _id: RUN_ID })) as ReindexRunDoc | null;
+export async function renameReindexRun(oldId: string, newId: string, inCollectionsOf: string = newId): Promise<void> {
+  const doc = await runs(inCollectionsOf).findOne(asFilter<ReindexRunDoc>({ _id: RUN_ID })) as ReindexRunDoc | null;
   if (!doc) return;
-  await runs(newId).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }), {
+  await runs(inCollectionsOf).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }), {
     $set: { members: doc.members.map(m => (m === oldId ? newId : m)) },
   });
 }

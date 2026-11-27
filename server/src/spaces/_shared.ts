@@ -76,7 +76,6 @@ export function setReindexNeeded(spaceId: string, needed: boolean): void {
  * disagree, and there is nothing it could wrongly "fix".
  */
 export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
-  const db = getDb();
   /**
    * What the log says of a failure the repair swallows. A failure on the STORE's side is said as that and nothing of the
    * driver's text (hosts, addresses, the store's own sentence): the repair carries on, so it is not the failure's last
@@ -88,7 +87,28 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
     if (f.status < 500) return peerText(err);
     return `a store failure${f.code !== undefined ? ` (code ${f.code}${f.codeName ? ` ${peerText(f.codeName)}` : ''})` : ''}; the repair is idempotent and runs again on the next boot or rename`;
   };
-  const prefix = `${spaceId}_`;
+  const { repaired, failures } = await repairStaleSpaceIdsReporting(spaceId);
+  // Never let a repair failure block startup — the space is still usable.
+  for (const { what, err } of failures) log.warn(`Stale-spaceId repair: ${what}: ${swallowed(err)}`);
+  return repaired;
+}
+
+/**
+ * The repair of `repairStaleSpaceIds`, with its failures handed back instead of swallowed: how many documents it rewrote, and each
+ * step that failed (`what` names it, `err` is the error as thrown). Nothing is logged for a failure here; the caller says it.
+ * It sets `spaceId` on the documents of the collections under `inCollectionsOf` (default: `spaceId` itself) to `spaceId`; a rename
+ * that moves back asks for the other pair, while the collections still stand under the new name.
+ *
+ * The caller that must not go on past a failure is the space rename: one that committed over a repair that failed left the
+ * documents of a space under its new name carrying the old name, invisible to every list, with no error anywhere (Q-978). The boot
+ * path (`repairStaleSpaceIds`) swallows, as it always did.
+ */
+export async function repairStaleSpaceIdsReporting(
+  spaceId: string, inCollectionsOf: string = spaceId,
+): Promise<{ repaired: number; failures: Array<{ what: string; err: unknown }> }> {
+  const db = getDb();
+  const failures: Array<{ what: string; err: unknown }> = [];
+  const prefix = `${inCollectionsOf}_`;
 
   // Discover the space's collections rather than iterating a hardcoded list.
   //
@@ -107,8 +127,8 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
       .map(c => c.name)
       .filter(n => n.startsWith(prefix));
   } catch (err) {
-    log.warn(`Stale-spaceId repair: could not list collections for '${peerText(spaceId)}': ${swallowed(err)}`);
-    return 0;
+    failures.push({ what: `could not list collections for '${peerText(inCollectionsOf)}'`, err });
+    return { repaired: 0, failures };
   }
 
   let repaired = 0;
@@ -126,8 +146,7 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
       );
       repaired += res.modifiedCount ?? 0;
     } catch (err) {
-      // Never let a repair failure block startup — the space is still usable.
-      log.warn(`Stale-spaceId repair failed for ${peerText(name)}: ${swallowed(err)}`);
+      failures.push({ what: `failed for ${peerText(name)}`, err });
     }
   }
 
@@ -138,7 +157,7 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
       `present but invisible to list/lookup queries; they are now visible again.`,
     );
   }
-  return repaired;
+  return { repaired, failures };
 }
 
 /**
