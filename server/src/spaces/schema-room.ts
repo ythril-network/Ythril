@@ -49,6 +49,9 @@ export interface SchemaRoomRefusal {
 
 const MiB = 1024 * 1024;
 const GiB = 1024 * MiB;
+/** The digits a size is first shown with, and the most a quota sentence adds to make the used figure read above the limit. */
+const SHOWN_DIGITS = 2;
+const MOST_DIGITS = 9;
 
 // One snapshot row must hold the bound and what it holds beside the text: the bound that binds first is the peer's, never the document's.
 if (SCHEMA_SNAPSHOT_MAX_BYTES >= MAX_BSON_OBJECT_SIZE) throw new Error('SCHEMA_SNAPSHOT_MAX_BYTES is no longer below one stored document: a schema inside it would not fit its snapshot row');
@@ -61,8 +64,8 @@ export function quotaSentence(area: string, usedGiB: number, limitGiB: number): 
   const [unit, size] = limitGiB < 1 ? ['MiB', MiB / GiB] as const : ['GiB', 1] as const;
   const used = usedGiB / size;
   const limit = limitGiB / size;
-  let digits = 2;
-  while (digits < 9 && Number(used.toFixed(digits)) <= Number(limit.toFixed(digits))) digits += 1;
+  let digits = SHOWN_DIGITS;
+  while (digits < MOST_DIGITS &&Number(used.toFixed(digits)) <= Number(limit.toFixed(digits))) digits += 1;
   return `Storage ${area} hard limit exceeded: ${used.toFixed(digits)} ${unit} used of ${Number(limit.toFixed(digits))} ${unit} allowed`;
 }
 
@@ -78,7 +81,7 @@ export async function schemaRoomRefusal(current: SpaceMeta | undefined, next: Sp
   if (growth <= 0) return null;
   if (nextBytes > SCHEMA_SNAPSHOT_MAX_BYTES) {
     return { status: TOO_LARGE, body: { code: SCHEMA_TOO_LARGE, error:
-      `The schema would take ${nextBytes} bytes (${(nextBytes / MiB).toFixed(2)} MiB), more than the ${SCHEMA_SNAPSHOT_MAX_BYTES} bytes (${SCHEMA_SNAPSHOT_MAX_BYTES / MiB} MiB) `
+      `The schema would take ${nextBytes} bytes (${(nextBytes / MiB).toFixed(SHOWN_DIGITS)} MiB), more than the ${SCHEMA_SNAPSHOT_MAX_BYTES} bytes (${SCHEMA_SNAPSHOT_MAX_BYTES / MiB} MiB) `
       + 'a schema may take: peers refuse to fetch a larger one, so it could never sync. Nothing was written; remove or shorten types to fit.' } };
   }
   try {
