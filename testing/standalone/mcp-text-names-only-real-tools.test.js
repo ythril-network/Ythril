@@ -76,7 +76,8 @@ before(async () => {
   const { RECORD_VERSION_AT_CEILING } = await import('../../server/dist/brain/write-precondition.js');
   // And the `code` an ordinary edit of a fork row, or a re-key past the fork cap, answers (Q-624: `fork_row_read_only`, `fork_cap`), from their one list.
   // And the code a link taken back because its entity was deleted meanwhile carries (`link_target_removed`, Q-305: a warning row, or the 409 of a link written on its own), from its constant beside the other.
-  const { FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED } = await import('../../server/dist/util/errors.js');
+  // And the code an edit answers when other writes moved its record on every try (`write_race_lost`, bundle-378 Q-976: the update tools and `write_file` name it), from its constant.
+  const { FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, WRITE_RACE_LOST } = await import('../../server/dist/util/errors.js');
   assert.ok(FORK_REFUSAL_CODES?.length >= 2, 'the fork refusal codes were not read');
   // And the `code` a create or a rename answers while a deleted space's search-index drop still runs (`space_still_being_removed`), from its constant.
   const { SPACE_STILL_BEING_REMOVED } = await import('../../server/dist/spaces/search-index-drops-in-flight.js');
@@ -120,7 +121,7 @@ before(async () => {
   const { UNCONVERTED_REASONS } = await import('../../server/dist/brain/schema-convert-items.js');
   assert.ok(SCHEMA_CONVERT_REFUSAL_CODES?.length >= 5 && UNCONVERTED_REFUSAL_CODES?.length >= 5 && UNCONVERTED_REASONS?.length >= 5, 'the conversion refusal codes and reason classes were not read');
   ANSWER_VALUES = [SCHEMA_CONVERT_VIEW_STATE, ...SCHEMA_CONVERT_REFUSAL_CODES,...UNCONVERTED_REFUSAL_CODES, ...UNCONVERTED_REASONS, ...DEGRADED_REASONS, ...FILE_CHANGES_REFUSAL_CODES, ...SCHEMA_VERSION_REFUSAL_CODES,...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
-    ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED, ...SYNC_ANSWER_CODES,
+    ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, WRITE_RACE_LOST, SPACE_STILL_BEING_REMOVED, ...SYNC_ANSWER_CODES,
     ...RDF_EXPORT_REFUSAL_CODES, ...RDF_SCHEMA_REFUSAL_CODES, ...SPARQL_ENDPOINT_CODES, ...SPARQL_WARNING_CODES,
     ...SPARQL_UPDATE_ACT_CODES, ...SPARQL_UPDATE_REFUSAL_CODES, ...TRIPLE_INDEX_REBUILD_REFUSAL_CODES, ...viewCodes];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');

@@ -22,7 +22,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/rdf/triple-index/write-counter.ts';
@@ -32,7 +32,7 @@ const SPELLED = /\$inc\s*:\s*(?:Object\.freeze\(\s*)?\{\s*writes\s*:/;
 const code = stripComments;
 
 describe('the write counter update is spelled in one module', () => {
-  const sources = readTrackedSources(['server/src'], { ext: ['.ts'], specs: false, floor: 50 });
+  const sources = readTrackedSources([...SERVER_CODE_ROOTS], { ext: ['.ts'], specs: false, floor: 50 });
 
   it('no module but the leaf spells the update', () => {
     const spellers = sources.filter(s => SPELLED.test(code(s.text))).map(s => s.file.replace(/\\/g, '/'));
