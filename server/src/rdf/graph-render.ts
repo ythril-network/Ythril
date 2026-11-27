@@ -10,7 +10,7 @@
  * - **A term no document can carry, said in a part of it.** A statement the writer refuses is `409 rdf_unwritable` ({@link unwritable}),
  *   which names no part of the term (the term may be the query's own text).
  */
-import { createRdfWriter, rdfVersionOf, RdfWriteError, type RdfFormat } from './serialize.js';
+import { createRdfWriter, rdfVersionOf, RdfWriteError, type RdfFormat, type RdfWriter } from './serialize.js';
 import { rdfContentType } from './export-format.js';
 import { EXPORT_CONFLICT } from '../export/export-statuses.js';
 import type { Quad } from './literals.js';
@@ -31,12 +31,15 @@ export const unwritable = (): GraphRefusal => ({
 /** Does a statement hold a triple term (only an object can)? */
 export const holdsTriple = (q: Quad): boolean => q.object.kind === 'triple';
 
-/** A graph answer by the export's writer: RDF 1.2 (announced) only when a statement holds a triple term. */
-export function renderGraph(format: RdfFormat, quads: readonly Quad[]): RenderedAnswer | GraphRefusal {
+/**
+ * A graph answer by the export's writer: RDF 1.2 (announced) only when a statement holds a triple term. `ending` writes the document's end
+ * in place of a bare close (the SPARQL view's export ends as every other export does); it is handed the writer that wrote the document.
+ */
+export function renderGraph(format: RdfFormat, quads: readonly Quad[], ending?: (writer: RdfWriter) => string): RenderedAnswer | GraphRefusal {
   const edgeDetails = quads.some(holdsTriple) ? 'rdf12' : 'reification';
   try {
     const writer = createRdfWriter(format, { edgeDetails });
-    const body = writer.open() + writer.write({ quads }) + writer.close();
+    const body = writer.open() + writer.write({ quads }) + (ending ? ending(writer) : writer.close());
     return { contentType: rdfContentType(format, rdfVersionOf(format, edgeDetails)), body };
   } catch (err) {
     if (err instanceof RdfWriteError) return unwritable();

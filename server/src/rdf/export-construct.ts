@@ -26,7 +26,7 @@ import { rdfContentDisposition, RDF_MEDIA_TYPES } from './export-format.js';
 import { constructStatements, VIEW_CONSTRUCT_TOO_LARGE_STATUS } from './view-construct.js';
 import type { Quad, EdgeDetails } from './literals.js';
 import type { RdfRecordKind } from './record-triples.js';
-import type { RdfFormat } from './serialize.js';
+import type { RdfFormat, RdfWriter } from './serialize.js';
 import type { ResolvedBudget } from '../brain/result-budget.js';
 import type { RdfCaller, FingerprintOf } from './rdf-space-state.js';
 import type { RdfExportPage, RdfExportRefusal, RdfExportSummary } from './export-shapes.js';
@@ -38,6 +38,12 @@ const RDF_EXPORT_INCOMPLETE = 'rdf_export_incomplete';
  * it, which is what tells it from `view_construct_too_large`, a CONSTRUCT that is past its cap whatever the budget.
  */
 export const RDF_EXPORT_BUDGET_EXCEEDED = 'rdf_export_budget_exceeded';
+
+/**
+ * The document's end, written by the export act's own ending (the one every RDF export closes with, so the export screen reads this one as
+ * whole): given the writer that wrote the statements and the count of records the CONSTRUCT read.
+ */
+export type ConstructEnding = (writer: RdfWriter, records: number) => string;
 
 /** What the export act judged before the run: the members, the format, the budget and the slot. */
 export interface ConstructPageInput {
@@ -55,7 +61,7 @@ export interface ConstructPageInput {
 }
 
 /** The page of a SPARQL view's export, or its refusal. @throws what is no refusal of the run (a fault of the server) */
-export async function constructPage(p: ConstructPageInput, construct: string): Promise<RdfExportPage | RdfExportRefusal> {
+export async function constructPage(p: ConstructPageInput, construct: string, ending: ConstructEnding): Promise<RdfExportPage | RdfExportRefusal> {
   const members = p.exported.map(e => e.space);
   const { timeoutMs, maxResultBytes } = sparqlLimits(getConfig());
   const deadline = Date.now() + timeoutMs;
@@ -85,7 +91,7 @@ export async function constructPage(p: ConstructPageInput, construct: string): P
     // Data address answer them: one cause is one answer on every door. Every status a run refuses with is one of the export's own.
     return { status: refused.status as RdfExportRefusal['status'], code: refused.code, error: refused.message };
   }
-  const rendered = renderGraph(p.format, made);
+  const rendered = renderGraph(p.format, made, writer => ending(writer, recordsRead));
   if ('code' in rendered) return { status: EXPORT_CONFLICT, code: rendered.code, error: rendered.error };
   const chars = rendered.body.length;
   const bytes = Buffer.byteLength(rendered.body, 'utf8');
