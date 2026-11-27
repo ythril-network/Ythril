@@ -22,7 +22,7 @@
  *    the next rename and delete of other spaces complete. Windows only: a Linux directory rename does not fail on an open handle.
  *  - (b) the same under `.chunks/<old>`: `.chunks/<new>` exists and `.chunks/<old>` does not. Windows only, for the same reason.
  *  - (c) a directory move that stays refused for longer than the retry window (a handle held on Windows, a non-empty directory under
- *    the new id elsewhere): the rename answers 500 "was not renamed", moves back what it moved and leaves no marker, and the same
+ *    the new id elsewhere): the rename answers 500 "was not renamed", moves back what it moved, leaves no marker and ends its act, and the same
  *    rename, once the cause is lifted, completes. Every platform.
  *
  * ## Seen red
@@ -57,7 +57,7 @@ const space = id => ({ id, label: id, folders: [], completeLinkage: true });
 const dataPath = (...parts) => path.join(process.env['DATA_ROOT'], ...parts);
 
 describe('a space rename and a concurrent holder', { skip }, () => {
-  let mongo, loader, lifecycle, renameMod;
+  let mongo, loader, lifecycle, renameMod, actsMod;
 
   before(async () => {
     fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
@@ -75,6 +75,7 @@ describe('a space rename and a concurrent holder', { skip }, () => {
     }
     lifecycle = await import('../../server/dist/spaces/lifecycle.js');
     renameMod = await import('../../server/dist/spaces/rename.js');
+    actsMod = await import('../../server/dist/spaces/space-act-runner.js');
   });
   after(async () => {
     await closeTestMongo();
@@ -133,6 +134,8 @@ describe('a space rename and a concurrent holder', { skip }, () => {
     assert.equal(r.status, 500, `a rename that could not move the files answered ${answer(r)}`);
     assert.match(String(r.error), /was not renamed/);
     assert.equal(loader.getConfig().pendingSpaceOp, undefined, 'the failed rename kept its marker although everything moved back');
+    // The act ended with the refusal: nothing is owed or queued for the space, so it takes writes and nothing retries behind the caller's back.
+    assert.equal(actsMod.spaceActStands(loader.getConfig(), 'held-c'), null, 'the refused rename that moved fully back still stands as an act');
     assert.ok(fs.existsSync(dataPath('files', 'held-c', 'transcripts', 'a.md')), 'the refused rename left the files away from the old id');
     assert.ok(loader.getConfig().spaces.some(s => s.id === 'held-c') && !loader.getConfig().spaces.some(s => s.id === 'held-c2'), 'the refused rename changed the config');
     assert.equal((await mongo.col('held-c_facts').findOne({ _id: 'held-c-f' }))?.spaceId, 'held-c', 'the refused rename left the collections away from the old id');

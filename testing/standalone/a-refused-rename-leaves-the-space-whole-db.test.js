@@ -59,7 +59,7 @@ const FILE = 'probe.txt';
 
 /** One space per case: a refused rename leaves its mark on the space, and the next case must not read it. */
 const CASES = ['collection', 'repair', 'counter', 'floor', 'reindex', 'tree', 'commit', 'undo', 'split', 'mcp',
-  'landcoll', 'landcounter', 'landfloor', 'keptcounter', 'leftover', 'repeat', 'commitwrite'];
+  'landcoll', 'landcounter', 'landfloor', 'keptcounter', 'leftover', 'repeat', 'commitwrite', 'markerclear', 'markerother', 'usage', 'warns'];
 const idOf = (c) => `rf-${c}`;
 const SPILLS = '_read_spills';
 const MARK = 250_000;
@@ -459,5 +459,95 @@ describe('a refused rename leaves the space whole', { skip }, () => {
       fs.writeFileSync = realWrite;
       proto.bulkWrite = realBulk;
     }
+  });
+
+  // ── What the second review proved (F2, F3, F4) ───────────────────────────────────────────────────────────────────────────────────────────────
+
+  it('the marker cannot be cleared after a full move back: the rename stays owed, the answer says so, and another space\'s rename does not finish it behind that answer', async () => {
+    const id = idOf('markerclear');
+    const newId = `${id}-moved`;
+    const realWrite = fs.writeFileSync;
+    let armed = false, failed = 0;
+    // The write that records the marker names the new id and arms the fault; the next write of config.json without a marker (the clear) fails, once.
+    const plant = () => {
+      strangerDir(newId);
+      fs.writeFileSync = function failMarkerClear(file, data, ...rest) {
+        if (String(file).endsWith('config.json.tmp')) {
+          const s = String(data);
+          if (s.includes('"pendingSpaceOp"') && s.includes(newId)) armed = true;
+          else if (armed && failed === 0 && !s.includes('"pendingSpaceOp"')) {
+            failed++;
+            throw Object.assign(new Error('EIO: i/o error, write'), { code: 'EIO', syscall: 'write' });
+          }
+        }
+        return realWrite.call(this, file, data, ...rest);
+      };
+    };
+    let r;
+    try {
+      r = await refused('markerclear', plant);
+    } finally {
+      fs.writeFileSync = realWrite;
+    }
+    assert.equal(failed, 1, 'the marker clear was not failed, so the rename never reached it');
+    assert.equal(r.a.status, 500, `answered ${r.a.status}: ${r.a.raw}`);
+    assert.ok(!/stands whole/.test(r.a.raw), `the answer says the space stands whole while its marker stands: ${r.a.raw}`);
+    assert.match(r.a.raw, /repeat the same rename/i, `the answer does not say how to finish: ${r.a.raw}`);
+    assert.equal(getConfig().pendingSpaceOp?.newId, newId, 'the marker is not standing');
+    assert.equal(standing(id).act, 'rename', 'the act of a rename whose marker stands has ended: the space refuses writes with nothing owed');
+    // The cause (the directory under the new name) still stands: another space's rename settles the marker first and cannot finish it.
+    const other = await rest('PATCH', `/api/spaces/${idOf('markerother')}/rename`, { newId: `${idOf('markerother')}-moved` });
+    assert.notEqual(other.status, 200, `another space's rename finished the refused rename behind its answer: ${other.raw}`);
+    assert.deepEqual(getConfig().spaces.map(s => s.id).filter(s => s === id || s === newId), [id], 'the refused rename was rolled forward');
+    fs.rmSync(dirOf(newId), { recursive: true, force: true });
+    await assertRetryCompletes('markerclear', r);
+  });
+
+  it('usage counted for the old id while a refused rename ran is kept by its move back', async () => {
+    const id = idOf('usage');
+    const bucketId = `${id}:2026-01-01T00`;
+    const proto = Object.getPrototypeOf(door.mongo.col('probe'));
+    const realBulk = proto.bulkWrite;
+    let flushed = 0;
+    // A flush of the old id's reads after its buckets moved: the `$inc` upsert every flush makes. Landed after the slice that deletes the old rows.
+    proto.bulkWrite = async function flushAfterTheMove(...args) {
+      const out = await realBulk.apply(this, args);
+      if (this.collectionName === ACTIVITY && flushed === 0 && Array.isArray(args[0]) && args[0].some(op => op.deleteOne)) {
+        flushed++;
+        await this.updateOne({ _id: bucketId }, { $inc: { 'calls.recall.n': 5 }, $setOnInsert: { space: id, bucket: '2026-01-01T00', bucketAt: new Date() } }, { upsert: true });
+      }
+      return out;
+    };
+    try {
+      const r = await refused('usage', async (newId) => {
+        strangerDir(newId);
+        await db.collection(ACTIVITY).replaceOne({ _id: bucketId }, { _id: bucketId, space: id, bucket: '2026-01-01T00', bucketAt: new Date(),
+          calls: { recall: { n: 1, answered: 1, sumTopScore: 0.5, sumMs: 10, over1s: 0, maxMs: 10 } } }, { upsert: true });
+      });
+      assert.equal(flushed, 1, 'the usage step never ran its delete, so no flush was made after it');
+      assert.equal(r.a.status, 500, `answered ${r.a.status}: ${r.a.raw}`);
+      const back = await db.collection(ACTIVITY).findOne({ _id: bucketId });
+      assert.equal(back?.calls?.recall?.n, 6, `the usage counted while the rename ran is lost: ${JSON.stringify(back?.calls)}`);
+      assert.equal(back?.calls?.recall?.maxMs, 10, `the slowest call is not kept: ${JSON.stringify(back?.calls)}`);
+      assert.equal(await db.collection(ACTIVITY).findOne({ _id: `${r.newId}:2026-01-01T00` }), null, 'a bucket stays under the new id');
+      fs.rmSync(dirOf(r.newId), { recursive: true, force: true });
+    } finally {
+      proto.bulkWrite = realBulk;
+    }
+  });
+
+  it('a refused rename logs neither the repair of the move back nor an index build on a collection that moved away', async () => {
+    const r = await refused('warns', (newId) => strangerDir(newId));
+    assert.equal(r.a.status, 500, `answered ${r.a.status}: ${r.a.raw}`);
+    assertWhole('warns', r.where, { home: r.id, away: r.newId, collections: r.collections });
+    // The rewrite of the move back puts the old id on documents the rename itself had given the new one: nothing was left stale, so nothing is warned of.
+    const repair = r.lines.filter(l => l.includes(`Space '${r.id}': repaired`));
+    assert.deepEqual(repair, [], 'the move back warns of a repair of documents the refused rename itself changed');
+    fs.rmSync(dirOf(r.newId), { recursive: true, force: true });
+    // An index build for a collection that no longer stands is not a failed index: the collections of a refused rename leave and come back.
+    const { ensureCollectionSearchIndexes } = await import('../../server/dist/spaces/vector-index.js');
+    const { result: outcome, lines } = await logLinesDuring(() => ensureCollectionSearchIndexes('rf-nowhere', 'facts', false));
+    assert.equal(outcome, 'failed', `the build for a collection that is not there answered ${outcome}, so search never reached the create`);
+    assert.deepEqual(lines.filter(l => /Failed to create vector search index/.test(l)), [], 'a collection that is not there is reported as a failed index');
   });
 });
