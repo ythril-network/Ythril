@@ -21,8 +21,9 @@
  *  - (a) a handle held 600 ms under `files/<old>`: the rename answers 200, the tree is under the new id, no marker is left, and
  *    the next rename and delete of other spaces complete. Windows only: a Linux directory rename does not fail on an open handle.
  *  - (b) the same under `.chunks/<old>`: `.chunks/<new>` exists and `.chunks/<old>` does not. Windows only, for the same reason.
- *  - (c) a handle held for longer than the retry window: the rename answers 500 "incomplete" with the marker kept, and the next
- *    operation, once the handle is released, resumes it. Every platform.
+ *  - (c) a directory move that stays refused for longer than the retry window (a handle held on Windows, a non-empty directory under
+ *    the new id elsewhere): the rename answers 500 "was not renamed", moves back what it moved and leaves no marker, and the same
+ *    rename, once the cause is lifted, completes. Every platform.
  *
  * ## Seen red
  *
@@ -111,31 +112,38 @@ describe('a space rename and a concurrent holder', { skip }, () => {
   });
 
   it('(c) a handle held longer than the retry window fails the rename, which moves back what it moved, and the same rename then completes', T, async () => {
-    // Held until THIS case releases it, which is after the rename has answered: longer than any retry window.
-    const fh = await fsp.open(dataPath('files', 'held-c', 'transcripts', 'a.md'), 'r');
+    // The files directory cannot be moved until THIS case lifts the cause, which is after the rename has answered: longer than any retry
+    // window. On Windows the cause is an open handle. Elsewhere a held handle does not stop a directory rename, so the same refusal is made
+    // by a non-empty directory under the new id, which the rename never overwrites: the promise asserted below holds on every platform.
+    let release;
+    if (process.platform === 'win32') {
+      const fh = await fsp.open(dataPath('files', 'held-c', 'transcripts', 'a.md'), 'r');
+      release = () => fh.close();
+    } else {
+      await fsp.mkdir(dataPath('files', 'held-c2'), { recursive: true });
+      await fsp.writeFile(dataPath('files', 'held-c2', 'keep.txt'), 'not this space\'s');
+      release = () => fsp.rm(dataPath('files', 'held-c2'), { recursive: true, force: true });
+    }
     let r;
     try {
       r = await renameMod.renameSpaceAct('held-c', { newId: 'held-c2' });
     } finally {
-      await fh.close();
+      await release();
     }
-    if (process.platform === 'win32') {
-      // Elsewhere a held handle does not stop a directory rename, so there is no failure to keep.
-      assert.equal(r.status, 500, `a rename held by an open handle answered ${answer(r)}`);
-      assert.match(String(r.error), /was not renamed/);
-      assert.equal(loader.getConfig().pendingSpaceOp, undefined, 'the failed rename kept its marker although everything moved back');
-      assert.ok(fs.existsSync(dataPath('files', 'held-c', 'transcripts', 'a.md')), 'the failed rename moved the files anyway');
-      // The handle is released: the same rename, asked again, completes.
-      const again = await renameMod.renameSpaceAct('held-c', { newId: 'held-c2' });
-      assert.equal(again.status, 200, `the same rename did not complete once the handle was released: ${answer(again)}`);
-    } else {
-      assert.equal(r.status, 200, answer(r));
-    }
+    assert.equal(r.status, 500, `a rename that could not move the files answered ${answer(r)}`);
+    assert.match(String(r.error), /was not renamed/);
+    assert.equal(loader.getConfig().pendingSpaceOp, undefined, 'the failed rename kept its marker although everything moved back');
+    assert.ok(fs.existsSync(dataPath('files', 'held-c', 'transcripts', 'a.md')), 'the refused rename left the files away from the old id');
+    assert.ok(loader.getConfig().spaces.some(s => s.id === 'held-c') && !loader.getConfig().spaces.some(s => s.id === 'held-c2'), 'the refused rename changed the config');
+    assert.equal((await mongo.col('held-c_facts').findOne({ _id: 'held-c-f' }))?.spaceId, 'held-c', 'the refused rename left the collections away from the old id');
+    // The cause is lifted: the same rename, asked again, completes.
+    const again = await renameMod.renameSpaceAct('held-c', { newId: 'held-c2' });
+    assert.equal(again.status, 200, `the same rename did not complete once the cause was lifted: ${answer(again)}`);
     const next = await renameMod.renameSpaceAct('by-c', { newId: 'by-c2' });
-    assert.equal(next.status, 200, `the next operation did not resume the pending rename: ${answer(next)}`);
+    assert.equal(next.status, 200, `the next rename of another space was refused: ${answer(next)}`);
     const cfg = loader.getConfig();
-    assert.equal(cfg.pendingSpaceOp, undefined, 'the pending rename was not resumed');
-    assert.ok(cfg.spaces.some(s => s.id === 'held-c2') && !cfg.spaces.some(s => s.id === 'held-c'), 'the resumed rename did not commit');
-    assert.ok(fs.existsSync(dataPath('files', 'held-c2', 'transcripts', 'a.md')), 'the resumed rename did not move the files');
+    assert.equal(cfg.pendingSpaceOp, undefined, 'a marker is left after the renames completed');
+    assert.ok(cfg.spaces.some(s => s.id === 'held-c2') && !cfg.spaces.some(s => s.id === 'held-c'), 'the repeated rename did not commit');
+    assert.ok(fs.existsSync(dataPath('files', 'held-c2', 'transcripts', 'a.md')), 'the repeated rename did not move the files');
   });
 });

@@ -58,10 +58,15 @@ const ACTIVITY = 'space_activity';
 const FILE = 'probe.txt';
 
 /** One space per case: a refused rename leaves its mark on the space, and the next case must not read it. */
-const CASES = ['collection', 'repair', 'counter', 'floor', 'reindex', 'tree', 'commit', 'undo', 'split', 'mcp'];
+const CASES = ['collection', 'repair', 'counter', 'floor', 'reindex', 'tree', 'commit', 'undo', 'split', 'mcp',
+  'landcoll', 'landcounter', 'landfloor', 'keptcounter', 'leftover', 'repeat', 'commitwrite'];
 const idOf = (c) => `rf-${c}`;
+const SPILLS = '_read_spills';
+const MARK = 250_000;
+/** What one case planted for the steps whose state is not under the space's prefix: the spill, the import report. */
+const planted = new Map();
 
-let door, faults, base, adminKey, callTool, ADMIN, server, getConfig, mutateConfig, db;
+let door, faults, base, adminKey, callTool, ADMIN, server, getConfig, mutateConfig, db, versionMark, rdfFiles, spaceActStands;
 
 async function rest(method, url, body) {
   const init = { method, headers: { Authorization: `Bearer ${adminKey}`, 'Content-Type': 'application/json' } };
@@ -95,7 +100,19 @@ async function seed(id) {
   await db.collection(FLOORS).replaceOne({ _id: id }, { _id: id, floor: 3 }, { upsert: true });
   await db.collection(CURSORS).replaceOne({ _id: `${id}:facts` }, { _id: `${id}:facts`, cursor: 'c' }, { upsert: true });
   await db.collection(ACTIVITY).replaceOne({ _id: `${id}:2026-01-01T00` }, { _id: `${id}:2026-01-01T00`, space: id, bucket: '2026-01-01T00', bucketAt: new Date(), calls: {} }, { upsert: true });
+  // The five steps that have no collection of their own under the prefix: a read spill that names the space, its version mark, the
+  // chunk-upload directory, an RDF import report and (above) the usage history. Each is moved by its own step, so each is asserted.
+  const spillId = randomUUID();
+  await db.collection(SPILLS).insertOne({ _id: spillId, kind: 'recall', issuedTo: 'rf', memberSpaceIds: [id], items: 0, rawBytes: 0,
+    createdAt: new Date(), expiresAt: new Date(Date.now() + 3_600_000), request: {} });
+  versionMark.followCounter(id, MARK);
+  fs.mkdirSync(path.join(chunkDirOf(id), 'u1'), { recursive: true });
+  fs.writeFileSync(path.join(chunkDirOf(id), 'u1', 'part0'), 'part');
+  const importId = randomUUID();
+  await rdfFiles.keepReport({ importId, space: id, status: 'done' });
+  planted.set(id, { spillId, importId });
 }
+const chunkDirOf = (id) => path.join(process.env['DATA_ROOT'], '.chunks', id);
 
 /** Where each part of the space is under a name, for the old and the new one. */
 async function whereIs(id, other) {
@@ -107,6 +124,13 @@ async function whereIs(id, other) {
     cursor: !!(await db.collection(CURSORS).findOne({ _id: `${p}:facts` })),
     run: (await db.collection(`${p}_reindex_run`).findOne({ _id: 'run' }))?.members ?? null,
     factSpaceIds: (await db.collection(`${p}_facts`).find({}).toArray()).map(d => d.spaceId),
+    // The `spaceId` of every document of every collection under the name, not of the facts alone: the rewrite covers them all.
+    allSpaceIds: [...new Set((await Promise.all((await underPrefix(p)).map(c => db.collection(`${p}_${c}`).find({}).toArray()))).flat().map(d => d.spaceId).filter(s => s !== undefined))],
+    spill: !!(await db.collection(SPILLS).findOne({ _id: planted.get(id)?.spillId, memberSpaceIds: p })),
+    mark: versionMark.versionMarkOf(p) !== undefined,
+    chunks: fs.existsSync(path.join(chunkDirOf(p), 'u1', 'part0')),
+    rdf: (await rdfFiles.readReport(planted.get(id)?.importId ?? 'none', 0))?.space === p,
+    usage: !!(await db.collection(ACTIVITY).findOne({ _id: `${p}:2026-01-01T00`, space: p })),
   });
   return { [id]: await at(id), [other]: await at(other), configIds: getConfig().spaces.map(s => s.id).filter(s => s === id || s === other) };
 }
@@ -123,6 +147,11 @@ function assertWhole(label, w, { home, away, collections }) {
   }
   assert.deepEqual(w[home].run, [home], `${label}: the reindex run does not name '${home}': ${JSON.stringify(w[home].run)}`);
   assert.ok(w[home].factSpaceIds.length > 0 && w[home].factSpaceIds.every(s => s === home), `${label}: documents under '${home}' carry ${JSON.stringify(w[home].factSpaceIds)}`);
+  assert.deepEqual(w[home].allSpaceIds, [home], `${label}: documents under '${home}' carry ${JSON.stringify(w[home].allSpaceIds)} in some collection`);
+  for (const k of ['spill', 'mark', 'chunks', 'rdf', 'usage']) {
+    assert.equal(w[home][k], true, `${label}: the ${k} of the space is not under '${home}'`);
+    assert.equal(w[away][k], false, `${label}: the ${k} of the space is under '${away}'`);
+  }
   assert.deepEqual(w.configIds, [home], `${label}: the config names ${JSON.stringify(w.configIds)}, not '${home}'`);
 }
 
@@ -132,6 +161,9 @@ describe('a refused rename leaves the space whole', { skip }, () => {
       spaces: CASES.map(c => ({ id: idOf(c), label: idOf(c), folders: [], meta: { suppressEmbeddings: true } })) });
     ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));
     ({ getConfig, mutateConfig } = await import('../../server/dist/config/loader.js'));
+    versionMark = await import('../../server/dist/util/version-mark.js');
+    rdfFiles = await import('../../server/dist/spaces/rdf-import-files.js');
+    ({ spaceActStands } = await import('../../server/dist/spaces/space-act-runner.js'));
     const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
     ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
     const tokens = await import('../../server/dist/auth/tokens.js');
@@ -162,11 +194,14 @@ describe('a refused rename leaves the space whole', { skip }, () => {
     const collections = await underPrefix(id);
     assert.ok(collections.length >= 2, `${id} has ${collections.length} collections: a rename of one proves nothing about the others`);
     const token = `fired-${randomUUID()}`;
-    plant(newId, collections, token);
+    await plant(newId, collections, token);
     const ask = () => (via === 'REST' ? rest('PATCH', `/api/spaces/${id}/rename`, { newId }) : mcp('space_rename', { space: id, newId }));
-    const { result: a } = await logLinesDuring(ask);
-    return { id, newId, collections, ask, a, where: await whereIs(id, newId) };
+    const { result: a, lines } = await logLinesDuring(ask);
+    return { id, newId, collections, ask, a, lines, where: await whereIs(id, newId) };
   }
+
+  /** What stands for the space after a refusal: its marker and the act of its rename that is owed. */
+  const standing = (id) => ({ marker: getConfig().pendingSpaceOp ?? null, act: spaceActStands(getConfig(), id)?.kind ?? null });
 
   /** The fault was reached, and the answer is the store failure's in our words. */
   function assertStoreAnswer(label, r, armed) {
@@ -213,6 +248,8 @@ describe('a refused rename leaves the space whole', { skip }, () => {
       const r = await refused(c, (newId, cols, token) => { armed = arm(newId, cols, token); });
       assertStoreAnswer(c, r, armed);
       assertWhole(c, r.where, { home: r.id, away: r.newId, collections: r.collections });
+      assert.deepEqual(standing(r.id), { marker: null, act: null }, `${c}: a rename moved fully back still stands as an act or a marker`);
+      assert.ok(!r.lines.some(l => /did not complete; it is retried automatically/.test(l)), `${c}: the log says a rename that moved fully back is retried automatically`);
       await assertRetryCompletes(c, r);
     });
   }
@@ -239,6 +276,11 @@ describe('a refused rename leaves the space whole', { skip }, () => {
     assert.match(r.a.raw, /was not renamed/, `the answer does not say the rename did not happen: ${r.a.raw}`);
     assert.ok(!/will be resumed/.test(r.a.raw), `the answer promises a resume of a rename that was moved back: ${r.a.raw}`);
     assertWhole('tree', r.where, { home: r.id, away: r.newId, collections: r.collections });
+    // Everything is back: the rename was refused and is over. Its act ends (the space takes writes again, nothing is queued, nothing is
+    // retried behind the caller's back) and the user repeats the rename. A refusal that moved everything back says so in the log.
+    assert.deepEqual(standing(r.id), { marker: null, act: null }, 'a rename moved fully back still stands as an act or a marker, so the space stays closed to writes');
+    assert.ok(!r.lines.some(l => /did not complete; it is retried automatically/.test(l)), `the log says a rename that moved fully back is retried automatically: ${JSON.stringify(r.lines.filter(l => /retried automatically/.test(l)))}`);
+    assert.ok(r.lines.some(l => /was refused/.test(l) && /moved back/.test(l)),`the log says nothing of the move back: ${JSON.stringify(r.lines.filter(l => /rename/i.test(l)))}`);
     assert.equal(fs.readFileSync(stranger(r.newId), 'utf8'), 'not this space\'s', 'the move back touched the directory that stood under the new name');
     fs.rmSync(dirOf(r.newId), { recursive: true, force: true });
     await assertRetryCompletes('tree', r);
@@ -285,6 +327,9 @@ describe('a refused rename leaves the space whole', { skip }, () => {
     }
     assert.match(r.a.raw, /repeat the same rename/i, `the answer does not say how to finish: ${r.a.raw}`);
     assert.deepEqual(r.where[r.newId].collections, r.collections, `what stays under the new name is not what the answer says: ${JSON.stringify(r.where[r.newId].collections)}`);
+    // Something stays moved: the rename stays owed with its marker, so the space stays closed until it is finished.
+    assert.equal(standing(r.id).act, 'rename', 'a rename that left collections under the new name no longer stands as an act');
+    assert.equal(getConfig().pendingSpaceOp?.newId, r.newId, 'the marker of a rename that left collections under the new name is gone');
     fs.rmSync(dirOf(r.newId), { recursive: true, force: true });
     await assertRetryCompletes('undo', r);
   });
@@ -301,5 +346,118 @@ describe('a refused rename leaves the space whole', { skip }, () => {
     assert.equal(getConfig().pendingSpaceOp?.newId, r.newId, 'the marker of a rename that could not be moved back is gone: nothing says it is unfinished');
     assert.ok(r.where[r.newId].collections.length > 0, 'nothing stays under the new name, so the move back was not the one refused');
     await assertRetryCompletes('split', r);
+  });
+
+  // ── What the review of the first fix proved (the probe's P1-P4 are the first four cases here) ──────────────────────────────────────────────
+
+  const strangerDir = (newId) => {
+    fs.mkdirSync(dirOf(newId), { recursive: true });
+    fs.writeFileSync(path.join(dirOf(newId), 'keep.txt'), 'not this space\'s');
+  };
+
+  for (const [c, what, method, name] of [
+    ['landcoll', 'a collection', 'rename', (id) => `${id}_files`],
+    ['landcounter', 'the counter document (its copy was written, the old one never deleted)', 'replaceOne', () => COUNTERS],
+    ['landfloor', 'the change-feed floor (its copy was written, the old one never deleted)', 'updateOne', () => FLOORS],
+  ]) {
+    it(`a step that wrote and then failed is moved back too: ${what}`, async () => {
+      let armed;
+      const r = await refused(c, () => {
+        const n = name(idOf(c));
+        faults.fail(method, n, failure(`landed-${c}`), { land: true });
+        armed = [[method, n]];
+      });
+      assertStoreAnswer(c, r, armed);
+      assertWhole(c, r.where, { home: r.id, away: r.newId, collections: r.collections });
+      await assertRetryCompletes(c, r);
+    });
+  }
+
+  it('a counter a deleted space kept under the new id survives a refused rename, and the space\'s own counter is back under its name', async () => {
+    const r = await refused('keptcounter', async (newId) => {
+      await db.collection(COUNTERS).replaceOne({ _id: newId }, { _id: newId, seq: 50 }, { upsert: true });
+      strangerDir(newId);
+    });
+    assert.equal(r.a.status, 500, `answered ${r.a.status}: ${r.a.raw}`);
+    assert.deepEqual(await db.collection(COUNTERS).findOne({ _id: r.newId }), { _id: r.newId, seq: 50 }, 'the move back took or rewrote the counter the new id already held');
+    assert.deepEqual(await db.collection(COUNTERS).findOne({ _id: r.id }), { _id: r.id, seq: 7 }, 'the space\'s own counter is not back as it was');
+    assertWhole('keptcounter', { ...r.where, [r.newId]: { ...r.where[r.newId], counter: false } }, { home: r.id, away: r.newId, collections: r.collections });
+    fs.rmSync(dirOf(r.newId), { recursive: true, force: true });
+    await db.collection(COUNTERS).deleteOne({ _id: r.newId });
+    await assertRetryCompletes('keptcounter', r);
+  });
+
+  it('a document in a collection under the new name that the rename did not move keeps its spaceId through a refusal, and gets the new one when the rename succeeds', async () => {
+    const ghost = (newId) => db.collection(`${newId}_notes`).findOne({ _id: 'ghost' });
+    const r = await refused('leftover', async (newId) => {
+      await db.collection(`${newId}_notes`).insertOne({ _id: 'ghost', spaceId: 'ghost' });
+      strangerDir(newId);
+    });
+    assert.equal(r.a.status, 500, `answered ${r.a.status}: ${r.a.raw}`);
+    assertWhole('leftover', r.where, { home: r.id, away: r.newId, collections: r.collections });
+    assert.equal((await ghost(r.newId))?.spaceId, 'ghost', 'the rename rewrote the spaceId of a document it never moved');
+    fs.rmSync(dirOf(r.newId), { recursive: true, force: true });
+    faults.clear();
+    const done = await r.ask();
+    assert.equal(done.status, 200, `the rename did not complete: ${done.raw}`);
+    assert.equal((await ghost(r.newId))?.spaceId, r.newId, 'a rename that succeeds no longer rewrites the spaceId of the documents under the new name');
+  });
+
+  it('a repeated rename refused again never claims the space whole while the earlier attempt\'s collections stand under the new name, and its id is not given away meanwhile', async () => {
+    const r = await refused('repeat', (newId, cols) => {
+      strangerDir(newId);
+      for (const c of cols) faults.fail('rename', `${newId}_${c}`, failure(`back-${c}`));
+    });
+    assert.equal(r.a.status, 500, `the first attempt answered ${r.a.status}: ${r.a.raw}`);
+    assert.deepEqual(r.where[r.newId].collections, r.collections, 'the first attempt left nothing under the new name, so its move back was not refused');
+    // The new id belongs to the rename that stands: a space created under it would meet the collections already there.
+    const created = await rest('POST', '/api/spaces', { id: r.newId, label: 'taken' });
+    assert.equal(created.status, 409, `a space was created under the id a standing rename moved collections to: ${created.status} ${created.raw}`);
+    assert.ok(!getConfig().spaces.some(s => s.id === r.newId), 'the refused create is in the config');
+    // The same rename again, refused at the same step. It moves back what it moved itself; the first attempt's collections stay under
+    // the new name, and the answer says so and keeps the marker.
+    faults.clear();
+    const again = await r.ask();
+    assert.equal(again.status, 500, `the repeat answered ${again.status}: ${again.raw}`);
+    assert.ok(!/stands whole/.test(again.raw), `the repeat says the space stands whole while its collections stand under the new name: ${again.raw}`);
+    assert.match(again.raw, /repeat the same rename/i, `the repeat does not say how to finish: ${again.raw}`);
+    assert.equal(getConfig().pendingSpaceOp?.newId, r.newId, 'the repeat cleared the marker of a rename that stays under the new name');
+    assert.equal(standing(r.id).act, 'rename', 'the repeat ended the act of a rename that stays under the new name');
+    assert.deepEqual((await whereIs(r.id, r.newId))[r.newId].collections, r.collections, 'the collections of the first attempt are no longer under the new name');
+    fs.rmSync(dirOf(r.newId), { recursive: true, force: true });
+    await assertRetryCompletes('repeat', r);
+  });
+
+  it('the config write that commits the rename fails and the move back is refused: the config is read again, so it still names the space by its old id and the same rename completes', async () => {
+    const id = idOf('commitwrite');
+    const newId = `${id}-moved`;
+    const proto = Object.getPrototypeOf(door.mongo.col('probe'));
+    const realBulk = proto.bulkWrite;
+    const realWrite = fs.writeFileSync;
+    let failed = 0;
+    // Armed at the last store step: the next write of config.json that names the new id (the commit's) fails, once.
+    proto.bulkWrite = async function plant(...args) {
+      if (this.collectionName === ACTIVITY && failed === 0) {
+        fs.writeFileSync = function failTheCommit(file, data, ...rest) {
+          if (failed === 0 && String(file).endsWith('config.json.tmp') && String(data).includes(`"id": "${newId}"`)) {
+            failed++;
+            fs.writeFileSync = realWrite;
+            throw Object.assign(new Error('EIO: i/o error, write'), { code: 'EIO', syscall: 'write' });
+          }
+          return realWrite.call(this, file, data, ...rest);
+        };
+      }
+      return realBulk.apply(this, args);
+    };
+    try {
+      const r = await refused('commitwrite', (n, cols) => { for (const c of cols) faults.fail('rename', `${n}_${c}`, failure(`back-${c}`)); });
+      assert.equal(failed, 1, 'the commit\'s config write was not failed, so the rename never reached its commit');
+      assert.deepEqual(getConfig().spaces.map(s => s.id).filter(s => s === id || s === newId), [id], 'the config in memory names the space by its new id although the file does not');
+      assert.ok(r.where[newId].collections.length > 0, 'nothing stays under the new name, so the move back was not the one refused');
+      await assertRetryCompletes('commitwrite', r);
+    } finally {
+      fs.writeFileSync = realWrite;
+      proto.bulkWrite = realBulk;
+    }
   });
 });
