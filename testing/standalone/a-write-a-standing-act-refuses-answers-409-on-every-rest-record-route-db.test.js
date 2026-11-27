@@ -80,6 +80,9 @@ const REQUESTS = {
   // SPARQL Update (bundle-272, Q-761): an INSERT DATA of one entity, sent as the protocol's own media type (`text` under `contentType`, not JSON);
   // a standing act refuses it with its own code, and the entity is not stored.
   'POST /api/brain/spaces/:spaceId/sparql/update': { contentType: 'application/sparql-update', text: 'INSERT DATA { <https://example.org/actheld409/entity/updated-during> a <https://w3id.org/ythril/ns#Entity>, <https://example.org/actheld409/vocab/entity/person> ; <http://www.w3.org/2000/01/rdf-schema#label> "Updated during" }', coll: 'entities', match: { name: 'Updated during' } },
+  // The triple index rebuild (bundle-273): it writes no record, but a rebuild during a restore would read records the restore is replacing,
+  // so it answers the act's 409 and code like every write door, and no build of the space's index starts (its build row stays empty).
+  'POST /api/brain/spaces/:spaceId/rdf-index/rebuild': { body: {}, coll: 'rdf_state', match: { _id: 'build' } },
 };
 
 /** Derived routes under the prefix that are not one write of a record, each with why. */

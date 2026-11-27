@@ -143,6 +143,9 @@ const KEEP = {
     'sync/delivered-by-backfill.ts:stampCollection', 'sync/positions-owed.ts:carryRows', 'sync/positions-owed.ts:repairRows',
     'sync/positions-rollback.ts:rollBackPositions', 'sync/resolved-elsewhere.ts:writeResolvedElsewhere',
   ]),
+  ...keep('writes the triple index\'s own collections (statements and terms derived from records), passed in by the caller; it never writes a record row', [
+    'rdf/triple-index/store.ts:applyRecordChanges', 'rdf/triple-index/terms.ts:termIds',
+  ]),
 };
 
 /** ARRIVAL writers: an arrival keeps the writer's stamp, the writer's claim (D-N5); a restore keeps the backup's. */
