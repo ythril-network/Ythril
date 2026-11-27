@@ -133,10 +133,10 @@ describe('every door answers the time of its phases', { skip }, () => {
 
   it('an answer the body parser refuses carries the timing header: a 400 for a body that is not JSON, a 413 for one past the limit', async () => {
     // The parsers sit above every route, so these answers are written before any route or guard runs: the timer must sit above them (R4).
-    const notJson = await d.sparqlRest(null, 'POST', '/api/brain/recall', { body: '{', headers: JSON_TYPE });
+    const notJson = await d.sparqlRest(null, 'POST', `/api/brain/spaces/${A}/facts`, { body: '{', headers: JSON_TYPE });
     assert.equal(notJson.status, 400, notJson.text.slice(0, 300));
     // A body really past the limit: the parser reads the whole request off the wire before it refuses, so a short body under a long Content-Length hangs.
-    const pastLimit = await d.sparqlRest(null, 'POST', '/api/brain/recall', { body: `{"query":"${'x'.repeat(JSON_LIMIT)}"}`, headers: JSON_TYPE });
+    const pastLimit = await d.sparqlRest(null, 'POST', `/api/brain/spaces/${A}/facts`, { body: `{"query":"${'x'.repeat(JSON_LIMIT)}"}`, headers: JSON_TYPE });
     assert.equal(pastLimit.status, 413, pastLimit.text.slice(0, 300));
     for (const [what, answer] of [['400', notJson], ['413', pastLimit]]) {
       const timing = serverTimingOf(answer.headers['server-timing']);
