@@ -120,6 +120,11 @@ function stampOf(stored: SpaceMeta | undefined): Stamp {
   return stamp;
 }
 
+/** The canonical schema text of `meta`: what its snapshot row stores whole (`schema-snapshot-store.ts`), and what its fingerprint is the hash of. */
+export function schemaTextOf(meta: SpaceMeta | undefined): string {
+  return stampOf(meta).text;
+}
+
 /** The stored meta of `spaceId`, read once. */
 const storedMetaOf = (spaceId: string): SpaceMeta | undefined => findSpace(spaceId)?.meta;
 

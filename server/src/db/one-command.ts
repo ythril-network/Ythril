@@ -40,7 +40,7 @@ import { isWriteTimeout } from './write-timeout.js';
 export const operationBytes = (value: unknown): number => BSON.calculateObjectSize({ v: value } as never);
 
 /** MongoDB's `maxBsonObjectSize`, which is also what the driver batches a bulk write by (and its fallback when a server reports none). */
-const MAX_BSON_OBJECT_SIZE = 16 * 1024 * 1024;
+export const MAX_BSON_OBJECT_SIZE = 16 * 1024 * 1024;
 
 /**
  * The most bytes of operations one bulk write may carry and stay one command: the driver's batch limit less room for the

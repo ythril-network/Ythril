@@ -53,7 +53,6 @@ import { assertSchemaWritable } from './schema-write-gate.js';
 import { spaceWriteClosedAnswer } from './space-write-gate.js';
 import { planSpaceMetaUpdate, type MetaUpdatePlan, type WriteCaller } from './meta-update.js';
 import { writeSpaceMeta, fieldRefusalsOf, SPACE_META_WRITE_NETWORKED } from './space-meta-write-act.js';
-import { typeCapError, typesAddedPastCap } from './types-added-past-cap.js';
 import { unknownSpaceAnswer, lostSpaceAnswer } from './unknown-space.js';
 import { RDF_IMPORT_ADDRESS_MAX } from './rdf-import-files.js';
 
@@ -88,7 +87,7 @@ const SCHEMA_RDF_NETWORKED = 'schema_rdf_networked';
 const SCHEMA_RDF_NOT_EMPTY = 'schema_rdf_not_empty';
 const SCHEMA_RDF_BUSY = 'schema_rdf_busy';
 const SCHEMA_RDF_CHANGED = 'schema_rdf_changed';
-/** The file's schema refused: a contradiction, a name collision, an invalid type, a type cap, or the planner's verdict; every reason listed. */
+/** The file's schema refused: a contradiction, a name collision, an invalid type, or the settings write's verdict (its room among them); every reason listed. */
 const SCHEMA_RDF_REFUSED ='schema_rdf_refused';
 const SPACE_NOT_FOUND = 'space_not_found';
 /** What the door says it did not do because of a document refusal. */
@@ -247,8 +246,8 @@ function changedTypesOf(answer: SchemaFromRdfAnswer): { changed: ChangedTypeSche
 /**
  * What `quads` would make of the type schemas of `spaceId` in `mode`: the types the file adds or changes, the mapping's answer, and the version
  * the stored meta had. The step the data import's schema option (Q-955) calls. Reads the stored schema (its library references resolved) and the
- * space's reverse names; writes nothing. A file the mapping refuses, a `generate` into a space with types, a source address that is not one, and
- * a write that would take a kind past the type cap counting only the types it adds, are answered as refusals.
+ * space's reverse names; writes nothing. A file the mapping refuses, a `generate` into a space with types, and a source address that is not one
+ * are answered as refusals; the schema's room is the settings write's question.
  */
 export async function proposeSchemaFromRdf(
   spaceId: string, quads: Iterable<Quad>, options: { from: readonly SchemaSource[]; mode: SchemaMode; source?: SourceNames; infer?: InferStep },
@@ -292,13 +291,8 @@ export async function proposeSchemaFromRdf(
     const met = meetStored('expand', inferred.built, first.typeSchemas, new Ledger(new Store([])));
     answer = { ...first, typeSchemas: met.typeSchemas, changes: [...first.changes, ...met.changes.map(c => ({ ...c, source: 'data' as const }))] };
   }
+  // No count of types refuses the proposal (Q-981): the settings write that stores it asks the schema's room (`schema-room.ts`).
   const { changed, added, changedCount } = changedTypesOf(answer);
-  // One cap over the whole proposal: the declared and the inferred types a write adds are counted together.
-  // The inference stops as soon as its built types pass the cap, with what it had built: that is the same refusal, whichever count meets it first.
-  const capped = typesAddedPastCap(meta.typeSchemas, changed)?.error ?? (inferred?.overCap !== undefined ? typeCapError(inferred.overCap) : null);
-  if (capped !== null) {
-    return refusal(HTTP.UNPROCESSABLE, SCHEMA_RDF_REFUSED, `${capped} ${NOTHING_BUILT}`, { reasons: [{ code: 'type-cap', message: capped }], reasonCount: 1 });
-  }
   return {
     kind: 'proposed', changed, answer, version: space.meta?.version ?? 0, typesAdded: added, typesChanged: changedCount,
     ...(inferred ? { inferred: inferred.inferred, leaveOut: inferred.leaveOut, labelKeys: inferred.labelKeys } : {}),

@@ -1,6 +1,6 @@
 /**
- * The size under the type cap (Q-759): the import refuses a kind with more than 200 types, so the largest product
- * count whose generated data keeps its type count under the cap is found by a binary search over the generator's
+ * The size under a type cap (Q-759): the import refused a kind with more than 200 types until Q-981 removed that limit; the
+ * largest product count whose generated data keeps its type count under a given cap is found by a binary search over the generator's
  * output, not by loading. The search is driven with a counting function; the counter reads N-Triples.
  *
  * Run: node --test testing/standalone/bsbm-harness-typecap.test.js
