@@ -10,12 +10,13 @@
  *
  * ## The rule, read from the parsed YAML of every tracked workflow (never its text)
  *
- * Every `actions/download-artifact` step:
- *  - has its own `timeout-minutes`, a whole number of at most {@link MOST_MINUTES_PER_ATTEMPT}, so two attempts end far inside a job's limit;
- *  - is the first of a pair: an `id`, `continue-on-error: true`, and the very next step the same action with the same `with` that runs only
+ * Every `actions/download-artifact` step has its own `timeout-minutes`, a whole number of at most {@link MOST_MINUTES_PER_ATTEMPT}, so two
+ * attempts end far inside a job's limit. A download of the test image (the one that stalled) is also:
+ *  - the first of a pair: an `id`, `continue-on-error: true`, and the very next step the same action with the same `with` that runs only
  *    `if: steps.<id>.outcome == 'failure'`, with its own timeout and no `continue-on-error` (so two failures still fail the job and the step
  *    after the pair runs after either attempt);
- *  - or is that second attempt, and then follows such a first one.
+ *  - or that second attempt, and then it follows such a first one.
+ * The results downloads feed the merge gate, which `ci-workflow-is-sound` holds to fail when its own step fails, so they time out and nothing more.
  *
  * A planted copy of each defect (timeout dropped, second attempt dropped, `continue-on-error` dropped from the first, the second attempt
  * made to ignore its own failure, the condition naming another step, a timeout beyond the cap, a new workflow nobody wrote the pair in)
@@ -37,6 +38,8 @@ const MOST_MINUTES_PER_ATTEMPT = 10;
 const FLOOR_OF_DOWNLOAD_STEPS = 2;
 
 const isDownload = (s) => usesOf(s)?.action === DOWNLOAD;
+/** The test-image download of a test job: the 959 MB one that stalled. The results downloads feed the merge gate, which must be able to fail, so they only time out. */
+const isImage = (s) => typeof s.with?.name === 'string' && s.with.name.startsWith('ythril-test-image');
 const sameDownload = (a, b) => a.uses === b.uses && JSON.stringify(a.with ?? null) === JSON.stringify(b.with ?? null);
 const retryCondition = (id) => `steps.${id}.outcome == 'failure'`;
 const hasTimeout = (s) => Number.isInteger(s['timeout-minutes']) && s['timeout-minutes'] > 0 && s['timeout-minutes'] <= MOST_MINUTES_PER_ATTEMPT;
@@ -51,6 +54,7 @@ function downloadViolations(doc, file) {
       if (!isDownload(s)) return;
       const where = `${file} ${jobId} step ${JSON.stringify(s.name ?? s.uses)}`;
       if (!hasTimeout(s)) v.push(`${where}: no step timeout-minutes of 1 to ${MOST_MINUTES_PER_ATTEMPT} (found ${JSON.stringify(s['timeout-minutes'])})`);
+      if (!isImage(s) && !secondAttemptOf(steps[i - 1], s)) return;
       if (secondAttemptOf(steps[i - 1], s)) {
         if (!sameDownload(steps[i - 1], s)) v.push(`${where}: the second attempt is not the same download as the first`);
         if (isTrue(s['continue-on-error'])) v.push(`${where}: the second attempt ignores its own failure, so two stalls pass the job`);
@@ -85,15 +89,16 @@ describe('the rule refuses a planted copy of each defect', () => {
   const violations = (text) => downloadViolations(parseWorkflow(text, CI), CI);
   const plant = (steps) => `on: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n${steps}`;
   const GOOD = [
-    '      - id: dl',
+    '      - name: first',
+    '        id: dl',
     '        uses: actions/download-artifact@v4',
     '        timeout-minutes: 5',
     '        continue-on-error: true',
-    '        with: { name: image }',
+    '        with: { name: ythril-test-image-1 }',
     '      - uses: actions/download-artifact@v4',
     '        if: steps.dl.outcome == \'failure\'',
     '        timeout-minutes: 5',
-    '        with: { name: image }',
+    '        with: { name: ythril-test-image-1 }',
   ];
   const withLines = (edit) => plant(edit(GOOD).join('\n') + '\n');
 
@@ -124,7 +129,7 @@ describe('the rule refuses a planted copy of each defect', () => {
   });
 
   it('the second attempt dropped', () => {
-    const v = violations(withLines((l) => l.slice(0, 5)));
+    const v = violations(withLines((l) => l.slice(0, 6)));
     assert.ok(v.some((m) => /no second attempt follows/.test(m)), JSON.stringify(v));
   });
 
@@ -134,7 +139,7 @@ describe('the rule refuses a planted copy of each defect', () => {
   });
 
   it('the second attempt that ignores its own failure', () => {
-    const v = violations(withLines((l) => [...l.slice(0, 7), '        continue-on-error: true', ...l.slice(7)]));
+    const v = violations(withLines((l) => [...l.slice(0, 8), '        continue-on-error: true', ...l.slice(8)]));
     assert.ok(v.some((m) => /second attempt ignores its own failure/.test(m)), JSON.stringify(v));
   });
 
@@ -146,7 +151,7 @@ describe('the rule refuses a planted copy of each defect', () => {
   });
 
   it('a second attempt that downloads something else', () => {
-    const v = violations(withLines((l) => l.map((x, i) => (i === 8 ? '        with: { name: another }' : x))));
+    const v = violations(withLines((l) => l.map((x, i) => (i === 9 ? '        with: { name: ythril-test-image-2 }' : x))));
     assert.ok(v.some((m) => /not the same download/.test(m)), JSON.stringify(v));
   });
 
@@ -156,7 +161,7 @@ describe('the rule refuses a planted copy of each defect', () => {
   });
 
   it('a bare download in a workflow nobody wrote the pair in', () => {
-    const v = violations(plant('      - uses: actions/download-artifact@v4\n        with: { name: image }\n'));
+    const v = violations(plant('      - uses: actions/download-artifact@v4\n        with: { name: ythril-test-image-1 }\n'));
     assert.ok(v.some((m) => /no step timeout-minutes/.test(m)) && v.some((m) => /no id/.test(m)), JSON.stringify(v));
   });
 });
