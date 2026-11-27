@@ -90,6 +90,19 @@ export function dbShardPort(index) {
 /** `db-file-weights.json`: the seconds each SLOW `-db` file took in a measured run (`_init/record-db-file-weights.mjs` writes it). */
 export const DB_FILE_WEIGHTS_PATH = join(dirname(fileURLToPath(import.meta.url)), 'db-file-weights.json');
 
+/**
+ * `db-file-seconds.json`: the seconds EVERY `-db` file took in CI, crowded by its shard, by file name and above the table's floor, and the
+ * `median` of the rest (`_init/record-shard-seconds.mjs` writes it). It orders and places nothing: `shard-budget.mjs` holds the plan to a
+ * time budget by it (`a-planned-shard-stays-inside-its-time-budget`).
+ */
+export const DB_FILE_SECONDS_PATH = join(dirname(fileURLToPath(import.meta.url)), 'db-file-seconds.json');
+
+/** The recorded crowded seconds of the `-db` files by file name, and `median`, the weight of a file the table does not name. */
+export function loadDbFileSeconds(path = DB_FILE_SECONDS_PATH) {
+  const table = JSON.parse(readFileSync(path, 'utf8'));
+  return { seconds: table.seconds ?? {}, median: table.median };
+}
+
 /** A file is "slow" for the table from this many seconds: the ones whose late start leaves a shard with one busy slot. */
 export const SLOW_SECONDS = 15;
 
