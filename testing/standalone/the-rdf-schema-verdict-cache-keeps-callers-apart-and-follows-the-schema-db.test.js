@@ -13,7 +13,11 @@
  *  2. a schema change drops the space's cached part, and the next resolution sees the new clash (`409 rdf_term_clash`); the entry is
  *     replaced, not added beside the old one;
  *  3. a change of the space's RDF names alone (its vocab), which the schema fingerprint does not cover, is seen too;
- *  4. the cache holds at most `RDF_SCHEMA_VERDICT_CAP` spaces: past the cap the least recently asked is dropped and asked again.
+ *  4. the cache holds at most `RDF_SCHEMA_VERDICT_CAP` spaces: past the cap the least recently asked is dropped and asked again;
+ *  5. (fix round A, L3.4) the members one request resolved for a caller are reused for that caller only (`rdfMembersReusing`), in both
+ *     directions: a narrower caller is never handed a wider one's members and a wider caller never a narrower one's;
+ *  6. (fix round A, R5) the library namespaces are part of the verdict's key: another address or prefix, or none, is another verdict. No
+ *     spec changed them, so a key that dropped `schemaLibraryNamespaces` stayed green.
  *
  * ## Seen red
  *
@@ -75,6 +79,35 @@ describe('the RDF schema verdict cache keeps callers apart and follows the schem
     assert.equal(after1.misses, warm.misses, 'the second caller recomputed the schema part');
     assert.ok(after1.hits > warm.hits, 'the second caller was not served from the cache');
     assert.deepEqual(resolve([A, B], both), { members: [`${A}:files=true`, `${B}:files=true`], leftOut: [] }, 'the first caller lost a member after the second asked');
+  });
+
+  it('member reuse inside a request never serves another caller\'s members (fix round A, L3.4)', () => {
+    const first = members.rdfMembers([A, B], both);
+    const same = members.rdfMembersReusing(first, [A, B], both);
+    assert.strictEqual(same.members[0], first.members[0], 'control: the same caller\'s members are reused, so the case below tests a reuse that exists');
+    const other = members.rdfMembersReusing(first, [A, B], onlyA);
+    assert.deepEqual(other.members.map(m => `${m.space}:files=${m.files}`), [`${A}:files=false`], 'a caller with narrower rights was handed the wider caller\'s members');
+    assert.notStrictEqual(other.members[0], first.members[0], 'the narrower caller was handed the very member objects the wider caller was');
+    const narrow = members.rdfMembers([A, B], onlyA);
+    const wide = members.rdfMembersReusing(narrow, [A, B], both);
+    assert.deepEqual(wide.members.map(m => `${m.space}:files=${m.files}`), [`${A}:files=true`, `${B}:files=true`], 'a caller with wider rights was handed the narrower caller\'s members');
+  });
+
+  it('another set of library namespaces is another verdict, the same set is the same one (fix round A, R5)', () => {
+    assert.ok(cache?.cachedSchemaVerdict, 'there is no schema verdict cache (cachedSchemaVerdict)');
+    let computed = 0;
+    const compute = () => { computed++; return { clashes: [], unwritable: null }; };
+    const meta = rdfMeta('q976-namespaces');
+    const ns = (iri) => [{ prefix: 'ex', iri }];
+    cache.cachedSchemaVerdict('q976-namespaces', meta, ns('https://ns.example.org/one/'), compute);
+    cache.cachedSchemaVerdict('q976-namespaces', meta, ns('https://ns.example.org/one/'), compute);
+    assert.equal(computed, 1, 'the same namespaces were computed again');
+    cache.cachedSchemaVerdict('q976-namespaces', meta, ns('https://ns.example.org/two/'), compute);
+    assert.equal(computed, 2, 'another namespace address was answered with the verdict of the first');
+    cache.cachedSchemaVerdict('q976-namespaces', meta, [{ prefix: 'other', iri: 'https://ns.example.org/two/' }], compute);
+    assert.equal(computed, 3, 'another namespace prefix was answered with the verdict of the first');
+    cache.cachedSchemaVerdict('q976-namespaces', meta, [], compute);
+    assert.equal(computed, 4, 'no namespaces at all was answered with a verdict that read some');
   });
 
   it('a schema change drops the cached part, and the next resolution sees the new clash', () => {

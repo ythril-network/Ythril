@@ -15,10 +15,15 @@
  *   counted or kept.
  * - **A count of an index that changed.** A write the follower applied raises the counter, so the next count is made again: the kept
  *   count of a predicate grows with the statements added.
+ * - **A count that keeps the query's text, or outlives its space (fix round A, L3.2).** The key holds a hash of the pattern, never a bound
+ *   term's text; a deleted space's counts go with it; every lookup is counted (`ythril_cache_lookups_total{cache="planning_count",result}`)
+ *   and the entries held are a gauge (`ythril_cache_entries{cache="planning_count"}`) (L2.2).
  *
  * ## Seen red
  *
- * On d97660409 the second run of the same query counts `rdf_quads` again (an `aggregate` of the quads collection per free pattern).
+ * On d97660409 the second run of the same query counts `rdf_quads` again (an `aggregate` of the quads collection per free pattern). On
+ * f91569511 the key is `JSON.stringify([space, build, writes, files, the bound terms' keys])`, so a pattern's IRI is in it; the counts of a
+ * deleted space stay; and no metric of these counts exists.
  *
  * Run: a Mongo the harness accepts, npm run build:server, then
  *      node --test testing/standalone/a-planning-count-of-the-triple-index-is-kept-until-it-changes-db.test.js
@@ -45,6 +50,13 @@ async function labelCount() {
   const n = await source.countQuads(undefined, DataFactory.namedNode(LABEL), undefined, undefined);
   assert.deepEqual(source.readPaths(), [{ space: S, path: 'index' }], 'the count is made over the index');
   return n;
+}
+
+/** The count the source gives the engine for `?s <iri> ?o` now (a quad source of its own, so nothing is kept for the query). */
+async function predicateCount(iri) {
+  const { createQuadSource } = await import('../../server/dist/rdf/quad-source.js');
+  const source = createQuadSource({ members: [S], caller: { id: 'tixc', admin: true, rights: { instanceAdmin: true } } }, { deadline: Date.now() + 60_000 });
+  return source.countQuads(undefined, DataFactory.namedNode(iri), undefined, undefined);
 }
 
 describe('a planning count of the triple index is kept until it changes', { skip }, () => {
@@ -88,4 +100,52 @@ describe('a planning count of the triple index is kept until it changes', { skip
     // A predicate whose statements are all gone answers 0 only when no find can answer it; a pattern that has rows answers at least 1.
     for (let i = 0; i < 3; i++) assert.ok(await labelCount() >= 1, 'a pattern with statements answers at least 1');
   });
+
+  it('a count is kept under a hash: the text of the pattern asked is in no key', async () => {
+    const kept = await import('../../server/dist/rdf/triple-index/kept-counts.js').catch(() => null);
+    assert.ok(kept?.keptCountKeys, 'there is no kept-counts module (server/dist/rdf/triple-index/kept-counts.js, keptCountKeys)');
+    // Only a predicate the space's records state is counted over the index (an address no record uses is told 0 with no count), so the pattern's
+    // text is the label predicate's address.
+    assert.ok(await predicateCount(LABEL) >= 1, 'fixture: the label pattern was not counted over the index');
+    const keys = kept.keptCountKeys();
+    assert.ok(keys.length > 0, 'the count was not kept, so the case proves nothing');
+    assert.deepEqual(keys.filter(k => k.includes('rdf-schema') || k.includes('w3.org')), [], 'a kept count\'s key holds the text of the pattern asked');
+    assert.deepEqual(keys.filter(k => k.length > 200), [], 'a kept count\'s key is longer than a hash and a space name');
+  });
+
+  it('every lookup of the counts is counted, hit or miss, and the entries held are a gauge', async () => {
+    const { register } = await import('../../server/dist/metrics/registry.js');
+    const series = async () => {
+      const out = { hit: null, miss: null, entries: null };
+      for (const line of (await register.metrics()).split('\n')) {
+        const n = Number(line.slice(line.lastIndexOf(' ') + 1));
+        if (/^ythril_cache_lookups_total\{[^}]*cache="planning_count"/.test(line)) out[/result="(hit|miss)"/.exec(line)?.[1]] = n;
+        if (/^ythril_cache_entries\{[^}]*cache="planning_count"/.test(line)) out.entries = n;
+      }
+      return out;
+    };
+    const before = await series();
+    assert.notEqual(before.hit, null, 'ythril_cache_lookups_total{cache="planning_count",result="hit"} is not declared');
+    assert.notEqual(before.miss, null, 'ythril_cache_lookups_total{cache="planning_count",result="miss"} is not declared');
+    assert.notEqual(before.entries, null, 'ythril_cache_entries{cache="planning_count"} is not declared');
+    // The type pattern was last counted before the ten statements the index took above; at this write counter it is counted for the first time.
+    const probe = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+    await predicateCount(probe);
+    await predicateCount(probe);
+    const after = await series();
+    assert.equal(after.miss, before.miss + 1, 'the first count of a pattern is one miss');
+    assert.equal(after.hit, before.hit + 1, 'its repeat is one hit');
+    assert.equal(after.entries, before.entries + 1, 'the count the miss kept is counted in the gauge');
+  });
+
+  it('the counts of a deleted space are dropped with it', async () => {
+    const kept = await import('../../server/dist/rdf/triple-index/kept-counts.js').catch(() => null);
+    assert.ok(kept?.keptCountKeys, 'there is no kept-counts module');
+    await labelCount();
+    assert.ok(kept.keptCountKeys().length > 0, 'fixture: no count was kept, so its removal proves nothing');
+    const { removeSpace } = await import('../../server/dist/spaces/lifecycle.js');
+    assert.equal(await removeSpace(S), true, 'fixture: the space was not removed');
+    assert.deepEqual(kept.keptCountKeys(), [], 'a deleted space\'s planning counts outlived it, taking slots of the bounded cache');
+  });
+
 });

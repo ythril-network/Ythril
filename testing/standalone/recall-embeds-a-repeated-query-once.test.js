@@ -12,8 +12,9 @@
  *   holds the model and the endpoint; a vector from another key is never reused.
  * - **Grow without bound, or keep a vector for ever.** At most `max` entries (the least recently used goes first) and each lives `ttlMs`.
  * - **Keep a failure.** A model call that failed is asked again next time.
- * - **Reach rights.** The cache holds vectors only, keyed by text and model: it imports nothing that names a space or a caller, so every
- *   hit still runs the same searches and the same rights filter as a miss.
+ * - **Reach rights.** The cache holds vectors only: it imports nothing that names a space or the rights, so every hit still runs the same
+ *   searches and the same rights filter as a miss. (Whose vector a hit may be, the caller's own alone, is
+ *   `a-recall-keeps-a-query-vector-for-its-caller-alone-db`.)
  *
  * ## Seen red
  *
@@ -46,14 +47,14 @@ describe('recall embeds a repeated query once', () => {
     const { QueryEmbeddingCache } = await cacheModule();
     const cache = new QueryEmbeddingCache({ max: 10, ttlMs: 60_000 });
     const { calls, compute } = counted();
-    const key = (text, model) => ({ input: text, model, endpoint: 'local' });
+    const key = (text, model) => ({ caller: 'c', input: text, model, endpoint: 'local' });
     const a = await cache.get(key('alpha', 'm1'), compute('alpha', 'm1'));
     const again = await cache.get(key('alpha', 'm1'), compute('alpha', 'm1'));
     assert.deepEqual(again, a, 'the kept vector is the one computed');
     assert.deepEqual(calls, ['m1:alpha'], 'the repeated text was embedded once');
     await cache.get(key('alpha', 'm2'), compute('alpha', 'm2'));
     await cache.get(key('beta', 'm1'), compute('beta', 'm1'));
-    await cache.get({ input: 'alpha', model: 'm1', endpoint: 'http://other' }, compute('alpha', 'm1'));
+    await cache.get({ caller: 'c', input: 'alpha', model: 'm1', endpoint: 'http://other' }, compute('alpha', 'm1'));
     assert.deepEqual(calls, ['m1:alpha', 'm2:alpha', 'm1:beta', 'm1:alpha'], 'another model, text or endpoint is embedded again');
   });
 
@@ -62,7 +63,7 @@ describe('recall embeds a repeated query once', () => {
     let now = 1_000;
     const cache = new QueryEmbeddingCache({ max: 2, ttlMs: 500, now: () => now });
     const { calls, compute } = counted();
-    const key = (text) => ({ input: text, model: 'm', endpoint: 'local' });
+    const key = (text) => ({ caller: 'c', input: text, model: 'm', endpoint: 'local' });
     await cache.get(key('a'), compute('a', 'm'));
     await cache.get(key('b'), compute('b', 'm'));
     await cache.get(key('a'), compute('a', 'm'));
@@ -79,16 +80,17 @@ describe('recall embeds a repeated query once', () => {
     assert.deepEqual(calls.slice(-1), ['m:x'], 'a failed model call is asked again');
   });
 
-  it('holds vectors only: it names no space and no caller, so rights filter every hit as every miss', () => {
+  it('holds vectors only: it imports nothing of spaces or rights, so rights filter every hit as every miss', () => {
     const src = strip(readFileSync('server/src/brain/query-embedding-cache.ts', 'utf8'));
     const imports = [...src.matchAll(/from '([^']+)'/g)].map(m => m[1]);
-    assert.deepEqual(imports.filter(p => /auth|rights|space|token|view/.test(p)), [], `the cache imports nothing of spaces or callers: ${imports.join(', ')}`);
+    assert.deepEqual(imports.filter(p => /auth|rights|space|token|view/.test(p)), [], `the cache imports nothing of spaces or rights: ${imports.join(', ')}`);
   });
 
-  it('recall embeds its query through the cache and names its phases', () => {
+  // That recall's key holds the model, the endpoint and the prepared text, and the caller, is driven by
+  // `a-recall-embeds-again-when-the-embedding-setup-changes-db` and `a-recall-keeps-a-query-vector-for-its-caller-alone-db` (R5): a grep
+  // of the source for `embedQuery(query)` stayed green when a part was taken out of the key.
+  it('recall names its phases', () => {
     const recall = strip(readFileSync('server/src/brain/recall.ts', 'utf8'));
-    assert.doesNotMatch(recall, /await embed\(query, 'query'\)/, 'recall still embeds every query itself');
-    assert.match(recall, /embedQuery\(query\)/, 'recall embeds its query through the cache');
     const timer = strip(readFileSync('server/src/http/phase-timer.ts', 'utf8'));
     for (const phase of ['embed', 'search', 'hydrate', 'rerank']) {
       assert.match(timer, new RegExp(`'${phase}'`), `the phase list names recall's ${phase}`);

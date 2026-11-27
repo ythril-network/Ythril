@@ -47,7 +47,7 @@ describe('the query is embedded once per RECALL, not once per space', () => {
     const g = fn('recallGlobal');
     assert.ok(g, 'recallGlobal is gone — re-point this test');
     // Through the query vector cache since bundle-378 (`embedQuery`, Q-976 S2): still one call per recall, and none for a repeated text.
-    assert.match(g, /await timePhase\('embed', \(\) => embedQuery\(query\)\)/,
+    assert.match(g, /await timePhase\('embed', \(\) => embedQuery\(query, opts\.caller\)\)/,
       'the fan-out must embed once up front; without it each space embeds the identical text again');
   });
 
@@ -63,7 +63,7 @@ describe('the query is embedded once per RECALL, not once per space', () => {
   });
 
   it('recall uses the handed-down vector when it has one', () => {
-    assert.match(src(), /const embResult = opts\?\.embedded \?\? await timePhase\('embed', \(\) => embedQuery\(query\)\)/,
+    assert.match(src(), /const embResult = opts\?\.embedded \?\? await timePhase\('embed', \(\) => embedQuery\(query, opts\?\.caller \?\? null\)\)/,
       'recall must prefer the precomputed vector; ignoring it would keep the N-wide fan-out');
   });
 
@@ -76,7 +76,7 @@ describe('the query is embedded once per RECALL, not once per space', () => {
 
   it('there is exactly ONE embed call site for a query in this module', () => {
     // Two would be two places to keep in step, and the second is where a future fan-out re-appears.
-    const calls = [...src().matchAll(/embedQuery\(query\)|await embed\(query, 'query'\)/g)].length;
+    const calls = [...src().matchAll(/embedQuery\(query, |await embed\(query, 'query'\)/g)].length;
     assert.equal(calls, 2,
       `expected exactly two: the fallback in recall and the one in recallGlobal. Found ${calls} — a third is a `
       + 'new fan-out, and it will embed the same text again');

@@ -12,7 +12,9 @@
  *  3. every door family read here (SPARQL and its Update, RDF export, Linked Data, a record write, filter, traverse) names `auth`, `rate`
  *     and `door`;
  *  4. MCP `sparql_query` carries the same phases in its result's `_meta` (`ythril/server-timing`), since a streamed MCP answer sends its
- *     HTTP headers before the tool has run.
+ *     HTTP headers before the tool has run;
+ *  5. an answer the body parsers refuse (a JSON body `{` is a 400, one past the limit a 413) carries the header too: the timer is mounted
+ *     above the parsers, which answer before any route (bundle-378 fix round A, R4; on f91569511 both answered with no `Server-Timing`).
  *
  * ## Seen red
  *
@@ -38,6 +40,8 @@ const ALL = 'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 5';
 const SPARQL_PHASES = ['auth', 'rate', 'door', 'parse', 'members', 'plan', 'run', 'render'];
 const DOOR_PHASES = ['auth', 'rate', 'door'];
 const JSON_TYPE = { 'Content-Type': 'application/json' };
+/** The body size the JSON parser refuses past (`config/body-limits.ts`), read from the build. */
+let JSON_LIMIT;
 
 let d, reader, writer;
 
@@ -65,6 +69,7 @@ describe('every door answers the time of its phases', { skip }, () => {
     // Linked Data answers an address under the public base only (`/ld/<space>/...` of `https://rdf.example.org/ld/<space>/`).
     process.env['PUBLIC_BASE_URL'] = PUBLIC;
     d = await openSparqlDoors({ suite: 'q976-phases', spaces: [{ id: A }] });
+    ({ JSON_BODY_MAX_BYTES: JSON_LIMIT } = await import('../../server/dist/config/body-limits.js'));
     await d.seed(A, 'entity', [{ _id: 'ea', name: 'Ada', type: 'Person', createdAt: STAMP, updatedAt: STAMP }]);
     reader = await d.mint('q976-phases-reader', { [A]: d.row({ knowledge: 'read', files: 'read' }) });
     writer = await d.mint('q976-phases-writer', { [A]: d.row({ knowledge: 'write', files: 'read' }) });
@@ -124,6 +129,19 @@ describe('every door answers the time of its phases', { skip }, () => {
       for (const phase of DOOR_PHASES) if (!timing?.has(phase)) missing.push(`${family} (${r.status}): no ${phase} in ${JSON.stringify(r.headers['server-timing'] ?? null)}`);
     }
     assert.deepEqual(missing, []);
+  });
+
+  it('an answer the body parser refuses carries the timing header: a 400 for a body that is not JSON, a 413 for one past the limit', async () => {
+    // The parsers sit above every route, so these answers are written before any route or guard runs: the timer must sit above them (R4).
+    const notJson = await d.sparqlRest(null, 'POST', '/api/brain/recall', { body: '{', headers: JSON_TYPE });
+    assert.equal(notJson.status, 400, notJson.text.slice(0, 300));
+    // A body really past the limit: the parser reads the whole request off the wire before it refuses, so a short body under a long Content-Length hangs.
+    const pastLimit = await d.sparqlRest(null, 'POST', '/api/brain/recall', { body: `{"query":"${'x'.repeat(JSON_LIMIT)}"}`, headers: JSON_TYPE });
+    assert.equal(pastLimit.status, 413, pastLimit.text.slice(0, 300));
+    for (const [what, answer] of [['400', notJson], ['413', pastLimit]]) {
+      const timing = serverTimingOf(answer.headers['server-timing']);
+      assert.ok(timing?.has('total'), `the ${what} the body parser refused carries no total: ${JSON.stringify(answer.headers['server-timing'] ?? null)}`);
+    }
   });
 
   it('MCP sparql_query carries the same phases in its result\'s _meta', async () => {
