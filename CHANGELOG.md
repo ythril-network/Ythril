@@ -202,7 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spaces:** a search-index readiness check stops within a second when its database connection closes, instead of asking the closed connection for up to a minute.
 - **Spaces:** MCP `space_stats` answers `embedQueue` (`pending`, `processing`, `failed`: records not searchable yet) as REST stats does; the doors that count a space's records read one function and answer one number.
 - **Spaces:** `update_space` refused for a face width the space's stored descriptors rule out answers 409 and `Error: <sentence>` on MCP and `POST /api/update_space`, as `PATCH /api/spaces/:id` does; it read `Error: Error (409): …` with status 400.
-- **Spaces:** a refused space rename moves back what it moved, so the space stays whole; repeat it to finish.
+- **Spaces:** a refused space rename moves back what it moved and leaves the space whole; repeat it to finish.
 - **Housekeeping:** a space set aside after a slow answer is checked again once its pause ends, even when its last check found it still building its positions. Before, no background task, the media queue included, checked that space again until a restart.
 - **Media:** a file whose run was cut short by, or met throughout, an unavailable embedder waits without spending an attempt, and no file is started until a probe finds the embedder back; counted by `ythril_media_jobs_handed_back_total` and `ythril_media_embedder_probes_total`.
 - **Media:** a file whose analysis becomes due at the moment the queue is looking is picked up at once. Before, a replaced or retried file could wait up to 30 seconds for the queue's next full look, and an embedding job the same way.
