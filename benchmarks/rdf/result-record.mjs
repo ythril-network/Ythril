@@ -14,6 +14,8 @@
  *   `rows-differ`, with `invalidQueries` naming each; the comparison refuses such a record.
  * - **Limits nobody wrote down.** A Ythril record carries the three SPARQL limits it ran under (`sparqlLimits`) and,
  *   when the run waited for it, the embed queue's wait and what was left (`embedQueue`).
+ * - **Door overhead inside an engine's figure.** A timed Ythril query carries the door's total and the engine's own time beside the
+ *   client's wall time (`door`, `engine`, `perRun`); a record without them is refused.
  * - **A failed query reading as a fast one.** A query holds timings or an `error`, never neither, so an
  *   engine that answered 404 for a query is a row saying so.
  */
@@ -27,6 +29,21 @@ const OUTCOMES = ['ok', 'partial', 'failed'];
 const REQUIRED = ['outcome', 'engine', 'size', 'ythrilCommit', 'oxigraphDigest', 'bsbmSeed', 'dataset', 'queries'];
 
 /**
+ * A timed Ythril query carries the door's total (`door`) and the engine's own time (`engine`), each `{ median, p95 }`, and every measured
+ * run (`perRun`: `wallMs`, `doorMs`, `engineMs`), so the engine is compared with Oxigraph's like for like. A query holding only its
+ * `error` has no times to carry.
+ */
+function checkServerTimes(name, q) {
+  if (typeof q.median !== 'number') return;
+  const whole = (v) => Number.isFinite(v?.median) && Number.isFinite(v?.p95);
+  if (!whole(q.door)) throw new Error(`query ${name} has no door { median, p95 }: a ythril query records the door's total time beside the client's`);
+  if (!whole(q.engine)) throw new Error(`query ${name} has no engine { median, p95 }: a ythril query records the engine's own time beside the client's`);
+  const ok = Array.isArray(q.perRun) && q.perRun.length === q.n
+    && q.perRun.every((r) => ['wallMs', 'doorMs', 'engineMs'].every((k) => Number.isFinite(r?.[k])));
+  if (!ok) throw new Error(`query ${name} has no perRun: one { wallMs, doorMs, engineMs } for each of its ${q.n} measured runs`);
+}
+
+/**
  * What only a Ythril record carries: the three SPARQL limits it was measured under, and every query's own verdict
  * (comparable, or one reason of the fixed list), with `valid` agreeing with them: false exactly when a query is `rows-differ`.
  */
@@ -37,6 +54,7 @@ function checkYthrilJudgement(input) {
   let finding = false;
   for (const [name, q] of Object.entries(input.queries)) {
     if (typeof q.comparable !== 'boolean') throw new Error(`query ${name} has no comparable: a ythril query is judged one by one`);
+    checkServerTimes(name, q);
     if (q.comparable) {
       if (q.reason !== undefined) throw new Error(`query ${name} is comparable and names a reason`);
       continue;

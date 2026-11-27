@@ -122,6 +122,12 @@ answer), `rowsPerRun` (the count of every run, by parameter set), `errors` and t
 `message`). The last key is
 `end: "END-OF-RECORD"`. A file is never overwritten: a second write to the same name is an error.
 
+A Ythril query also records the server's own time from each answer's `Server-Timing` header: `door` (the `total` phase, the door's whole
+time: auth, rights, verdict and rendering included) and `engine` (the `plan` and `run` phases, the SPARQL engine's own work), each
+`{ median, p95 }`, and `perRun` (`wallMs`, `doorMs`, `engineMs` of every measured run). The table shows them beside the client's wall time,
+so a comparison with Oxigraph reads the engine's figure like for like. An answer without the header is that query's error
+(`no-server-timing`), and a Ythril record whose timed query lacks them is refused. An Oxigraph record is unchanged.
+
 ## Reading a refused Ythril load
 
 BSBM data is not Ythril-shaped. On 2026-11-25 the import of the raw 1 000-product file (with forward chaining)
@@ -239,7 +245,7 @@ recreated container's port), and compare the two tables: the before and after of
 
 ## Tests
 
-`stats`, `params`, `queries`, `result-record`, `prepare`, `compare`, `ythril` (the refusal wording), `ythril-params`,
+`stats`, `params`, `queries`, `result-record`, `server-timing`, `prepare`, `compare`, `ythril` (the refusal wording), `ythril-params`,
 `chunk`, `answer-rows`, `validity`, `typecap`, `comparability`, `query-shape`, `not-taken`, `sparql-limits`,
 `embed-wait` and `embed-meaning` (its pure parts) have `node:test` files in `testing/standalone/bsbm-harness-<module>.test.js`, so the standalone runner (and the
 pure standalone part of CI) runs them with the repository's tests, and no workflow or script names them. Run one in a container, not on
@@ -258,6 +264,7 @@ docker run --rm -v <checkout>:/w:ro -w /w node:24 node --test testing/standalone
 | `typecap-search.mjs` | the largest product count under the import's type cap, from the generator's output |
 | `load.mjs` | `oxigraph-up/down`, `ythril-up/down`, `ythril` |
 | `run.mjs` | runs the queries, maps Ythril's parameters, judges validity, writes the record and the table |
+| `server-timing.mjs` | the `Server-Timing` header (and MCP `_meta`) read once for `run.mjs` and `door-floor.mjs`: the door's total and the engine's own time |
 | `compare.mjs` | two records side by side, the queries more than 10x slower marked, invalid records refused |
 | `embed-meaning.mjs` | Q-763: edge recall with and without the label's meaning in the embedding text (see [A label's meaning in the edge text](#a-labels-meaning-in-the-edge-text-q-763)) |
 | `env.mjs`, `oxigraph.mjs`, `ythril.mjs`, `unzip.mjs` | plumbing: booked docker, the two engines, a zip reader |
