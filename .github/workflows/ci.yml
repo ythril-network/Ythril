@@ -579,7 +579,19 @@ jobs:
         run: npm run build:server
 
       - name: Download the test image
+        id: fetch-image
+        # A download that stalls must fail its own step in minutes, not hold the job to its limit (main run 46071083951: 44 minutes on a
+        # 959 MB image). The first attempt ignores its failure; the second, identical step runs only after it and fails the job if it fails too.
         uses: actions/download-artifact@v4
+        timeout-minutes: 10
+        continue-on-error: true
+        with:
+          name: ythril-test-image-${{ github.run_attempt }}
+
+      - name: Download the test image (second attempt)
+        if: steps.fetch-image.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        timeout-minutes: 10
         with:
           name: ythril-test-image-${{ github.run_attempt }}
 
@@ -666,7 +678,19 @@ jobs:
         run: npm run build:server
 
       - name: Download the test image
+        id: fetch-image
+        # A download that stalls must fail its own step in minutes, not hold the job to its limit (main run 46071083951: 44 minutes on a
+        # 959 MB image). The first attempt ignores its failure; the second, identical step runs only after it and fails the job if it fails too.
         uses: actions/download-artifact@v4
+        timeout-minutes: 10
+        continue-on-error: true
+        with:
+          name: ythril-test-image-${{ github.run_attempt }}
+
+      - name: Download the test image (second attempt)
+        if: steps.fetch-image.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        timeout-minutes: 10
         with:
           name: ythril-test-image-${{ github.run_attempt }}
 
@@ -781,7 +805,19 @@ jobs:
         run: npm run build:server
 
       - name: Download the test image
+        id: fetch-image
+        # A download that stalls must fail its own step in minutes, not hold the job to its limit (main run 46071083951: 44 minutes on a
+        # 959 MB image). The first attempt ignores its failure; the second, identical step runs only after it and fails the job if it fails too.
         uses: actions/download-artifact@v4
+        timeout-minutes: 10
+        continue-on-error: true
+        with:
+          name: ythril-test-image-${{ github.run_attempt }}
+
+      - name: Download the test image (second attempt)
+        if: steps.fetch-image.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        timeout-minutes: 10
         with:
           name: ythril-test-image-${{ github.run_attempt }}
 
@@ -858,7 +894,19 @@ jobs:
         run: npm run build:server
 
       - name: Download the test image
+        id: fetch-image
+        # A download that stalls must fail its own step in minutes, not hold the job to its limit (main run 46071083951: 44 minutes on a
+        # 959 MB image). The first attempt ignores its failure; the second, identical step runs only after it and fails the job if it fails too.
         uses: actions/download-artifact@v4
+        timeout-minutes: 10
+        continue-on-error: true
+        with:
+          name: ythril-test-image-${{ github.run_attempt }}
+
+      - name: Download the test image (second attempt)
+        if: steps.fetch-image.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        timeout-minutes: 10
         with:
           name: ythril-test-image-${{ github.run_attempt }}
 
@@ -929,6 +977,7 @@ jobs:
 
       - name: Download this run's test results
         uses: actions/download-artifact@v4
+        timeout-minutes: 3
         with:
           pattern: test-results-*-${{ github.run_attempt }}
           path: test-results
@@ -1031,6 +1080,7 @@ jobs:
 
       - name: Download every job's test results
         uses: actions/download-artifact@v4
+        timeout-minutes: 3
         with:
           # The verified run's artifacts and attempt only (this run's own when nothing was reused): a re-run of one job must
           # not read the first attempt's files beside its own. `github-token` is what lets the download read another run.

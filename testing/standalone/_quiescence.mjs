@@ -78,10 +78,17 @@ export function busyQueues(queues) {
 }
 
 /**
+ * The turns the wait gives a drain before it throws: several seconds, since every fiftieth turn is a 15 ms timer. The former bound (1.2 s) gave up
+ * on a space wipe that took 1.36 s on a loaded CI runner (main run 46071083951, `a-round-conclusion-lands-the-same-at-every-site-db`), with the wipe's own
+ * log line 0.3 s later; a drain that is slow but progressing must not hit the bound, and one that never ends still fails in seconds, not at the file's timeout.
+ */
+export const DEFAULT_MAX_TURNS = 30000;
+
+/**
  * Resolve once every queue in `queues` has answered zero for `stable` consecutive turns of the event loop; THROW, naming the busy queues, after
  * `maxTurns` turns without that. Bounded by turns, never by milliseconds.
  */
-export async function untilQuiescentOf(queues, { stable = 4, maxTurns = 4000 } = {}) {
+export async function untilQuiescentOf(queues, { stable = 4, maxTurns = DEFAULT_MAX_TURNS } = {}) {
   let idleTurns = 0;
   let busy = [];
   // waits-differently: the bound is a count of event-loop turns, not a clock deadline - the same count was a second on Windows and a tenth of one on CI when it was a time, and the turn is what the queues drain on
@@ -91,8 +98,9 @@ export async function untilQuiescentOf(queues, { stable = 4, maxTurns = 4000 } =
     // waits-differently: every fiftieth turn is a 15 ms timer — the queues drain through store and peer round trips, and four thousand
     // `setImmediate` turns passed in milliseconds while one wipe batch was still on the wire. The delay is stated, not left to the
     // platform: a zero timer is about 15 ms on Windows and about 1 ms on Linux, so the same bound was a second here and a tenth of one on
-    // CI (the runner's idle wait in `_space-act-harness.mjs` failed that way, Full run 39067730979). A wait that never ends throws in
-    // about a second on both.
+    // CI (the runner's idle wait in `_space-act-harness.mjs` failed that way, Full run 39067730979). The bound is {@link DEFAULT_MAX_TURNS},
+    // several seconds on both platforms: one second was shorter than a space wipe on a loaded CI runner (main run 46071083951), and a wait
+    // that never ends still throws in seconds, naming its queue.
     await new Promise(resolve => (i % 50 === 49 ? setTimeout(resolve, 15) : setImmediate(resolve)));
   }
   throw new Error(`the instance never went quiescent: still busy after ${maxTurns} turns: ${busy.join(', ')}`);
