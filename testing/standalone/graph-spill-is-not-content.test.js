@@ -87,8 +87,11 @@ describe('the queue declines to embed a spill', () => {
 
   it('and the guard is reachable — the enqueue is what file writes call', () => {
     // Without this the assertion above could pass against a function nothing calls.
+    // Through the one re-queue of a changed file row (Q-428, bundle-41), which calls the write lane's enqueue.
     const meta = read('server/src/files/file-meta.ts');
-    assert.match(meta, /await enqueueEmbedJob\(spaceId, 'file', normalised, \{ priority:/);
+    assert.match(meta, /await requeueEmbedWorkOfChangedRow\(spaceId, normalised\)/);
+    const work = read('server/src/files/file-embed-work.ts');
+    assert.match(work, /enqueueWriteEmbedJobs\(spaceId, \[\{ recordType: 'file', recordId: fileId \}\]/);
   });
 });
 

@@ -27,7 +27,7 @@
  */
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { embedJobId, enqueueEmbedJobs, enqueueWriteEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from '../brain/embed-queue.js';
+import { embedJobId, enqueueEmbedJobs, enqueueWriteEmbedJobs, retireEmbedJobs, EMBED_PRIORITY, EMBED_REPAIR_ROUTE } from '../brain/embed-queue.js';
 import { rootsOfDirectoryPages, rowsOfFiles } from './derived-rows.js';
 import { movedId, movedRoot, type PathKind } from './moved-paths.js';
 import { sidecarsOwnedBy } from './sidecar-disk.js';
@@ -70,16 +70,16 @@ const changedRowNotQueued = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
  * never reached the row's vector until somebody reindexed.
  */
 export async function requeueEmbedWorkOfChangedRow(spaceId: string, fileId: string): Promise<void> {
-  const say = (why: string): void => {
+  const say = (why: unknown): void => {
     changedRowNotQueued(spaceId, () => log.warn(`embed queue: the file ${peerText(spaceId)}/${peerText(fileId)} `
-      + `changed, but it was not re-queued for embedding (${why}). It keeps the vector of its previous text until the space is reembedded `
-      + '(POST /api/spaces/:id/reembed).'));
+      + `changed, but it was not re-queued for embedding (${peerText(why)}). It keeps the vector of its previous text until the space is reembedded `
+      + `(${EMBED_REPAIR_ROUTE}).`));
   };
   try {
     const { failed } = await withinWriteBound(() => enqueueWriteEmbedJobs(spaceId, [{ recordType: 'file', recordId: fileId }], { priority: EMBED_PRIORITY.write }));
     if (failed > 0) say('the queue refused the write');
   } catch (err) {
-    say(peerText(err));
+    say(err);
   }
 }
 
