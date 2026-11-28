@@ -32,6 +32,7 @@
  */
 import { spawn } from 'node:child_process';
 
+import { availableCpus } from '../../util/cpu-budget.js';
 import { extForMimeType } from '../mime.js';
 
 /**
@@ -54,7 +55,7 @@ export function inputExtForDemuxer(mimeType: string, mediaType: 'image' | 'audio
 }
 
 /**
- * How long ONE ffmpeg step may take: a duration probe, a silence pass, a segment extract, a keyframe pass.
+ * How long ONE ffmpeg step may take: a silence pass, a segment extract, a keyframe pass.
  *
  * A constant rather than a setting, deliberately: it is a ceiling on a step, not a quality control, and a setting
  * would owe its env var and its config-key documentation for a number no operator has a reason to choose. Ten minutes
@@ -66,11 +67,40 @@ export const FFMPEG_STEP_TIMEOUT_MS = 10 * 60_000;
 export interface FfmpegResult { stdout: Buffer; stderr: string }
 
 /**
+ * The most threads one ffmpeg run's decoder and filter graph are given, whatever the CPU budget. Above it an explicit
+ * count raises ffmpeg's memory beyond what its own default would use: ffmpeg caps its automatic frame threads there.
+ */
+export const FFMPEG_MAX_THREADS = 16;
+
+/**
+ * The whole argument list `runFfmpeg` spawns for the caller's `args` on a budget of `cpus` CPUs (Q-298).
+ *
+ * ## What it prevents
+ *
+ * ffmpeg sizes its decoder's and its filter graph's thread pools from the HOST's core count. In a container limited to
+ * two CPUs on a 32-core host, one media job's ffmpeg started dozens of threads that the quota then throttled, and the
+ * instance's other work starved behind them. `-threads N -filter_threads N` before `-i` cap both pools for that run, at
+ * `min(cpus, FFMPEG_MAX_THREADS)`. Only the decoder and the filter graph are capped: an encoder's threads are an output
+ * option and are not set here (the media path encodes only small WAV segments and keyframe images).
+ *
+ * The cap is per run, not divided by the pool's slots: it stops a host-sized pool in a small container, which was the
+ * defect; dividing would also slow a single job on an idle pool.
+ *
+ * The hardening flags come first, then the cap, then the caller's arguments unchanged. Pure, so a test reads exactly
+ * what is spawned for a CPU count it chooses.
+ */
+export function ffmpegArgs(args: string[], cpus: number): string[] {
+  const threads = String(Math.max(1, Math.min(Math.floor(cpus), FFMPEG_MAX_THREADS)));
+  return ['-nostdin', '-y', '-protocol_whitelist', 'file,pipe', '-threads', threads, '-filter_threads', threads, ...args];
+}
+
+/**
  * Run `ffmpeg` with `args` and answer its output. Rejects when it exits non-zero, when it is killed by the bound, or
  * when `signal` aborts it.
  *
  * `args` begin with the input: `['-i', path, ...]`. The hardening flags and `-y` go in front of them here, so no caller
- * can forget one.
+ * can forget one, and so does the thread cap (`ffmpegArgs`). The CPU budget is read on every call, not once per process:
+ * `docker update --cpus` changes the quota while the process lives, and the read is two small cgroup files.
  */
 export function runFfmpeg(args: string[], opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<FfmpegResult> {
   return new Promise((resolve, reject) => {
@@ -78,7 +108,7 @@ export function runFfmpeg(args: string[], opts: { signal?: AbortSignal; timeoutM
     const stderrChunks: string[] = [];
     const timeoutMs = opts.timeoutMs ?? FFMPEG_STEP_TIMEOUT_MS;
 
-    const proc = spawn('ffmpeg', ['-nostdin', '-y', '-protocol_whitelist', 'file,pipe', ...args], {
+    const proc = spawn('ffmpeg', ffmpegArgs(args, availableCpus()), {
       stdio: ['ignore', 'pipe', 'pipe'],
       // Node kills the child when this passes, which is the difference between a bound and a timer: a timer that
       // settles the promise leaves the process running and the worker slot held.
