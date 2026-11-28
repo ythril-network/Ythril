@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Changes on upgrade | Action |
 |---|---|
-| A pub/sub subscriber's schema edit answers `200` and stays in its own definitions, not `202 vote_pending`; `targetNetwork` on it is `400` | Change the network's schema on the publisher; upgrade it, as an older one still passes a subscriber's round |
+| A pub/sub subscriber's schema edit answers `200` and stays in its own definitions, not `202 vote_pending`; `targetNetwork` on it is `400` | Change the network's schema on the publisher; upgrade it: an older one passes a subscriber's round |
 | An RDF import with `schema` set builds the space's schema from the file's classes and shapes and writes it only when the data passes; it needs `schema: write` | None; without `schema` an import is unchanged |
 | A space import sent slower than 16 KiB/s or silent over a minute is refused `408`, then `429` with `Retry-After` for a minute | Send backups faster than 16 KiB/s, without pauses |
 | With `softDeleteFileMeta` off, a deleted, moved or re-keyed file leaves a feed marker (path, deletion time, position) for `fileChangeFeedWindowDays` (default 30) | None; set the key to change the window, 0 to purge at the next sweep |
@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schema:** every schema violation row carries a stable `code` and its `params` beside its `reason` on every door, and the web app words it in your language; a bulk warning row gains `warning`. The guide lists the codes; an older unconverted item has none.
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the schema's canonical text, alike on every instance holding it; derived, stripped when the meta is sent back.
 - **Schema:** the schema versions a space uses are kept privately on this instance, named by their fingerprint, with what each was built from (own types, network layers). A database backup carries them.
-- **Schema:** a schema version is kept while a record here carries it, while it is current or a network's layer, or while a kept version links it; then housekeeping removes it a day after first finding it unused.
+- **Schema:** a schema version is kept while a record here carries it, while it is current or a network's layer, or while a kept version links it; then housekeeping removes it no sooner than a day after it first found it unused.
 - **Schema:** `GET /api/spaces/:id/schema-versions` and MCP `space_schema_versions` list a space's schema versions with record counts, read one (`fp`), or say what changed per type between two (`fp`, `against`).
 - **Schema:** `against: stamp` on `POST /api/spaces/:id/validate-schema` and MCP `schema_validate` judges each stored record by the version it carries, counting the rest in `skipped` (`unversioned`, `notHeld`, `unread`); every answer echoes `against`.
 - **Schema:** a type's history on the schema versions door and tool (`kind`, `type`, `fps`), `sameAs:<fp>` on the filter, the History dialog, a clock mark on types with records on an older definition, and the Brain's chips and column.
