@@ -244,7 +244,7 @@ function ownerOf(address: string, names: AddressNames): string | null {
 }
 
 /** The characters a term counts toward its subject's bound: every string it carries. */
-function termChars(term: Term | undefined): number {
+export function termChars(term: Term | undefined): number {
   if (!term) return 0;
   switch (term.kind) {
     case 'iri': return term.value.length;

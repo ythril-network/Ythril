@@ -24,6 +24,7 @@ import { satisfies } from '../auth/required-rung.js';
 import type { RdfCaller } from '../rdf/rdf-space-state.js';
 import { refusal, type RdfDocumentRefusal } from '../rdf/rdf-document.js';
 import { quadGroupKey, type ImportFolder, type QuadGroup } from '../rdf/import-spool.js';
+import { assertInferenceFits, inferencePairsRoom } from '../rdf/import-memory.js';
 import { schemaGroupsOf, SCHEMA_RDF_MAX_QUADS, type SchemaChange, type SchemaMode, type SchemaSource } from '../rdf/schema-from-rdf.js';
 import {
   gatherClasses, inferBoundText, inferFromData, INFER_BOUND_KNOB, INFER_MIN_CONFIDENCE_DEFAULT, INFER_MIN_SUPPORT_DEFAULT, SCHEMA_INFER_MAX_CLASSES,
@@ -119,6 +120,7 @@ function typeNamesOf(proposal: SchemaProposal): { added: string[]; changed: stri
 export async function schemaAtDoor(input: {
   spaceId: string; caller: RdfCaller | undefined; options: ImportOptions; groups: () => AsyncGenerator<QuadGroup, void, undefined>; schema: SchemaAsked;
   dryRun: boolean; maxQuads: number | undefined; maxPredicates?: number | undefined; maxClasses?: number | undefined; maxPairs?: number | undefined;
+  subjects: number; memoryBytes: number;
 }): Promise<DoorSchema | RdfDocumentRefusal> {
   const { spaceId, options, schema } = input;
   const bases = new Set(Object.values(options.graphBases));
@@ -142,12 +144,16 @@ export async function schemaAtDoor(input: {
     const names = addressNames(inlineResolvableRefs((space?.meta ?? {}) as SpaceMeta), options.source);
     const source: DataSource = { groups: input.groups, skip: found.keys, namesOf: () => names, blankNodes: options.blankNodes };
     const width = input.maxPredicates ?? SCHEMA_INFER_MAX_PREDICATES;
+    // What the inference holds for the whole file is charged to the import's room, as the index is: refused before a statement is read (a 413 naming
+    // the memory bound, with the whole need), and the pairs the second pass remembers are what is left beside the subjects.
+    assertInferenceFits(input.subjects, input.memoryBytes);
+    const maxPairs = inferencePairsRoom(input.subjects, input.memoryBytes, input.maxPairs ?? SCHEMA_INFER_MAX_PAIRS);
     const classes = await gatherClasses(source, { predicates: width, classes: input.maxClasses ?? SCHEMA_INFER_MAX_CLASSES });
     if (classes.kind === 'over') {
       return refusal(HTTP.TOO_LARGE, BOUND_EXCEEDED, inferBoundText(classes.bound, classes.limit), { bound: INFER_BOUND_KNOB[classes.bound], limit: classes.limit });
     }
     const thresholds = schema.infer ?? { minSupport: INFER_MIN_SUPPORT_DEFAULT, minConfidence: INFER_MIN_CONFIDENCE_DEFAULT, functional: false };
-    infer = (first) => inferFromData(source, classes, first, { ...thresholds, maxPredicates: width, maxPairs: input.maxPairs ?? SCHEMA_INFER_MAX_PAIRS });
+    infer = (first) => inferFromData(source, classes, first, { ...thresholds, maxPredicates: width, maxPairs });
   }
   const proposal = await proposeSchemaFromRdf(spaceId, found.quads, { from: declaring, mode: schema.mode, ...(options.source ? { source: options.source } : {}), ...(infer ? { infer } : {}) });
   if (proposal.kind === 'refused') return proposal;

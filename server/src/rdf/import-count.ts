@@ -16,7 +16,8 @@
  * the index will hold, so the door's need is never below the act's.
  */
 import { createHash } from 'node:crypto';
-import { MINTED_ENTRY_BYTES, SET_ENTRY_BYTES, ImportMemoryMeter, indexEntryBytes } from './import-memory.js';
+import { ENDS_COPY_BYTES, MINTED_END_BYTES, MINTED_ENTRY_BYTES, SET_ENTRY_BYTES, ImportMemoryMeter, indexEntryBytes } from './import-memory.js';
+import { RdfImportBoundExceeded } from './import-bound.js';
 import { recordOfAddress, type AddressNames } from './term-reverse.js';
 import type { QuadGroup } from './import-spool.js';
 import type { Quad } from './literals.js';
@@ -83,20 +84,28 @@ function subjectBytes(group: QuadGroup, names: AddressNames): number {
 }
 
 /**
- * Throw {@link RdfImportBoundExceeded} (`RDF_IMPORT_MAX_MEMORY`, a 413) when the file's subjects, its statement sets and its bare edges need more than
- * `memoryBytes`, or as soon as the subjects and statements read so far make that certain. Answers the need when the file fits. Reads only `groups`
- * (the sorted spool); `namesOf` says which address names a group's graph is read under.
+ * Throw {@link RdfImportBoundExceeded} (`RDF_IMPORT_MAX_MEMORY`, a 413) when the act's holders for the file need more than `memoryBytes`, or as soon as
+ * the subjects and statements read so far make that certain. The act has two phases, each within the room: the translation, which holds the index (a
+ * subject each, and a bare edge each) and the two sets, and then the plan, which holds the minted ends of the records the file inserts and a copy of
+ * them (`import-ends.ts`), by then without the index and the sets. The need is the larger of the two; a refusal that comes where it is known whole (the
+ * second phase's figure from the number of subjects, or the bare edges that end the first) says so, and one at the charge that crossed the room, before
+ * the rest was read, is at least that. Answers the need when the file fits. Reads only `groups` (the sorted spool); `namesOf` says which address names
+ * a group's graph is read under.
  */
 export async function assertRecordsWithinBound(
   groups: AsyncIterable<QuadGroup>, namesOf: (graph: string | undefined) => AddressNames, memoryBytes: number,
 ): Promise<{ need: number }> {
   const meter = new ImportMemoryMeter(memoryBytes);
   const sets = new TripletSets(meter);
+  let subjects = 0;
   for await (const group of groups) {
     const names = namesOf(group.graph?.value);
     meter.charge(subjectBytes(group, names));
     sets.addGroup(group.quads, names);
+    subjects += 1;
   }
-  meter.charge(sets.bare() * MINTED_ENTRY_BYTES);
-  return { need: meter.used };
+  // At most one end for each group (a stored record, an edge or a subject that is no record has none): an upper bound, as the first phase's is.
+  const need = Math.max(meter.used + sets.bare() * MINTED_ENTRY_BYTES, subjects * (MINTED_END_BYTES + ENDS_COPY_BYTES));
+  if (need > memoryBytes) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_MEMORY', memoryBytes, need, true);
+  return { need };
 }

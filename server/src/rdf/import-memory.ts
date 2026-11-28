@@ -1,12 +1,41 @@
 /**
- * How much memory may one RDF import's index and record sets hold on this instance, and does an import's need fit? (bundle-384, Q-983; owner's
- * decision: the fixed count of records per import becomes a bound by memory, as the type cap became a bound by size.)
+ * How much memory may one RDF import hold for its file on this instance, and does an import's need fit? (bundle-384, Q-983; owner's decision: the
+ * fixed count of records per import becomes a bound by memory, as the type cap became a bound by size.)
  *
  * ## Why memory and not a count
  *
- * An import keeps one entry per subject in its index, one per bare edge, and one per statement in its two digest sets, for the whole file: that is what
- * bounds an import. A fixed count (it was 1 000 000) refused a benchmark whose records fit (BSBM at 10 000 products makes 1.7 to 2.0 million) and, on a
- * small instance, was not derived from memory at all. The figure is now what the process can give.
+ * An import keeps, for the whole file, one entry per subject in its index, one per bare edge, and one per statement in its two digest sets; after the
+ * translation one minted end per record and a copy of them for the plan; and, when a schema is inferred from the data, one entry per subject of the
+ * inference. That is what bounds an import. A fixed count (it was 1 000 000) refused a benchmark whose records fit (BSBM at 10 000 products makes 1.7 to
+ * 2.0 million) and, on a small instance, was not derived from memory at all. The figure is now what the process can give.
+ *
+ * ## What is charged to the room, and what sits outside it
+ *
+ * Every holder that grows with the file is charged to a meter of this room, or capped by a share of it, so none can spend it twice or outgrow it:
+ *
+ * - **Phase one of the act** (translation): the index with its bare edges and the two digest sets, one meter ({@link ImportMemoryMeter}); the door's
+ *   count (`import-count.ts`) charges the same figures from the spool alone.
+ * - **Phase two of the act** (plan and commit): the minted ends and their copy (`import-ends.ts`), a meter of their own room, since the index and the sets
+ *   are gone by then ({@link MINTED_END_BYTES}, {@link ENDS_COPY_BYTES}). The door's count answers the larger of the two phases.
+ * - **The door's inference from the data**: {@link INFER_SUBJECT_BYTES} a subject and {@link INFER_PAIR_BYTES} a repeated pair, from the spool's count
+ *   of subjects, before a statement is read ({@link assertInferenceFits}, {@link inferencePairsRoom}). A door and an act can run at once, each within a room.
+ * - **The group window** (`import-window.ts`): capped at `1/WINDOW_DIVISOR` of the room, not charged: a window ends at its share, and a group is held whole.
+ *
+ * Outside the meter, and bounded by something that does not grow with the file: one group, held whole (at most `RDF_IMPORT_MAX_SUBJECT_QUADS` quads and
+ * `RDF_IMPORT_MAX_SUBJECT_CHARS` characters, about 40 MiB of heap at the most), the sort's runs (`RDF_IMPORT_SORT_RUN_BYTES` characters), the write
+ * windows' operations, and what the rest of the instance holds (the SPARQL engine, the database driver, the embedding child). Every figure above is a
+ * heap measurement taken after a full collection at the worse end of a Map's doubling (`the-import-memory-charges-what-an-entry-costs.test.js`,
+ * `the-import-memory-charges-every-holder-of-the-import.test.js`, `the-import-group-window-ends-at-its-share-of-room.test.js`).
+ *
+ * ## The share, and its measurement
+ *
+ * A quarter of the smaller of the heap limit and half the container's limit stays the room, and the door and the act together may then hold half of
+ * that: measured by `the-import-memory-room-keeps-the-process-alive-at-its-bound.test.js` and a probe in containers of 1, 2 and 4 GiB, with the door's
+ * inference, the act's first phase (its window at its share) and then its second phase each filled to the room, each refused just past it, the process
+ * alive. The heap peaked at 249 of 524 MiB (1 GiB container), 645 of 1 048 (2 GiB) and 1 273 of 2 096 (4 GiB), 0.48 to 0.62 of the limit, leaving the
+ * rest for the instance's own heap, a collection and the memory outside the heap; a share above a quarter was not measured. An eighth would refuse
+ * BSBM at 10 000 products at 4 GiB: its need by these charges is at most 357 MiB (the larger phase, the first: 326 255 subjects and at most 1 354 637
+ * edge statements, counted from the file) against a room of 512 MiB, and the second phase and the inference need 80 and 120 MiB.
  *
  * ## The room
  *
@@ -64,6 +93,41 @@ export const TWO_BYTE_CHARACTER_BYTES = 2;
  */
 export const SET_ENTRY_BYTES = 78;
 
+/**
+ * The heap bytes of one of the act's minted ends (`import-ends.ts`): a record's id and its kind and type, held after the translation for the dry plan
+ * and the commit, the Map slot included. Measured 184 for an entity just after the Map's table doubled (its dearest), 156 just before the next
+ * doubling and 145 for a fact, ids and types as the operation spool hands them back; charged a little above the dearest of these.
+ */
+export const MINTED_END_BYTES = 192;
+/** The heap bytes of one entry of the copy the dry plan takes of the minted ends (the table only: the ids and kinds are shared). Measured at most 56 an entry, charged a little above. */
+export const ENDS_COPY_BYTES = 64;
+/**
+ * The heap bytes the inference of a schema from the data keeps per subject while it reads the file: a typed subject's digest in the seen set and its
+ * classes in the map (measured 313 just after the Maps doubled, 264 just before the next doubling), or a label-only subject's address and labels
+ * (measured 374 with the address held once); charged the dearer of the two, rounded up.
+ */
+export const INFER_SUBJECT_BYTES = 392;
+/** The heap bytes of one (subject, predicate) pair the second pass of the inference remembers: a string and its slot. Measured 136.9, charged a little above. */
+export const INFER_PAIR_BYTES = 144;
+
+/**
+ * The inference of a schema from the data holds {@link INFER_SUBJECT_BYTES} for each of the file's subjects at most (a subject typed by no class of the
+ * file holds nothing), which the sorted spool counts: throws {@link RdfImportBoundExceeded} naming the memory bound with the whole need, before the
+ * inference reads a statement, when they cannot fit the room. The inference is the door's, and a door and an act can run at once, each within its own room.
+ */
+export function assertInferenceFits(subjects: number, room: number): void {
+  const need = subjects * INFER_SUBJECT_BYTES;
+  if (need > room) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_MEMORY', room, need, true);
+}
+
+/**
+ * How many repeated (subject, predicate) pairs the inference's second pass may remember beside its `subjects` subjects within `room`: what is left of
+ * the room, at most `asked` (the caller's own bound is never raised), never below zero.
+ */
+export function inferencePairsRoom(subjects: number, room: number, asked: number): number {
+  return Math.max(0, Math.min(asked, Math.floor((room - subjects * INFER_SUBJECT_BYTES) / INFER_PAIR_BYTES)));
+}
+
 /** An id the instance mints: a UUID, which the index holds as its 16 bytes. */
 export const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** A text every character of which V8 can hold in one byte. */
@@ -88,7 +152,7 @@ export interface ImportMemorySources {
 
 /** The room and the figures it came from. */
 export interface ImportMemoryRoom {
-  /** What one import's index and record sets may hold, in bytes. */
+  /** What one import may hold for its file (each phase of it, and the inference), in bytes. */
   bytes: number;
   heapLimitBytes: number;
   /** The container's memory limit, or null when there is none this process can see. */
@@ -114,7 +178,7 @@ function containerLimit(readFile: (path: string) => string): number | null {
   return null;
 }
 
-/** How much memory one import's index and record sets may hold here, read now. Never throws. */
+/** How much memory one import may hold for its file here, read now. Never throws. */
 export function importMemoryRoom({
   heapLimitBytes = v8.getHeapStatistics().heap_size_limit,
   readFile = (path) => fs.readFileSync(path, 'utf8'),

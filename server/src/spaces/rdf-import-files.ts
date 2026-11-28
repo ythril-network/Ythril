@@ -173,6 +173,8 @@ export interface RdfImportSchemaStep {
   schemaAtDoor(input: {
     spaceId: string; caller: RdfCaller | undefined; options: ImportOptions; groups: () => AsyncGenerator<QuadGroup, void, undefined>; schema: SchemaAsked;
     dryRun: boolean; maxQuads: number | undefined; maxPredicates?: number | undefined; maxClasses?: number | undefined; maxPairs?: number | undefined;
+    /** The file's subjects (the sorted spool's count) and the import's room: what an inference from the data may hold beside them (`import-memory.ts`). */
+    subjects: number; memoryBytes: number;
   }): Promise<DoorSchema | RdfDocumentRefusal>;
   decidedOfStep(step: SchemaStepFile): DoorDecided | undefined;
   keepSchemaStep(folder: ImportFolder, built: DoorSchema, caller: RdfCaller | undefined): Promise<Pick<ActState, 'schemaStep' | 'caller'>>;

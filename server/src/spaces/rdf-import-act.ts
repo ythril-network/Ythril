@@ -8,7 +8,7 @@
  * - **Two doors that differ.** Parameters, defaults, bounds, every refusal and its code, and the report are decided here; a door only reads its
  *   body off its wire and puts the answer back on it. The parameters are judged by one schema (`RdfImportParams`) before anything else runs.
  * - **A stranger's file landing half.** The door reads the whole file into a sorted spool (`rdf/import-spool.ts`), answers what it can know
- *   without the store at once (a malformed file: 400 with its place; a file over a bound, the record bound counted from the spool alone
+ *   without the store at once (a malformed file: 400 with its place; a file over a bound, the memory bound counted from the spool alone
  *   included: 413 naming it), registers the act and answers with its `importId`. The act, which holds the space, builds the import's index
  *   (bare edges counted: each is a record of it), translates every group (`rdf/quads-to-ops.ts`; a refusal of the translation ends the act as an
  *   input failure that releases the space, read from the status door), then dry-plans every operation with the real planners
@@ -94,6 +94,9 @@ import {
   type ImportFolder, type ImportSpoolBounds, type QuadGroup,
 } from '../rdf/import-spool.js';
 import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
+import { ImportMemoryMeter, importMemoryRoom } from '../rdf/import-memory.js';
+import { MintedEnds } from '../rdf/import-ends.js';
+import { windowBudgetOf, windowsOf } from '../rdf/import-window.js';
 import { TripletSets, assertRecordsWithinBound, type DigestSet } from '../rdf/import-count.js';
 import { counted } from '../rdf/import-upload.js';
 import { defaultSourceBase, graphsWithoutBase, noteGraphs, type GraphsSeen } from '../rdf/import-default-source.js';
@@ -230,16 +233,6 @@ class MintedThroughIndex extends Map<string, MintedRecord> {
   override has(key: string): boolean { return this.get(key) !== undefined; }
 }
 
-/** Groups in windows of `size`. */
-async function* windowsOf<T>(items: AsyncIterable<T>, size: number): AsyncGenerator<T[], void, undefined> {
-  let w: T[] = [];
-  for await (const item of items) {
-    w.push(item);
-    if (w.length >= size) { yield w; w = []; }
-  }
-  if (w.length > 0) yield w;
-}
-
 /** The record address of a subject or object under this space's base, or null. */
 function spaceRecordOf(term: Term, names: AddressNames): { kind: RecordKind; id: string } | null {
   if (term.kind !== 'iri') return null;
@@ -249,7 +242,7 @@ function spaceRecordOf(term: Term, names: AddressNames): { kind: RecordKind; id:
 
 /**
  * What the translation works with: the sorted file's groups, the space's meta and the options the file is read under. It runs in the act, under
- * its hold (a dry run's inline), so a bound it meets (the index's record bound, bare edges counted) ends the act as an input failure and a stored
+ * its hold (a dry run's inline), so a bound it meets (the memory bound of the index, the sets and the bare edges, and of the minted ends the plan keeps) ends the act as an input failure and a stored
  * record it cannot read is a refusal in the report.
  */
 interface TranslateRun {
@@ -295,7 +288,7 @@ async function indexPass(run: TranslateRun): Promise<{ index: ImportIndex; asser
   // One meter for the index, the sets and (through the index) the bare edges of pass 2: the room is asked now, when the act runs.
   const index = new ImportIndex({ memoryBytes: knobs.bounds?.memoryBytes });
   const triplets = new TripletSets(index.meter);
-  for await (const window of windowsOf(run.groups(), windowSize())) {
+  for await (const window of windowsOf(run.groups(), windowSize(), windowBudgetOf(index.meter.room))) {
     const candidates: Array<{ key: string; kind: RecordKind; id: string }> = [];
     const fresh: Array<{ key: string; kind: RecordKind }> = [];
     for (const group of window) {
@@ -341,7 +334,7 @@ async function translatePass(run: TranslateRun, index: ImportIndex, asserted: Di
   await removeOperations(run.folder);
   const ops = await openOperationSpool(run.folder);
   try {
-    for await (const all of windowsOf(run.groups(), windowSize())) {
+    for await (const all of windowsOf(run.groups(), windowSize(), windowBudgetOf(index.meter.room))) {
       const window = run.skip ? all.filter(g => !run.skip!.has(g.key)) : all;
       for (const g of all) {
         if (run.skip?.has(g.key)) run.builder.notTaken(run.notAsked?.has(g.key) ? RDF_IMPORT_SCHEMA_NOT_ASKED : RDF_IMPORT_SCHEMA_NOT_TAKEN, g.quads.length);
@@ -403,9 +396,12 @@ async function* opWindows(folder: ImportFolder): AsyncGenerator<RecordOp[], void
   if (w.length > 0) yield w;
 }
 
-/** The records the import inserts, by id: what the dry plan and the commit seed as present (with an entity's type). */
-async function mintedEndsOf(folder: ImportFolder): Promise<Map<string, MintedEnd>> {
-  const ends = new Map<string, MintedEnd>();
+/**
+ * The records the import inserts, by id: what the dry plan and the commit seed as present (with an entity's type). The act's second phase: the
+ * index and the sets of the first are gone, and each end is charged to `meter`, a room of its own (`import-ends.ts`).
+ */
+async function mintedEndsOf(folder: ImportFolder, meter: ImportMemoryMeter): Promise<MintedEnds> {
+  const ends = new MintedEnds(meter);
   for await (const w of opWindows(folder)) {
     for (const op of w) {
       if (op.op !== 'insert' || op.kind === 'edge') continue;
@@ -453,8 +449,8 @@ async function dryPlanOnce(run: Run, builder: ReportBuilder, seeds: ReadonlyMap<
  * run takes at least one id out of a finite set of seeds, so it ends; its last report is the one that names every record judged without the
  * refused ones (and holds the refusals of every earlier run too, since a refused record stays refused).
  */
-async function dryPlanPass(run: Run, minted: ReadonlyMap<string, MintedEnd>): Promise<ReportBuilder> {
-  const seeds = new Map(minted);
+async function dryPlanPass(run: Run, minted: MintedEnds): Promise<ReportBuilder> {
+  const seeds = minted.copy();
   const base = run.builder.report;
   for (;;) {
     const attempt = new ReportBuilder(structuredClone(base));
@@ -506,7 +502,8 @@ async function persist(run: Run, phase: ActState['phase']): Promise<void> {
 async function planAndCommit(run: Run): Promise<'refused' | 'planned' | 'completed' | { ended: SpaceActBodyOutcome }> {
   const state = run.state;
   run.planMeta = planMetaFor(run.spaceId, run.planSchema);
-  const minted = await mintedEndsOf(run.folder);
+  // The second phase's room: the index and the sets of the translation are gone (nothing keeps them), so the ends and their copy have a room of their own.
+  const minted = await mintedEndsOf(run.folder, new ImportMemoryMeter(knobs.bounds?.memoryBytes ?? importMemoryRoom().bytes));
   if (!state || state.phase === 'translated') {
     run.builder = await dryPlanPass(run, minted);
     if (run.builder.refused) return 'refused';
@@ -623,7 +620,14 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
     run.builder.report.schema = done.report;
     return null;
   };
-  const outcome = await planAndCommit(run);
+  // The second phase has a room as the first has: a refusal of it (a resumed commit on a smaller instance, a file the door's count let in) ends the act as an input failure.
+  let outcome: Awaited<ReturnType<typeof planAndCommit>>;
+  try {
+    outcome = await planAndCommit(run);
+  } catch (err) {
+    if (err instanceof RdfImportBoundExceeded) return gone(HTTP.TOO_LARGE, err.code, err.message, err.detail);
+    throw err;
+  }
   if (outcome === 'refused') return refused(run);
   if (typeof outcome === 'object') return outcome.ended;
   const report = { ...run.builder.report, endedAt: new Date().toISOString() };
@@ -804,7 +808,7 @@ async function readAndRun(
     const built = schema
       ? await rdfImportSchemaStep().schemaAtDoor({
         spaceId: input.spaceId, caller: input.caller, options, groups: sorted.groups, schema, dryRun, maxQuads: knobs.schemaMaxQuads, maxPredicates: knobs.schemaInferMaxPredicates,
-        maxClasses: knobs.schemaInferMaxClasses, maxPairs: knobs.schemaInferMaxPairs,
+        maxClasses: knobs.schemaInferMaxClasses, maxPairs: knobs.schemaInferMaxPairs, subjects: sorted.subjects, memoryBytes: sorted.memoryBytes,
       })
       : null;
     if (built?.kind === 'refused') return built;
