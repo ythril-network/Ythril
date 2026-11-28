@@ -117,7 +117,7 @@ function actSecondPhase() {
   const copy = made.copy();
   // The dry plan's shared read set (a functional edge label), charged an edge at a time to a fork of the meter until the room refuses.
   const view = new ReadSet('probe');
-  const sets = new edgePlan.EdgeReadSets({ edge: { productFeature: { functional: true } } }, meter.fork(), () => view);
+  const sets = new edgePlan.EdgeReadSets({ edge: { productFeature: { functional: true } } }, meter.resumed(), () => view);
   let edges = 0;
   let refused = false;
   try {
