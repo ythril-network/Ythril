@@ -9,27 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Changes on upgrade | Action |
 |---|---|
-| A pub/sub subscriber's schema edit answers `200` and stays in its own definitions, not `202 vote_pending`; `targetNetwork` on it is refused `400` | Change the network's schema on the publisher, and upgrade the publisher: an older one still passes a subscriber's round |
+| A pub/sub subscriber's schema edit answers `200` and stays in its own definitions, not `202 vote_pending`; `targetNetwork` on it is `400` | Change the network's schema on the publisher; upgrade it, as an older one still passes a subscriber's round |
 | An RDF import with `schema` set builds the space's schema from the file's classes and shapes and writes it only when the data passes; it needs `schema: write` | None; without `schema` an import is unchanged |
-| A space import (`POST /api/admin/spaces/:spaceId/import`) sent slower than 16 KiB/s over a minute, or silent for a minute, is refused `408`; the caller then waits a minute (`429`, `Retry-After`) | Send a backup over a link faster than 16 KiB/s, without pauses |
+| A space import sent slower than 16 KiB/s or silent over a minute is refused `408`, then `429` with `Retry-After` for a minute | Send backups faster than 16 KiB/s, without pauses |
 | With `softDeleteFileMeta` off, a deleted, moved or re-keyed file leaves a feed marker (path, deletion time, position) for `fileChangeFeedWindowDays` (default 30) | None; set the key to change the window, 0 to purge at the next sweep |
 | A file deleted before this release has an old position: it is listed as deleted only to a feed read with no cursor | None |
 | An empty, non-JSON or unreadable `config.json` stops the start, naming the file, instead of opening first-run setup | Repair or restore the file; delete it only to set the instance up anew |
 | Irreversible: records of files whose bytes this instance lost are removed here only, with no tombstone, once their window has passed and every peer we pull from completed a sync | Put lost bytes back before upgrading to keep their records |
 | A joined club, closed or democratic member takes the network's schema per space at the join or its next cycle; under `validationMode: strict` it then refuses what that schema refuses | None |
 | `GET /api/sync/meta` now asks `schema: read` on the space (`knowledge: write` implies it); a peer token without it is answered `403 schema_rung` | Give peer tokens `schema: read` where a member reads the schema |
-| The per-type files `schemas/<space>_<kind>_<type>.json` are no longer written, and the housekeeping cycle removes the ones this instance wrote (a file you uploaded at such a path is kept) | Read the schema from `GET /api/spaces/:id/meta` or MCP `space_meta` instead |
+| The per-type files `schemas/<space>_<kind>_<type>.json` are no longer written, and housekeeping removes the ones this instance wrote (an upload at such a path stays) | Read the schema from `GET /api/spaces/:id/meta` or MCP `space_meta` |
 | Members below 6.6.0 drop `schemaFingerprint` on arrival and forward records without it | None; a record is stamped again on its next write on a newer member |
 | A `merkle: true` network reports divergence while a member runs below 6.6.0 or was rolled back to 6.5: 6.5 hashes a stored `schemaFingerprint` | Upgrade or roll back every member together |
 | Records written before this release carry no `schemaFingerprint`; nothing backfills it | None; a record is stamped on its next write that conforms |
 | An embedder that cannot be reached no longer ends embed jobs `failed`: they wait (`pending`, `transientFailures` rising) | None; alert on `ythril_embed_jobs_handed_back_total` as well as on failed jobs |
-| A file whose run finds the embedder unavailable no longer ends `failed`: it reads `processing` while its job waits; an alert on failed media jobs stays quiet during an outage | None; alert on `ythril_media_embedder_probes_total{outcome="unavailable"}` as well |
+| A file whose run finds the embedder unavailable reads `processing` while its job waits, not `failed`; a failed-media-jobs alert stays quiet in an outage | None; alert on `ythril_media_embedder_probes_total{outcome="unavailable"}` as well |
 | An importer below 6.6.0 skips the `schemaSnapshots` of a 6.6 export: the records land without their schema versions, which are then fetched from members or stay unheld | Import a 6.6 export into 6.6.0 or later to keep the versions |
 | A member below 6.6.0 keeps a schema vote's conversion steps, takes the schema and converts nothing | After it upgrades, run `POST /api/spaces/:id/schema-convert` on the types the change reached |
 | No 200-type limit per kind: a schema that grows at the storage hard limit is refused `507`, one over 10 MiB `413`; a single-type write over the rule limits `400` | Keep a schema within storage and the rule limits |
 | The audit row of a call a guard refused names the token it refused; it was empty | None; read `tokenId` on `403` and `429` rows |
 | An edit other writes outran three times answers `409 write_race_lost`, not `404`; so does an upload (it was `500`), its bytes stored | Retry it |
 | `POST /api/brain/spaces/:spaceId/reindex` with a PAT and MFA on asks `X-TOTP-Code` (`403 MFA_REQUIRED`); MCP `space_reindex` and `space_reembed` refuse that PAT `403` | Send the code from scripts; MCP cannot send it |
+| A peer token gets `403 peer_door` but on `/api/sync/*`, `GET`/`POST /api/files/:spaceId`, `POST /api/notify` | Use an operator token |
+| `peerInstanceId` on `POST /api/tokens` needs an instance admin | Mint as one, or join |
+| A sync read needs `knowledge` or `files` read (`merkle` both) | Grant them to hand-made sync tokens |
 
 ### Added
 
@@ -38,24 +41,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Operations:** new metrics `ythril_cache_lookups_total{cache,result}` and `ythril_cache_entries{cache}` count the lookups and entries of the recall, SPARQL planning-count and RDF schema caches.
 - **Operations:** `ythril_write_group_aborts_total{reason}` counts SPARQL Update write groups that landed nothing; a delete still referenced is refused whole (`referenced`).
 - **Performance:** a recall repeated by the same token within ten minutes no longer calls the embedding model again; the saved query vector is private to that token, and no token can tell from its timing what another searched.
-- **Schema:** every schema violation row carries a stable `code` and its `params` beside its `reason` on every REST door and MCP tool, and the web app words it in your language; a bulk warning row gains `warning`. The integration guide lists the codes; an older unconverted item has none.
+- **Schema:** every schema violation row carries a stable `code` and its `params` beside its `reason` on every door, and the web app words it in your language; a bulk warning row gains `warning`. The guide lists the codes; an older unconverted item has none.
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.
 - **Schema:** the schema versions a space uses are kept privately on this instance, named by their fingerprint, with what each was built from (own types, network layers). A database backup carries them.
 - **Schema:** a schema version is kept while a record here carries it, while it is current or a network's layer, and while a kept version links it; once none holds, the housekeeping cycle removes it no sooner than a day after it first found it unused.
-- **Schema:** `GET /api/spaces/:id/schema-versions` and MCP `space_schema_versions` list a space's schema versions with record counts, read one (`fp`), or say what changed per type from one to another (`fp` and `against`); a peer-bound token sees only what the sync door would serve it.
-- **Schema:** `against: stamp` on `POST /api/spaces/:id/validate-schema` and MCP `schema_validate` judges each stored record by the version it carries, counting those it cannot in `skipped` (`unversioned`, `notHeld`, `unread`); `against` is echoed in every answer.
-- **Schema:** a type's history on the schema versions door and tool (`kind`, `type`, `fps`), `sameAs:<fp>` on the filter, the History dialog, a clock mark on types with records on an older definition, the drawer's Type definition row and the Brain chips and column.
-- **Schema:** `convertRecords` on `PATCH /api/spaces/:id` and MCP `schema_update` declares steps that convert stored records: rename a property, map an enum, rename or split a type. Each is checked against the schema before and after; a bad one refuses the save (`bad_conversion_step`).
-- **Schema:** after such a save each instance stamps the copies that already fit the new schema in place (no new version, nothing replicated) and rewrites the ones a step changes, in the background; a rewrite moves the record to the top of lists by change date and replicates it.
+- **Schema:** `GET /api/spaces/:id/schema-versions` and MCP `space_schema_versions` list a space's schema versions with record counts, read one (`fp`), or say what changed per type between two (`fp`, `against`).
+- **Schema:** `against: stamp` on `POST /api/spaces/:id/validate-schema` and MCP `schema_validate` judges each stored record by the version it carries, counting the rest in `skipped` (`unversioned`, `notHeld`, `unread`); every answer echoes `against`.
+- **Schema:** a type's history on the schema versions door and tool (`kind`, `type`, `fps`), `sameAs:<fp>` on the filter, the History dialog, a clock mark on types with records on an older definition, and the Brain's chips and column.
+- **Schema:** `convertRecords` on `PATCH /api/spaces/:id` and MCP `schema_update` declares steps that convert stored records: rename a property, map an enum, rename or split a type, each checked against both schemas; a bad one refuses the save (`bad_conversion_step`).
+- **Schema:** after such a save each instance stamps the copies that fit the new schema in place (nothing replicated) and rewrites in the background the ones a step changes; a rewrite tops lists by change date and replicates.
 - **Schema:** `POST` and `GET /api/spaces/:id/schema-convert` and MCP `space_schema_convert` and `space_schema_conversion` start a conversion toward the current schema (`knowledge: admin` and the space's admin right) and read how it went.
-- **Schema:** `GET /api/spaces/:id/schema-convert/items`, the one and bulk dismissals under it, and MCP `list_unconverted`, `dismiss_unconverted` and `dismiss_unconverted_shown` list and dismiss the records a conversion could not convert, naming fields and never values.
+- **Schema:** `GET /api/spaces/:id/schema-convert/items`, its dismissals, and MCP `list_unconverted`, `dismiss_unconverted` and `dismiss_unconverted_shown` list and dismiss the records a conversion could not convert, naming fields, never values.
 - **Schema:** `reason` on the unconverted list and its bulk dismissal takes one reason or a list of them (REST `reason=a,b` or repeated; MCP a string or an array); `expect` counts over all of them.
 - **Schema:** the unconverted list takes `status=all` (open and dismissed together, newest first, each row saying its `status`) and answers `counts.openBy`: the open items of the space by kind, type and reason, on REST and MCP.
 - **Schema:** metrics `ythril_schema_convert_records_total` and `ythril_schema_convert_runs_in_progress`; audit events `schema.convert.start`, `schema.convert.run`, `unconverted.list`, `unconverted.dismiss` and `unconverted.dismiss_shown`.
 - **Import/export:** an admin space export carries `schemaSnapshots`, `{ fp, text, links }` for each schema version its records use and each one those link; one too large for an importer is left out, counted `schemaSnapshotsOmitted`.
-- **Import/export:** an import keeps each verified schema version as fetched, after its records, and skips one that is not; it answers `schemaSnapshots: { landed, held, refused }`, and its audit row counts `snapshotsLanded`, `snapshotsRefused` and `unreadArraysTotal`.
-- **Records:** a record carries `schemaFingerprint`, the schema it conformed to when it was written here or when it arrived: a conforming write stamps it, and its answer shows it; a non-conforming update, a redaction, a relink or a change of an edge end's type removes it. Recall hits omit it.
-- **Records:** `schemaVersion` on `POST /api/filter` and MCP `filter` finds records by the schema version they carry: `current`, a fingerprint, `unversioned`, or `older` with `schemaChanged`; the answer's `schemaVersion.members` counts the matches whose version is not held or not classifiable.
+- **Import/export:** an import keeps each verified schema version, after its records, and skips one that is not, answering `schemaSnapshots: { landed, held, refused }`; its audit row counts them.
+- **Records:** a record carries `schemaFingerprint`, the schema it conformed to when written or arrived here: a conforming write stamps it; a non-conforming update, a redaction, a relink or an edge end's type change removes it. Recall hits omit it.
+- **Records:** `schemaVersion` on `POST /api/filter` and MCP `filter` finds records by schema version: `current`, a fingerprint, `unversioned`, or `older` with `schemaChanged`; `schemaVersion.members` counts matches whose version is not held or not classifiable.
 - **Sync:** a record's `schemaFingerprint` travels with it on push, pull and import as its writer sent it; a value that is not a 64-character lowercase hex fingerprint is read as absent (stored without a stamp, never refused).
 - **Sync:** `GET /api/sync/schema-snapshot`: a member fetches a schema version it lacks from the member that sent the stamped record; one built from a network the asker is not in answers `409 not_shared`.
 - **Sync:** metric `ythril_schema_snapshot_total`, with outcomes `removed` (the sweep), `imported` and `import_refused` (an admin import) beside the fetch's; audit event `file.retired_schema_file.sweep`.
@@ -79,8 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** that data is rebuilt in the background without slowing writes, a failing rebuild retried hourly at most; `space_rdf_rebuild` (knowledge `admin`, audited) rebuilds one space now, `space_rdf_index` reads its state (`unbuilt` until built).
 - **RDF:** config key `sparql.maxIndexRowsRead` (default 20 times `sparql.maxRecordsRead`) bounds the index statements one query reads (`413 sparql_too_much_read`).
 - **RDF:** a personal view can be a SPARQL CONSTRUCT (`sparql: { query }`): the export, SPARQL and `/ld/@<name>/` read its statements over what you read (at most 50 000); other doors answer `409 view_is_construct`.
-- **RDF:** the statements a SPARQL Update removes and inserts become record writes by the import's rules, or are refused with a named reason (`server-owned-removed`, `edge-ends-change`, `not-writable-here`, `field-not-removable`, `subject-not-an-address-here`).
-- **RDF:** SPARQL 1.1 Update on one space: `POST /api/brain/spaces/:spaceId/sparql/update` and MCP `sparql_update` (`knowledge: write`), through the write rules every door keeps, whole or not at all ([SPARQL Update](docs/integration-guide/04j-sparql-api.md#sparql-update)).
+- **RDF:** the statements a SPARQL Update removes and inserts become record writes by the import's rules, or are refused with a named reason (`server-owned-removed`, `edge-ends-change`, `not-writable-here`, …).
+- **RDF:** SPARQL 1.1 Update on one space: `POST /api/brain/spaces/:spaceId/sparql/update` and MCP `sparql_update` (`knowledge: write`), by every door's write rules, whole or not at all ([SPARQL Update](docs/integration-guide/04j-sparql-api.md#sparql-update)).
 - **RDF:** an Update names a refused statement (`422 sparql_update_refused`), refuses to delete an entity still named (`409 sparql_update_referenced`), and retries a lost race up to 3 times (`409 sparql_update_conflict`).
 - **RDF:** in an Update a removal no record holds is a no-op, and the answer's `statements` count what was taken, a no-op or not taken (`reasons` and `notTaken` name them).
 - **RDF:** config key `sparql.maxRecordsChanged` (default 1 000, at most 5 000), read live; more is `413 sparql_too_many_changes`. One Update at a time per token; one that deletes is a destructive call.
@@ -99,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** while an import lands, its space takes no other write or sync (`409 space_being_rdf_imported`); it resumes after a restart. MCP `import_rdf_status` and `GET .../import/rdf/:importId` answer its report.
 - **RDF:** an import's records are bounded by memory, not a count: a file past it is `413 rdf_bound_exceeded` (`bound: RDF_IMPORT_MAX_MEMORY`, `limit`, `need`) ([Exports](docs/integration-guide/06f-exports.md#rdf-import)).
 - **RDF:** `POST /api/spaces/:id/schema-rdf` and MCP `import_schema_rdf` build type schemas from an OWL, RDFS or SHACL file, without data; only types the file adds or changes are written, and a networked space is `409 schema_rdf_networked`.
-- **RDF:** `import_rdf` with `schema` and `from: data` infers types, datatypes and edge labels from the records, pruned by `inferMinSupport` and `inferMinConfidence`, each term with its support and confidence; declared terms win ([Exports](docs/integration-guide/06f-exports.md#rdf-import)).
+- **RDF:** `import_rdf` with `schema` and `from: data` infers types, datatypes and edge labels from the records, pruned by `inferMinSupport` and `inferMinConfidence`; declared terms win ([Exports](docs/integration-guide/06f-exports.md#rdf-import)).
 - **RDF:** a whole export streams uncompressed, whatever `Accept-Encoding`; a slow or idle cut and a refused export slot each log one line (space and rule, no record).
 - **RDF:** the user guide describes the "RDF namespaces of schema groups" card of the Schema Library page.
 - **RDF:** the Ythril vocabulary is published under `docs/rdf/`, with decision record 23: a property holds one plain value; structure is an edge or a link.
@@ -107,7 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** config keys `sparql.timeoutMs`, `sparql.maxRecordsRead`, `sparql.maxResults` and `sparql.maxResultBytes`, read live; two queries at once per instance, one per token (`503 sparql_busy`).
 - **RDF:** audit event `brain.sparql_query`, written whatever `logReads` says, with a query's counts and outcome, never its text.
 - **RDF:** the SPARQL engine `@comunica/query-sparql-rdfjs` (MIT) ships, listed in `NOTICE`; it reaches no network.
-- **RDF:** addresses in a space's base under `<public url>/ld/` resolve to their statements for a token with read rights on the space (`423` for a peer token on a held space); a browser gets `303` to the Brain ([Exports](docs/integration-guide/06f-exports.md#record-addresses)).
+- **RDF:** addresses in a space's base under `<public url>/ld/` resolve to their statements for a token with read rights on the space; a browser gets `303` to the Brain ([Exports](docs/integration-guide/06f-exports.md#record-addresses)).
 - **RDF:** under `/ld/` the base itself, the ontology, each SHACL shape and a type records use but the schema does not declare resolve too.
 - **RDF:** audit event `ld.read`, a read: the space and the record's id, and the request path as sent; no field holds the absolute address.
 - **RDF:** a base that starts another space's base, or is started by it, is refused at the save with `409 rdf_base_nested`, as an equal one is with `rdf_base_shared`.
@@ -130,11 +133,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schema:** the per-type files `schemas/<space>_<kind>_<type>.json` are no longer written; the housekeeping cycle removes the ones this instance wrote, locally and without a tombstone.
 - **Schema:** after the upgrade, what schema-version reads need is prepared in the background; until a space has it, such a read answers `503 schema_index_building`.
 - **Schema:** `schema_update` and `PATCH` say a named type is replaced whole: send the complete type as `space_meta` returned it. The MCP door has no `If-Match`; read `space_meta` after the write.
-- **Schema:** the bulk dismissal (`POST /api/spaces/:id/schema-convert/items/dismiss`, MCP `dismiss_unconverted_shown`) answers `400 unconverted_bad_status` to a `status` other than `open`: it dismisses open items only. A caller that sent `all` or `dismissed` must drop it.
+- **Schema:** the bulk dismissal (`POST /api/spaces/:id/schema-convert/items/dismiss`, MCP `dismiss_unconverted_shown`) answers `400 unconverted_bad_status` to a `status` other than `open`: it dismisses open items only.
 - **Records:** a `schemaFingerprint` sent in a write body is ignored (not named as an unknown field, never stored); `deleteFields` refuses it by name.
 - **Sync:** the space hash (Merkle root) leaves out `schemaFingerprint`; copies that differ only in it count as equal (ADR 22).
 - **Sync:** `GET /api/sync/meta` asks `schema: read` on the space.
-- **Import/export:** an admin space import names the array keys of its body it does not read, in the answer (`unknownKeys`, the first 10, and `unknownKeysTotal`) and one warn line, instead of skipping them unnamed; they are still never landed.
+- **Import/export:** an admin space import names the array keys of its body it does not read (`unknownKeys`, the first 10, `unknownKeysTotal`, one warn line) instead of skipping them unnamed.
 - **Files:** bytes that arrive from a peer move the file row's position, never its version: a reader paging by position hears of them, and the publisher's next edit still wins. Identical bytes again write nothing.
 - **Files:** a file deletion (own, folder, TTL, a peer's, a sidecar's) takes a position in the same write that flags or marks the row.
 - **Files:** a record whose bytes this instance lost is removed here only, with no tombstone: checked once a day per space, after 1 day (30 without a recorded hash or after a restore or import), once every peer completed a sync; mass losses are held.
@@ -195,6 +198,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Sync:** a peer's upload over a file that changed here lands beside it as a conflict copy instead of overwriting it.
+- **Tokens:** a peer token whose handshake expired unfinished is revoked at start and at the peer's next handshake, as 5.6.1 said.
 - **Recall:** a recall that fails or finds nothing to rank no longer leaves its text search running, and the text search ends at the recall's own `maxTimeMS`.
 - **Audit:** a request to a brain route of a space called `files`, `facts`, `entities`, `edges` or `chrono` was recorded under another route's operation; the audit rules read the one path form the server serves.
 - **Brain:** a `$ref:` key in a bulk item's link field is refused saying a key is resolved only at an edge's `from` or `to`: save the record first and pass its id, or connect the records by an edge. `save_bulk` and the guides no longer say a link field takes a key.
@@ -237,7 +242,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Embedding:** reindex asks what reembed asks: MFA on REST, `knowledge: admin` on MCP (was instance admin), where a PAT asked for MFA is refused. A held space refuses peer tokens on every route that asks the second factor.
+- **Sync:** a peer token reaches only the sync doors; every other route and MCP answer `403 peer_door`. The file door also needs a network carrying the space and, to upload, push rights here.
+- **Tokens:** only an instance admin binds a token to a peer (`peerInstanceId`); the audit row names the peer.
+- **Sync:** each sync read asks the area of its rows, `knowledge` or `files` (`merkle` both): `403 <area>_rung`.
+- **Embedding:** reindex asks what reembed asks: MFA on REST, `knowledge: admin` on MCP (was instance admin), where a PAT asked for MFA is refused.
 - **Networks:** on a pub/sub network only the publisher's cast decides a round: a subscriber's yes or veto counts nothing, and the publisher adopts and passes only rounds it opened. Every 6.5.x let one subscriber change the network's schema for every member.
 - **Networks:** a pub/sub subscriber's schema edit lands in its own definitions, opens no round and never reaches the publisher; the publisher's schema outranks it.
 - **Networks:** a join or removal round on a club or pub/sub network, and a space addition on a pub/sub one, is never adopted and never passes. A club round passes on its proposer's yes: any member's yes passes that member's own round.

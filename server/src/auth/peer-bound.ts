@@ -48,8 +48,10 @@ export function specialPurposeApproverRefusal(
 /**
  * The tools a peer-bound token may not call: the user doors that store a file as THIS instance's own upload.
  *
- * ONE named set, here and nowhere else. `write_file`, `import_rdf` and `import_schema_rdf` (their REST routes ask this same function) are among the members today; Q-244 widens this set to every user write door
- * (ingest, save_bulk, move_file, update_file_meta, the PATCH routes) and the callers need no change when it does.
+ * ONE named set, here and nowhere else. `write_file`, `import_rdf` and `import_schema_rdf` (their REST routes ask this same function) are among the members today.
+ * Since Q-244 a peer-bound token does not reach a tool at all: token resolution refuses it on every route but the sync doors
+ * (`auth/peer-doors.ts`), `/mcp` and the REST tool doors included. This set stays as the tool layer's own answer, so a caller that reaches the
+ * dispatch by another way still meets it.
  */
 const PEER_REFUSED_TOOLS: ReadonlyMap<string, string> = new Map([
   // bundle-270 second review U2: the RDF import registers a space act, which stops the transfers of its space, and a request a peer's token made is one of them: its connection was destroyed with no answer.

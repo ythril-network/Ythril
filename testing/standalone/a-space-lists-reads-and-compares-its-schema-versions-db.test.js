@@ -14,7 +14,9 @@
  *   version, fp + against the diff. One route and one tool, one shape (one-capability-is-one-shape).
  * - Refusals: `404 unknown_fingerprint` (not held, or not one this caller may have), `400 bad_fingerprint`, and on both doors
  *   `400 against_needs_fp`.
- * - A peer-bound token sees only the versions `servableTo` lets the sync door serve it; a local token sees all.
+ * - A local token sees all the versions the space holds. A peer-bound token no longer reaches these doors to be narrowed to what `servableTo` lets the
+ *   sync door serve it: Q-244 (bundle-47) confines it to the sync doors, so the list, the read and the diff answer it `403 peer_door` on REST and on `/mcp`
+ *   (an HTTP `403` with a JSON body, not a tool result), and the held version built from a network the peer is not in is never read for it.
  * - A personal view on these routes is an unknown space, answered as `GET /meta` answers it.
  * - `versionText(spaceId, fp)` (`spaces/schema-version-text.js`): a row that is gone is not held (`null`); a store failure throws.
  *
@@ -227,19 +229,18 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
   });
 
   describe('who sees which versions', () => {
-    it('a peer-bound token sees only what the sync door would serve it; a local token sees all', async () => {
+    it('a peer-bound token is refused 403 peer_door on the list, the read and the diff, on both doors; a local token sees all', async () => {
       const mine = versionsOf(await listRest(local.key)).map(e => e.fp);
       assert.ok(mine.includes(X.fp), 'a local token does not see a held version');
-      const r = await listRest(peer.key);
-      assert.equal(r.status, 200, r.text.slice(0, 300));
-      const theirs = versionsOf(r).map(e => e.fp);
-      assert.ok(theirs.includes(v1.fp), 'the peer does not see a version it shares');
-      assert.ok(!theirs.includes(X.fp), 'the peer sees a version built from a network it is not in');
-      for (const path of [`?fp=${X.fp}`, `?fp=${X.fp}&against=current`]) {
-        const read = await listRest(peer.key, S, path);
-        assert.equal(read.status, 404, `${path}: ${read.text.slice(0, 200)}`);
-        assert.equal(read.body?.code, 'unknown_fingerprint', `${path}: a version the peer may not have is not answered as one it does not know`);
+      for (const path of ['', `?fp=${X.fp}`, `?fp=${X.fp}&against=current`]) {
+        const r = await listRest(peer.key, S, path);
+        assert.equal(r.status, 403, `${path || 'list'}: ${r.text.slice(0, 200)}`);
+        assert.equal(r.body?.code, 'peer_door', `${path || 'list'}: the peer was not refused as a peer`);
+        assert.deepEqual(versionsOf(r), [], `${path || 'list'}: a version was read for the peer`);
       }
+      const viaMcp = await d.rpc(peer.key, 'tools/call', { name: 'space_schema_versions', arguments: { space: S, fp: X.fp } });
+      assert.equal(viaMcp.status, 403, 'MCP: a peer-bound token was answered');
+      assert.equal(viaMcp.messages[0]?.code, 'peer_door', 'MCP: the peer was not refused as a peer');
     });
 
     it('a personal view is an unknown space here, answered as GET meta answers it', async () => {

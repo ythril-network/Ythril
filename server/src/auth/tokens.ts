@@ -439,6 +439,25 @@ export async function adoptPeerToken(tokenId: string): Promise<void> {
   for (const old of replaced) {
     if (await revokeToken(old.id)) log.info(`Revoked peer PAT '${peerText(old.name)}' (${peerText(old.id)}) — replaced by a newer handshake`);
   }
+  // A handshake with the same peer that expired unfinished left a token no one can present any more (Q-354).
+  const expired = new Set(expiredHandshakeTokenIds(getConfig()));
+  for (const old of getConfig().tokens.filter(x => x.peerInstanceId === t.peerInstanceId && x.id !== tokenId && expired.has(x.id))) {
+    if (await revokeToken(old.id)) log.info(`Revoked peer PAT '${peerText(old.name)}' (${peerText(old.id)}) — its handshake expired unfinished`);
+  }
+}
+
+/**
+ * The peer tokens whose handshake expired unfinished: bound to a peer, carrying an expiry, and that expiry passed (at `now` or before).
+ *
+ * A handshake mints its token with an expiry and lifts it when it completes (`adoptPeerToken`); one that never completes leaves a token
+ * that can no longer be used yet stayed listed for ever, because every clean-up read "has an expiry" as "a handshake in flight" without
+ * asking whether it had passed (Q-354). A future expiry is a handshake still in flight and is left alone; a token with no expiry is live;
+ * an expiry that does not parse is not judged. Pure; the boot sweep and `adoptPeerToken` revoke what it returns.
+ */
+export function expiredHandshakeTokenIds(config: Pick<Config, 'tokens'>, now: number = Date.now()): string[] {
+  return config.tokens
+    .filter(t => t.peerInstanceId && t.expiresAt !== null && t.expiresAt !== undefined && Date.parse(t.expiresAt) <= now)
+    .map(t => t.id);
 }
 
 /**

@@ -1,7 +1,7 @@
 /**
  * The RDF import's doors read the body whatever its content type, answer an act that will be retried as running and an input failure by its own
- * status and code, ask the brain's storage limit, and treat a peer-bound token as the neighbouring write door does (bundle-270, second review F5,
- * F6, F10 and U2).
+ * status and code, ask the brain's storage limit, and refuse a peer-bound token as every door outside the sync doors does (bundle-270, second review
+ * F5, F6, F10 and U2; bundle-47, Q-244 for U2).
  *
  * ## What it holds
  *
@@ -11,8 +11,10 @@
  * - F6: an act left owed answers 202 with the `importId` and its status address on both doors (a caller who retries would import twice); an input
  *   failure answers its own status and code on both doors.
  * - F10: with the brain's hard storage limit reached, both doors refuse as the fact doors do (REST 507 with `storageExceeded`, the tool an error).
- * - U2: a peer-bound token meets the REST import, the tool and both status doors as it meets the neighbouring write door (`POST entities`,
- *   `save_entity`) and the neighbouring read door.
+ * - U2: Q-244 confines a peer-bound token to the sync doors (`/api/sync/*`, `GET`/`POST /api/files/:spaceId`, `POST /api/notify`): token resolution
+ *   answers it `403 { code: 'peer_door' }` on every other route, `/mcp` included (an HTTP `403` with a JSON body, not a tool result). So the REST import,
+ *   the tool and both status doors answer a peer-bound token `403 peer_door`, as do the neighbouring write and read doors (`POST entities`,
+ *   `save_entity`), no import act is registered and no record lands. Control: a token not bound to a peer writes through the neighbouring door.
  *
  * Run: node --test testing/standalone/an-rdf-import-reads-any-body-and-answers-what-it-did-db.test.js (server build and the test MongoDB)
  */
@@ -136,32 +138,25 @@ describe('the RDF import doors read any body and answer what happened (real rout
     } finally { d.loader.mutateConfig(cfg => { delete cfg.storage; }); }
   });
 
-  it('U2: a peer-bound token meets the import doors as it meets the neighbouring doors', async () => {
-    const entity = { name: 'By a peer', type: 'person' };
-    // A door that closes the connection on the token is an answer too, said as one so the comparison names it.
-    const attempt = async (name, call) => {
-      try { return await call(); } catch (err) { return { status: 599, isError: true, text: `${name}: no answer (${err.cause?.message ?? err.message})`, body: null, headers: new Headers() }; }
-    };
-    // The neighbouring doors take a peer-bound token (Q-244 has not widened the refused set), and a read door answers it as a read.
-    const neighbourWrite = await attempt('POST entities', () => d.rest(peer.key, 'POST', `/api/brain/spaces/${PEER}/entities`, entity));
-    const neighbourTool = await attempt('save_entity', () => d.toolCall(peer.key, 'save_entity', { space: PEER, name: 'By a peer, by tool', type: 'person' }));
-    assert.ok(neighbourWrite.status < 300 && neighbourTool.isError === false, `the neighbouring doors take a peer-bound token: ${neighbourWrite.status} ${neighbourTool.text.slice(0, 120)}`);
-    // The import is a space act: it registers, and a request a peer-bound token made is a transfer of the space the registration tells to stop. The
-    // answer is a refusal in words (the registered set of tools a peer token may not call), never a connection that closes with no answer.
-    const rest = await attempt('REST import', () => d.importRest(peer.key, PEER, goodTurtle(PEER)));
-    assert.equal(rest.status, 403, `REST import: ${rest.text.slice(0, 300)}`);
-    assert.match(rest.text, /operator token/);
-    const tool = await attempt('import_rdf', () => d.importMcp(peer.key, { space: PEER, document: goodTurtle(PEER), format: 'turtle' }));
-    assert.equal(tool.isError, true, tool.text.slice(0, 300));
-    assert.match(tool.text, /import_rdf/);
-    assert.match(tool.text, /operator token/);
+  it('U2: a peer-bound token is refused 403 peer_door on the import doors and on the neighbouring doors, registers no act and lands no record', async () => {
+    // `/mcp` answers a peer-bound token an HTTP 403 with a JSON body (the door never reaches the tool), so the code is read from that body.
+    const viaMcp = async (name, args) => { const r = await d.rpc(peer.key, 'tools/call', { name, arguments: args }); return { status: r.status, code: r.messages[0]?.code, text: JSON.stringify(r.messages[0] ?? {}).slice(0, 300) }; };
+    const restRefused = (a, what) => assert.ok(a.status === 403 && a.body?.code === 'peer_door', `${what}: ${a.status} ${a.text.slice(0, 300)}`);
+    const mcpRefused = (a, what) => assert.ok(a.status === 403 && a.code === 'peer_door', `${what}: ${a.status} ${a.text}`);
+    // The neighbouring write and read doors refuse it the same way, so the import's refusal is the rule for every door outside the sync doors.
+    restRefused(await d.rest(peer.key, 'POST', `/api/brain/spaces/${PEER}/entities`, { name: 'By a peer', type: 'person' }), 'POST entities');
+    mcpRefused(await viaMcp('save_entity', { space: PEER, name: 'By a peer, by tool', type: 'person' }), 'save_entity');
+    restRefused(await d.importRest(peer.key, PEER, goodTurtle(PEER)), 'REST import');
+    mcpRefused(await viaMcp('import_rdf', { space: PEER, document: goodTurtle(PEER), format: 'turtle' }), 'import_rdf');
     assert.deepEqual(d.actsOf(PEER), [], 'no act was registered');
-    assert.deepEqual((await d.records(PEER, 'entities')).map(e => e.name).sort(), ['By a peer', 'By a peer, by tool'], 'nothing was imported');
-    // The status doors read: answered as a read of an import that does not exist, as for any token.
+    assert.deepEqual(await d.records(PEER, 'entities'), [], 'something was written for a peer-bound token');
+    // The status doors read, and are refused as well: a peer-bound token learns nothing of an import of this space.
     const missing = '00000000-0000-4000-8000-000000000000';
-    const statusRest = await attempt('REST status', () => d.statusRest(peer.key, PEER, missing));
-    assert.equal(statusRest.status, 404, statusRest.text.slice(0, 200));
-    const statusTool = await attempt('import_rdf_status', () => d.statusMcp(peer.key, { space: PEER, importId: missing }));
-    assert.match(statusTool.text, /No import of this space/);
+    restRefused(await d.statusRest(peer.key, PEER, missing), 'REST status');
+    mcpRefused(await viaMcp('import_rdf_status', { space: PEER, importId: missing }), 'import_rdf_status');
+    // Control: a token not bound to a peer, with the same rungs on the same space, writes through the neighbouring door, so the refusals above are about the token kind.
+    const control = await d.rest(writer.key, 'POST', `/api/brain/spaces/${PEER}/entities`, { name: 'By a writer', type: 'person' });
+    assert.ok(control.status < 300, `control: a token not bound to a peer was refused the neighbouring write door: ${control.status} ${control.text.slice(0, 200)}`);
+    assert.deepEqual((await d.records(PEER, 'entities')).map(e => e.name), ['By a writer'], 'only the control\'s record exists: nothing a peer-bound token sent landed');
   });
 });

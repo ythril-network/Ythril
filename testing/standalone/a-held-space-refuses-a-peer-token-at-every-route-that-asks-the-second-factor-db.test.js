@@ -9,15 +9,21 @@
  * the type-schema routes, validate-schema, network-precedence, schema-convert, the schema and data RDF imports), so the refusal reaches all of
  * them, and no test drove it. The routes are derived here from the route table (the ones whose chain names the guard), never listed.
  *
- * ## What it holds (the real application over a socket, real MongoDB; a wipe round applied here whose peer has not concluded it holds the space)
+ * ## What holds now (bundle-47, Q-244; the real application over a socket, real MongoDB; a wipe round applied here whose peer has not concluded it holds the space)
  *
- * 1. A peer-bound token with the rung on the held space is answered `423 space_held` on reindex, reembed and validate-schema, each of which is
- *    asserted to stand behind the guard in the route table.
- * 2. The same token on a space nothing holds, and an instance-admin token on the held one, are not refused for the hold.
- * 3. A peer-bound token WITHOUT the rung is answered `403` first, and its answer on the held space is the answer it gets on a free one: it never
- *    learns the space is held.
+ * Q-244 confines a peer-bound token to the sync doors: token resolution answers it `403 { code: 'peer_door' }` on every route but `/api/sync/*`,
+ * `GET`/`POST /api/files/:spaceId` and `POST /api/notify`. None of the routes behind the second-factor guard is one of those, so a peer token no
+ * longer reaches the hold there: the refusal comes first, and it is the same on a held space and on a free one. The routes driven are the same
+ * (DRIVEN, derived from the route table), and the file holds:
  *
- * Seen red on f3cd49548 by mutation: `refuseHeldPeer` dropped from `requireSpaceAuthMfaScoped`: rows 1 answer 202 or 200.
+ * 1. A peer-bound token with the rung on the held space is answered `403 peer_door` on reindex, reembed and validate-schema, never `423 space_held`,
+ *    each of which is asserted to stand behind the guard in the route table.
+ * 2. Controls: the same token on a space nothing holds is answered the same words (the refusal is about the token kind, not the hold); an
+ *    instance-admin token on the held space is neither held nor refused as a peer.
+ * 3. A peer-bound token WITHOUT the rung is answered `403 peer_door` on the held space and on a free one alike: it never learns the space is held.
+ *
+ * Seen red at the bundle-47 server: the rows as Q-181 wrote them (`423` on the held space, a hold-free answer on the free one) fail with the `peer_door`
+ * refusal. The hold's own guard on these routes was seen red on f3cd49548 by mutation (`refuseHeldPeer` dropped from `requireSpaceAuthMfaScoped`).
  *
  * Run: node --test testing/standalone/a-held-space-refuses-a-peer-token-at-every-route-that-asks-the-second-factor-db.test.js
  * (requires a prior `npm run build:server` and the test MongoDB)
@@ -27,6 +33,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openRdfExportDoors, rdfMeta } from './_rdf-export-doors.mjs';
 import { MFA_GUARDED_ROUTES_DRIVEN as DRIVEN } from './_mfa-guarded-routes-driven.mjs';
+import { isPeerDoorRefusal } from './_peer-door.mjs';
 
 const skip = await mongoSkipReason();
 const HELD = 'mfaheld';
@@ -39,6 +46,7 @@ const HOUR = 3_600_000;
 // the-routes-the-held-space-test-drives-stand-behind-the-second-factor-guard.test.js.
 const url = (path, space) => path.replace(/:\w+/, space);
 const isHeld = (r) => r.status === 423 && r.body?.code === 'space_held';
+const isPeerDoor = isPeerDoorRefusal;
 const fmt = (r) => `${r.status} ${r.text.slice(0, 160)}`;
 
 /** An applied wipe round of the held space with no evidence that the peer concluded it: the space is held for that peer. */
@@ -73,26 +81,29 @@ describe('a held space is refused to a peer token on every route that asks the s
 
   const drive = (route, key, space) => d.rest(key, route.method, url(route.path, space), route.body);
 
-  it('a peer token with the rung is answered 423 space_held on each route driven', async () => {
-    const notHeld = [];
-    for (const route of DRIVEN) { const r = await drive(route, keys.peer, HELD); if (!isHeld(r)) notHeld.push(`${route.method} ${route.path} -> ${fmt(r)}`); }
-    assert.deepEqual(notHeld, [], `a peer token acted on a space whose wipe only this side has applied:\n  ${notHeld.join('\n  ')}`);
+  it('a peer token with the rung is answered 403 peer_door on each route driven, never 423 space_held', async () => {
+    const notRefused = [];
+    for (const route of DRIVEN) { const r = await drive(route, keys.peer, HELD); if (!isPeerDoor(r)) notRefused.push(`${route.method} ${route.path} -> ${fmt(r)}`); }
+    assert.deepEqual(notRefused, [], `a peer token was not refused as a peer on a route that is no peer door:\n  ${notRefused.join('\n  ')}`);
   });
 
-  it('controls: the same token on a free space and an instance-admin token on the held one are not held', async () => {
+  it('controls: the same token on a free space is refused the same words, and an instance-admin token on the held one is neither held nor refused as a peer', async () => {
     for (const route of DRIVEN) {
       const free = await drive(route, keys.peer, FREE);
-      assert.ok(!isHeld(free), `${route.method} ${route.path} on a space nothing holds: ${fmt(free)}`);
+      assert.ok(isPeerDoor(free), `${route.method} ${route.path} on a space nothing holds: ${fmt(free)}`);
+      const held = await drive(route, keys.peer, HELD);
+      assert.equal(held.text, free.text, `${route.method} ${route.path}: the peer's answer on the held space differs from the one on a free space`);
       const admin = await drive(route, keys.admin, HELD);
       assert.ok(!isHeld(admin), `${route.method} ${route.path}: an instance-admin token was held as if it were the exchange: ${fmt(admin)}`);
+      assert.ok(!isPeerDoor(admin), `${route.method} ${route.path}: an instance-admin token was refused as a peer: ${fmt(admin)}`);
     }
   });
 
-  it('a peer token without the rung is refused 403 first and told nothing of the hold', async () => {
+  it('a peer token without the rung is refused 403 peer_door on the held space and the free one alike, and told nothing of the hold', async () => {
     for (const route of DRIVEN) {
       const held = await drive(route, keys.peerNoRung, HELD);
       const free = await drive(route, keys.peerNoRung, FREE);
-      assert.equal(held.status, 403, `${route.method} ${route.path}: ${fmt(held)}`);
+      assert.ok(isPeerDoor(held), `${route.method} ${route.path}: ${fmt(held)}`);
       assert.ok(!isHeld(held), `${route.method} ${route.path} told a token without the rung that the space is held`);
       assert.equal(held.text.split(HELD).join('S'), free.text.split(FREE).join('S'), `${route.method} ${route.path}: the answer on the held space differs from the one on a free space`);
     }

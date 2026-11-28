@@ -357,6 +357,14 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
   }
   const { name, expiresAt, peerInstanceId, schemaLibrary, mfa, rights, rateLimitPerMinute } = parsed.data;
 
+  // A token bound to peer P IS P to every sync door: it rewrites P's address in a network's member list (the next cycle then sends this
+  // instance's credential for P there) and casts P's unsigned votes. Only an instance administrator, who holds the whole configuration
+  // anyway, binds one here; the invite and join handshakes bind theirs without this route (Q-243). The bound peer is audited below.
+  if (peerInstanceId !== undefined && !isInstanceAdmin(req.authToken as Parameters<typeof isInstanceAdmin>[0])) {
+    res.status(403).json({ error: 'Only an instance administrator can bind a token to a peer (peerInstanceId); a network join binds its own.' });
+    return;
+  }
+
   /*
    * The both-descriptions refusal that stood here is GONE, and its absence is the point: there is only
    * one description of access on this route now. It refused a body carrying `rights` AND a legacy field,
@@ -472,6 +480,8 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
     rights: effective as never,
     rateLimitPerMinute,
   });
+  // The peer a token was bound to is the one value of a mint an auditor needs: which identity an administrator handed out (Q-243).
+  if (peerInstanceId !== undefined) req.auditChangesExplicit = [{ field: 'peerInstanceId', to: peerInstanceId }];
   // Return plaintext only on creation — never retrievable again
   const { hash: _h, ...safeRecord } = record;
   res.status(201).json({ token: withReadOnlyAlias(safeRecord), plaintext });

@@ -72,8 +72,9 @@ admitted only to the spaces of networks the peer is currently a member of.
 joiner when `finalize` answers, and on both sides of a club pairing — every other live token this instance gave that
 peer is revoked, because the peer can no longer present it. They used to stay valid until the two shared no network
 at all, so each join left one more behind. A token still in a handshake keeps its expiry and is never revoked this
-way, since two joins with one peer can overlap. At start an instance also revokes the ones left from before: tokens a
-newer one with the same peer replaced, and that the peer has not presented since.
+way, since two joins with one peer can overlap; once that expiry has passed, the handshake ended unfinished and the
+token is revoked, both when the peer's next handshake completes and at start. At start an instance also revokes the
+ones left from before: tokens a newer one with the same peer replaced, and that the peer has not presented since.
 
 **Why the whole bundle travels rather than a short URL to fetch it from.** `rsaPublicKeyPem` is what pins
 the handshake to the intended instance. If the joiner fetched it instead, whoever controls that fetch could

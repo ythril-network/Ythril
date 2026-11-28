@@ -20,7 +20,8 @@ import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { readAfterPosition } from '../../util/position-keyset.js';
 import { pageAnswer, pushAnswer } from '../../sync/wire-answer.js';
 import { parseLimit } from '../../util/pagination.js';
-import { MAX_FORK_DEPTH, withAuthoredKeys, syncPositionStart, refusePeerSpace, refusePeerWrite, pushAllowed, withSchemaViolations } from './_shared.js';
+import { MAX_FORK_DEPTH, withAuthoredKeys, syncPositionStart, refusePeerSpace, refusePeerWrite, pushAllowed, withSchemaViolations, refuseSyncRung } from './_shared.js';
+import type { SpaceArea } from '../../config/rights-shape.js';
 import { boundedRows } from '../../brain/write-validation.js';
 import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
@@ -65,6 +66,11 @@ const SERVED_AS: Partial<Record<PayloadKey, <D extends object>(doc: D) => D>> = 
  * model, and a soft delete reaches a peer as the file tombstone, never as its flagged row. It comes from the family row rather than a parameter, so the
  * page, the read by id and the push cannot each be handed a different one.
  */
+/** The rights area a family's rows belong to (Q-247): a file's metadata is `files`, every record family `knowledge`. */
+function areaOfFamily(key: PayloadKey): SpaceArea {
+  return key === 'filemeta' ? 'files' : 'knowledge';
+}
+
 function pageByPosition<T extends { _id: string; seq: number }>(key: PayloadKey) {
   const { collection, pushFilter: extraFilter = {} } = familyOf(key);
   const serve = SERVED_AS[key];
@@ -72,6 +78,7 @@ function pageByPosition<T extends { _id: string; seq: number }>(key: PayloadKey)
     try {
       const { spaceId, networkId, limit, full: fullParam } = req.query as Record<string, unknown>;
       if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+      if (refuseSyncRung(res, spaceId, [areaOfFamily(key)], req.authToken)) return;
       if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
 
       const start = syncPositionStart(req.query as Record<string, unknown>);
@@ -111,6 +118,7 @@ function oneById<T extends { _id: string }>(key: PayloadKey) {
     try {
       const { spaceId, networkId } = req.query as Record<string, string>;
       if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+      if (refuseSyncRung(res, spaceId, [areaOfFamily(key)], req.authToken)) return;
       if (refusePeerSpace(res, spaceId, networkId, req.authToken)) return;
 
       /*

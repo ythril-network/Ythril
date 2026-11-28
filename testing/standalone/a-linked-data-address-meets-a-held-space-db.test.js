@@ -9,17 +9,24 @@
  * while the export answered 423, outside the transfer fence. The hold is asked after the rung, so a token without the rung still gets
  * the one not-found answer and never learns the space is held.
  *
- * ## The rules
+ * ## What holds now (bundle-47, Q-244)
  *
- * 1. A peer-bound token with the rung on a held space: `423 space_held` on the record, the file, the agent and the schema routes, as the
- *    export answers it (the control row).
- * 2. The same token on a space nothing holds, and an instance-admin token on the held space, are read (the operator's own tooling is no peer).
- * 3. A peer-bound token without the rung on the held space is answered the not-found problem body, not the hold.
+ * Q-244 confines a peer-bound token to the sync doors: token resolution answers it `403 { code: 'peer_door' }` on every route but `/api/sync/*`,
+ * `GET`/`POST /api/files/:spaceId` and `POST /api/notify`. Neither `/ld/` nor the export is one of those, so a peer token never reaches the area
+ * rung or the hold on either: the refusal comes first, on a held space and on a free one alike, and the hold's own answer (`423`) is no longer
+ * what that token meets there.
+ *
+ * 1. A peer-bound token with the rung on a held space: `403 peer_door` on the record, the file, the agent, the schema and the vocabulary routes,
+ *    and on the export (the control row the address is held to), never `423 space_held`.
+ * 2. Controls: the same token on a space nothing holds is refused the same `403 peer_door` (the refusal is about the token kind, not the hold);
+ *    an instance-admin token on the held space is read (the operator's own tooling is no peer).
+ * 3. A peer-bound token without the rung on the held space is answered the same refusal as on a free space: it learns nothing of the hold.
  *
  * ## Seen red
  *
- * On ce62acbbb the held space's record answers 200 to the peer token (the export, 423). Mutation: `refuseHeldPeer` dropped from
- * `requireResolvedRung`.
+ * At the bundle-47 server the rows as Q-758 wrote them (`423` on the held space, a `200` record on the free one, the not-found problem body
+ * without the rung) fail with the `peer_door` refusal. The hold on `/ld/` was seen red on ce62acbbb (record `200` to the peer token) by
+ * mutation: `refuseHeldPeer` dropped from `requireResolvedRung`.
  *
  * Run: a Mongo the harness accepts, npm run build:server, then
  *      node --test testing/standalone/a-linked-data-address-meets-a-held-space-db.test.js
@@ -28,6 +35,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf } from './_rdf-export-doors.mjs';
+import { isPeerDoorRefusal } from './_peer-door.mjs';
 
 const skip = await mongoSkipReason();
 const PUBLIC = 'https://rdf.example.org';
@@ -52,6 +60,7 @@ async function get(path, key) {
 }
 const fmt = (r) => `${r.status} ${r.text.slice(0, 160)}`;
 const isHeld = (r) => r.status === 423 && r.body?.code === 'space_held';
+const isPeerDoor = isPeerDoorRefusal;
 
 /** An applied wipe round of the held space with no evidence that the peer concluded it: the space is held for that peer. */
 const wipeRound = (selfId) => {
@@ -91,30 +100,36 @@ describe('a linked data address meets a held space as the export does', { skip }
     await d?.close();
   });
 
-  it('the export answers a peer token 423 on the held space (the control the address is held to)', async () => {
+  it('the export answers a peer token 403 peer_door on the held space, not 423 (the control the address is held to)', async () => {
     const r = await get(`/api/brain/spaces/${HELD}/export/rdf`, keys.peer);
-    assert.ok(isHeld(r), `the export of a held space for a peer token: ${fmt(r)}`);
+    assert.ok(isPeerDoor(r), `the export of a held space for a peer token: ${fmt(r)}`);
+    assert.ok(!isHeld(r), `the export of a held space for a peer token was held, not refused as a peer: ${fmt(r)}`);
   });
 
-  it('a peer token with the rung is answered 423 at every address of the held space', async () => {
+  it('a peer token with the rung is answered 403 peer_door at every address of the held space, never 423 and never the record', async () => {
     const paths = [`/ld/${HELD}/entity/e1`, `/ld/${HELD}/file/${FILE_PATH}`, `/ld/${HELD}/agent/rdf-test-instance`, `/ld/${HELD}/schema/${'0'.repeat(64)}`, `/ld/${HELD}/vocab/entity/Person`];
-    const notHeld = [];
-    for (const p of paths) { const r = await get(p, keys.peer); if (!isHeld(r)) notHeld.push(`${p} -> ${fmt(r)}`); }
-    assert.deepEqual(notHeld, [], `a peer token read a held space through /ld/:\n  ${notHeld.join('\n  ')}`);
+    const notRefused = [];
+    for (const p of paths) { const r = await get(p, keys.peer); if (!isPeerDoor(r)) notRefused.push(`${p} -> ${fmt(r)}`); }
+    assert.deepEqual(notRefused, [], `a peer token was not refused as a peer through /ld/:\n  ${notRefused.join('\n  ')}`);
   });
 
-  it('controls: the same token on a free space and an instance-admin token on the held one are not held', async () => {
+  it('controls: the same token on a free space is refused the same words, and an instance-admin token reads both spaces, held or not', async () => {
     const free = await get(`/ld/${FREE}/entity/e1`, keys.peer);
-    assert.equal(free.status, 200, `a space nothing holds: ${fmt(free)}`);
-    assert.ok(free.text.includes(`${baseOf(FREE)}entity/e1`));
+    assert.ok(isPeerDoor(free), `a space nothing holds: ${fmt(free)}`);
+    const held = await get(`/ld/${HELD}/entity/e1`, keys.peer);
+    assert.equal(held.text, free.text, 'the peer token\'s answer on the held space differs from the one on a free space');
+    const adminFree = await get(`/ld/${FREE}/entity/e1`, keys.admin);
+    assert.equal(adminFree.status, 200, `the door does not answer an instance-admin token on a free space: ${fmt(adminFree)}`);
+    assert.ok(adminFree.text.includes(`${baseOf(FREE)}entity/e1`));
     const admin = await get(`/ld/${HELD}/entity/e1`, keys.admin);
     assert.ok(!isHeld(admin), `an instance-admin token was held as if it were the exchange: ${fmt(admin)}`);
+    assert.ok(!isPeerDoor(admin), `an instance-admin token was refused as a peer: ${fmt(admin)}`);
   });
 
-  it('a peer token without the rung is told nothing of the hold: the one not-found answer', async () => {
+  it('a peer token without the rung is told nothing of the hold: the same peer_door refusal as on a free space', async () => {
     const r = await get(`/ld/${HELD}/entity/e1`, keys.peerNoRung);
-    const missing = await get(`/ld/${FREE}/entity/nope`, keys.peer);
-    assert.equal(r.status, 404, fmt(r));
-    assert.equal(r.text, missing.text, 'a token without the rung learns the space is held');
+    const free = await get(`/ld/${FREE}/entity/nope`, keys.peer);
+    assert.ok(isPeerDoor(r), fmt(r));
+    assert.equal(r.text, free.text, 'a token without the rung learns the space is held');
   });
 });

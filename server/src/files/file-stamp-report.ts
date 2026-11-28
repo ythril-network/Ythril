@@ -58,7 +58,7 @@ import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
 import { pagePositionRuns } from '../sync/position-run-pager.js';
 import { PeerPagesBySeq } from '../util/errors.js';
-import { syncBasePath } from '../sync/file-sync.js';
+import { syncBasePath } from '../sync/file-agreement.js';
 import { peerIdsCarryingSpace, peersCarryingSpace, type PeerForSpace } from '../sync/peer-for-space.js';
 import { limitRefusal } from '../util/strict-limit.js';
 import { RequestRefusal } from '../util/errors.js';

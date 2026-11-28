@@ -7,10 +7,7 @@
  */
 import { Readable } from 'node:stream';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
-import { v4 as uuidv4 } from 'uuid';
-import type { NetworkMember, ConflictDoc, FileMetaDoc } from '../config/types.js';
-import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { spaceCollection } from '../db/space-collection.js';
+import type { NetworkMember } from '../config/types.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { log, logSafe, peerText } from '../util/log.js';
 import { StreamVerificationError } from '../util/sha256-tap.js';
@@ -35,6 +32,7 @@ import { applyPeerFileTombstones } from '../files/peer-tombstone-apply.js';
 import { peerSafeFetch, transferInit, PEER_TRANSFER_TIMEOUT_MS } from './peer-fetch.js';
 import { recordFileTombstoneAck, ackedPositionFrom } from './file-tombstone-ack.js';
 import { decideFilePull, decideFilePush, conflictCopyPath, isInstanceLocalFile } from './file-conflict.js';
+import { recordFileConflict, recordSyncBase, syncBasePath } from './file-agreement.js';
 import { peerFileSpaceId } from './space-map.js';
 import { deliveryOfMember } from './deletion-authority.js';
 import { declinedCountOf, refusedCountOf, sayPeerDeclined, sayPeerRefused } from './decline-report.js';
@@ -42,7 +40,6 @@ import { serverCursorOf } from './position-run-pager.js';
 import { MAX_TRANSFER_PAGES, stopAtPageBound, type TransferOutcome } from './watermark.js';
 import { noteToldTombstoned, wasToldTombstoned, noteRefusedUpload, wasRefusedUpload } from './told-tombstoned.js';
 import { pushStoredFile, type SendUpload } from './file-push.js';
-import { assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
 import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { adoptAllLegacyRows } from '../files/legacy-file-keys.js';
 import { peerUnreadableOf, UnreadablePaths } from '../files/unreadable-paths.js';
@@ -470,23 +467,8 @@ export async function syncFiles(
             await commitStaged(absConflictPath, staged);
             pulledBytes += staged.size;
             pulledFiles++;
-
-            // Persist a conflict record so the UI can surface it to the user
-            const conflictDoc: ConflictDoc = {
-              _id: uuidv4(),
-              spaceId,
-              originalPath: key,
-              conflictPath: conflictRelPath,
-              peerInstanceId: member.instanceId,
-              peerInstanceLabel: member.label,
-              detectedAt: new Date().toISOString(),
-            };
-            await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts')).insertOne(asDoc<ConflictDoc>(conflictDoc));
-
-            log.warn(
-              `FILE_CONFLICT: '${peerText(key)}' from peer '${peerText(member.label)}' differs from local copy. ` +
-              `Conflict copy saved as '${peerText(conflictRelPath)}'. Resolve in Settings → Conflicts.`,
-            );
+            // The conflict record the UI surfaces, written by the one recorder the push door uses too (`file-agreement.ts`).
+            await recordFileConflict(spaceId, key, conflictRelPath, { instanceId: member.instanceId, label: member.label });
           }
         } finally {
           await staged.discard();   // every exit: shadowed, committed (nothing left), refused, failed
@@ -573,22 +555,6 @@ export async function syncFiles(
 }
 
 /**
- * The hash of each file this instance and `peerId` last both held, by path (`Q-66`). Kept on the local file's metadata
- * as `syncBase.<peer instance id>`: LOCAL state, never replicated (the ingest schema does not declare it, so
- * `fileMetaForWire` drops it) and never hashed (`FILE_HASH_PROJECTION` is an inclusion list).
- */
-type SyncedFileMeta = FileMetaDoc & { syncBase?: Record<string, string> };
-
-/**
- * The Mongo path of the base recorded for `peerId` (`syncBase.<peer instance id>`): the ONE place the key is formed, read by the
- * pull's projection, written by `recordSyncBase` and filtered on by the file-stamp report. A reader and a writer that spelled it
- * separately would stop agreeing the day the key changes, and a row would look unsynced to one and synced to the other.
- */
-export function syncBasePath(peerId: string): string {
-  return `syncBase.${peerId}`;
-}
-
-/**
  * Pull the peer's file tombstones, a page at a time, to the end, applying each page through the one apply
  * (`applyPeerFileTombstones`) with the page's `Delivery`: the peer pulled from is the authenticated source, and whether it is
  * this space's upstream is this instance's own knowledge (`sync/deletion-authority.ts`), never the peer's say-so.
@@ -636,12 +602,4 @@ async function pullFileTombstones(
     if (stopAtPageBound(outcome, (why) => log.warn(`File tombstones from ${peer} stopped: ${logSafe(why)}; the rest is read next cycle.`), pages, MAX_TRANSFER_PAGES)) return;
     cursor = next;
   }
-}
-
-/** Record that this instance and `peerId` now both hold `sha256` for the file at `filePath`. */
-async function recordSyncBase(spaceId: string, filePath: string, peerId: string, sha256: string): Promise<void> {
-  try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (isActRefusal(err)) return; throw err; }
-  await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
-    .updateOne(asFilter<SyncedFileMeta>({ _id: filePath }), asUpdate<SyncedFileMeta>({ $set: { [syncBasePath(peerId)]: sha256 } }))
-    .catch(err => log.warn(`recordSyncBase ${peerText(filePath)}: ${peerText(err)}`));
 }

@@ -10,12 +10,19 @@
  * ## The rule
  *
  * `auth/peer-bound.ts` `peerTokenToolRefusal(peerId, toolName)` is the one question "may a peer-bound token call this tool?" (Q-244 widens it
- * to every user write door; this bundle names `write_file`). A refused call:
+ * to every user write door; this bundle names `write_file`). It stays the tool dispatcher's own refusal and the source gate below still holds
+ * it to both call sites.
  *
- *  - is `403` on `POST /api/write_file` and an error result on MCP, and writes nothing;
- *  - leaves an audit row that NAMES ITS SPACE (the refusal runs after the dispatch has set the audit space, before the per-space loop);
- *  - is never advertised: `tools/list` for that token does not offer `write_file`;
- *  - is not asked of an operator token, which still writes.
+ * ## What holds now (bundle-47, Q-244)
+ *
+ * Q-244 confines a peer-bound token to the sync doors: token resolution answers it `403 { code: 'peer_door' }` on every route but `/api/sync/*`,
+ * `GET`/`POST /api/files/:spaceId` and `POST /api/notify`, `/mcp` included (an HTTP `403` with a JSON body, not a tool error result). So a peer
+ * token's `write_file` never reaches the tool dispatcher on either door; it is refused first. The behavioural rows hold:
+ *
+ *  - on `POST /api/write_file` and on `/mcp` the peer-bound token is answered `403 peer_door` and nothing is written;
+ *  - the refusal comes before any space is resolved, so it leaves no audit row that names the space (the operator's write, the control, does);
+ *  - `tools/list` for that token is refused the same way, so it advertises no tool; the operator's lists `write_file`;
+ *  - an operator token is not refused, and still writes.
  *
  * ## The source gate
  *
@@ -56,11 +63,11 @@ async function rpc(key, method, params) {
   });
   const raw = await r.text();
   const data = raw.startsWith('event:') || raw.startsWith('data:') ? raw.split('\n').find(l => l.startsWith('data:'))?.slice(5) ?? '{}' : raw;
-  return JSON.parse(data);
+  return { ...JSON.parse(data), httpStatus: r.status };
 }
 const mcpWrite = async (key) => {
   const out = await rpc(key, 'tools/call', { name: 'write_file', arguments: { space: S, path: P, content: 'hello' } });
-  return { isError: out.result?.isError === true, text: (out.result?.content ?? []).map(c => c.text ?? '').join('\n'), sc: out.result?.structuredContent ?? {} };
+  return { status: out.httpStatus, code: out.code, isError: out.result?.isError === true, text: (out.result?.content ?? []).map(c => c.text ?? '').join('\n'), sc: out.result?.structuredContent ?? {} };
 };
 const restWrite = async (key) => {
   const r = await fetch(`${server.url}/api/write_file`, {
@@ -73,9 +80,12 @@ const written = () => fs.existsSync(path.join(process.env['DATA_ROOT'], 'files',
 
 /** The two tool doors, so a rule stated over doors holds for each. */
 const DOORS = () => [
-  { name: 'MCP write_file', call: mcpWrite, refused: (a) => a.isError && /peer/i.test(a.text), ok: (a) => !a.isError },
-  { name: 'POST /api/write_file', call: restWrite, refused: (a) => a.status === 403, ok: (a) => a.status < 300 },
+  { name: 'MCP write_file', call: mcpWrite, refused: (a) => a.status === 403 && a.code === 'peer_door', ok: (a) => a.status === 200 && !a.isError },
+  { name: 'POST /api/write_file', call: restWrite, refused: (a) => a.status === 403 && a.body?.code === 'peer_door', ok: (a) => a.status < 300 },
 ];
+
+/** The rows the audit log holds that name the space and belong to a file write, once the writer has settled. */
+const writeRows = async () => (await auditRowsOf(mongo, { spaceId: S })).filter(r => /write_file/.test(r.path ?? '') || /file/.test(r.operation ?? ''));
 
 describe('a peer-bound token cannot call write_file', { skip }, () => {
   before(async () => {
@@ -97,31 +107,33 @@ describe('a peer-bound token cannot call write_file', { skip }, () => {
   });
 
   for (const d of DOORS()) {
-    it(`${d.name}: a peer-bound token is refused (403 on REST) and nothing is written`, async () => {
+    it(`${d.name}: a peer-bound token is refused 403 peer_door and nothing is written`, async () => {
       const a = await d.call(peerKey);
-      assert.ok(d.refused(a), `a peer-bound token's write_file was not refused: ${JSON.stringify(a)}`);
+      assert.ok(d.refused(a), `a peer-bound token's write_file was not refused as a peer: ${JSON.stringify(a)}`);
       assert.equal(written(), false, 'the refused call wrote the file');
     });
 
-    it(`${d.name}: the audit row of the refused call names its space`, async () => {
-      await d.call(peerKey);
-      const rows = (await auditRowsOf(mongo, { spaceId: S })).filter(r => /write_file/.test(r.path ?? '') || /file/.test(r.operation ?? ''));
-      assert.ok(rows.length >= 1, 'the refused call left no audit row naming the space');
-      assert.ok(rows.every(r => r.status >= 400), `the row of a refused call is not a failure: ${JSON.stringify(rows.map(r => [r.operation, r.status]))}`);
+    it(`${d.name}: the refused call is stopped before any space is resolved, so no audit row names the space`, async () => {
+      const a = await d.call(peerKey);
+      assert.ok(d.refused(a), `a peer-bound token's write_file was not refused as a peer: ${JSON.stringify(a)}`);
+      assert.deepEqual((await writeRows()).map(r => [r.operation, r.status]), [], 'the refused call left an audit row naming the space');
     });
 
-    it(`${d.name}: an operator token still writes`, async () => {
+    it(`${d.name}: an operator token still writes, and its write is the audit row the peer's refusal does not leave`, async () => {
       const a = await d.call(adminKey);
       assert.ok(d.ok(a), `an operator's write_file was refused: ${JSON.stringify(a)}`);
       assert.equal(written(), true, 'the operator\'s write did not land');
+      assert.ok((await writeRows()).length >= 1, 'the operator\'s write left no audit row naming the space: the probe cannot see a row');
     });
   }
 
-  it('tools/list for the peer-bound token does not offer write_file; the operator\'s does', async () => {
-    const names = async (key) => (await rpc(key, 'tools/list', {})).result?.tools?.map(t => t.name) ?? [];
-    const operator = await names(adminKey);
-    assert.ok(operator.includes('write_file'), 'the operator\'s listing does not offer write_file: the probe is broken');
-    assert.ok(!(await names(peerKey)).includes('write_file'), 'tools/list advertises a tool the dispatcher refuses this token');
+  it('tools/list for the peer-bound token is refused 403 peer_door, so it offers no tool; the operator\'s offers write_file', async () => {
+    const operator = await rpc(adminKey, 'tools/list', {});
+    assert.ok((operator.result?.tools ?? []).some(t => t.name === 'write_file'), 'the operator\'s listing does not offer write_file: the probe is broken');
+    const peer = await rpc(peerKey, 'tools/list', {});
+    assert.equal(peer.httpStatus, 403, `tools/list answered a peer-bound token ${peer.httpStatus}`);
+    assert.equal(peer.code, 'peer_door');
+    assert.equal(peer.result, undefined, 'tools/list advertises tools to a peer-bound token');
   });
 });
 
