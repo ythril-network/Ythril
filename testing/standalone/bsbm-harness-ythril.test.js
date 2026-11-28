@@ -29,6 +29,14 @@ test('another refusal (a bound, a bad parameter) keeps its own code and message'
   assert.deepEqual(r, { code: 'rdf_bound_exceeded', message: 'too many subjects' });
 });
 
+test('an act ended as an input failure is recorded with the code its report keeps under failure', () => {
+  const report = { status: 'failed', failure: { status: 413, code: 'rdf_memory_exceeded', detail: 'the index passed room' } };
+  for (const json of [{ report }, report]) {
+    const r = describeRefusal({ status: 200, json, text: '{"huge":"json"}' });
+    assert.equal(r.code, 'rdf_memory_exceeded');
+  }
+});
+
 test('an answer that is not JSON is recorded as unknown, with its text', () => {
   const r = describeRefusal({ status: 502, json: null, text: 'Bad Gateway' });
   assert.deepEqual(r, { code: 'unknown', message: 'Bad Gateway' });
