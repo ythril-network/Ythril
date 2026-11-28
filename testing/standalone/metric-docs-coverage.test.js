@@ -34,6 +34,15 @@ function documentedMetrics(text) {
   return [...text.matchAll(/^\|\s*`(ythril_[a-z0-9_]+)`\s*\|/gm)].map(m => m[1]);
 }
 
+/**
+ * The exposed names the docs never name WHOLE. A name counts only where no name character stands on either side of it: a substring match
+ * read `ythril_embed_jobs` as documented inside `ythril_embed_jobs_failed_total` (bundle-41, Q-182 S5b), so a new metric whose name begins
+ * another's passed this gate with no row of its own. The regex is built fresh per name.
+ */
+function undocumented(exposed, text) {
+  return exposed.filter(n => !new RegExp(`(?<![A-Za-z0-9_])${n}(?![A-Za-z0-9_])`).test(text));
+}
+
 describe('metrics — registry and docs agree', () => {
   const exposed = registryMetrics();
   const docsText = allDocsText();
@@ -49,11 +58,20 @@ describe('metrics — registry and docs agree', () => {
   });
 
   it('every metric the instance exposes is documented', () => {
-    const missing = exposed.filter(n => !docsText.includes(n));
+    const missing = undocumented(exposed, docsText);
     assert.deepEqual(missing, [], `exposed on /metrics, absent from the docs:\n  ${missing.join('\n  ')}\n\n`
       + 'Add a row to the "Metrics exposed" table in docs/integration-guide/11-setup-api.md. An\n'
       + 'undocumented metric is one an operator cannot find, which is how a fleet came to ask for a gauge\n'
       + 'that already existed.');
+  });
+
+  it('a name that only begins a documented one is not documented (whole names, not substrings)', () => {
+    // The plant is the repository's own row for the longer name, read from the docs, never typed here: the docs text it is matched against
+    // holds `ythril_embed_jobs_failed_total` and nothing else, so `ythril_embed_jobs` must come back undocumented.
+    const row = docsText.split(/\r?\n/).find(l => /^\|\s*`ythril_embed_jobs_failed_total`\s*\|/.test(l));
+    assert.ok(row, 'fixture: the docs hold no row for ythril_embed_jobs_failed_total to plant');
+    assert.deepEqual(undocumented(['ythril_embed_jobs', 'ythril_embed_jobs_failed_total'], row), ['ythril_embed_jobs'],
+      'a metric named by a prefix of a documented one was read as documented: the gate matches substrings');
   });
 
   it('every metric the docs name actually exists', () => {

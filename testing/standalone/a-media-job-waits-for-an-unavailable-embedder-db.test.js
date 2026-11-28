@@ -74,7 +74,8 @@ cp.spawn = (cmd, ...rest) => {
   proc.stderr = new EventEmitter();
   const last = String(args[args.length - 1]);
   let stderr = '';
-  if (args.includes('-af')) stderr = ff.silenceStderr;
+  // The silencedetect pass prints the Duration line too, as the real ffmpeg does (probe P1, Q-984).
+  if (args.includes('-af')) stderr = `  Duration: 00:00:${String(ff.durationS).padStart(2, '0')}.00, start: 0.000000, bitrate: 256 kb/s\n${ff.silenceStderr}`;
   else if (last === '-') stderr = `Duration: 00:00:${String(ff.durationS).padStart(2, '0')}.00, start: 0.000000`;
   else if (last.includes('%06d')) fs.writeFileSync(last.replace('%06d', '000001'), 'jpeg');
   else fs.writeFileSync(last, 'wav');

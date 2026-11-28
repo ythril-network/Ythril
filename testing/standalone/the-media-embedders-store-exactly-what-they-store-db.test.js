@@ -103,7 +103,8 @@ function fakeFfmpeg(args) {
   let code = 0;
   const failure = ff.fail(call);
   if (failure !== null) { stderr = failure; code = 1; }
-  else if (call.kind === 'silence') stderr = ff.silenceStderr;
+  // The silencedetect pass decodes the whole input and prints its Duration line too, as the real ffmpeg does (probe P1, Q-984).
+  else if (call.kind === 'silence') stderr = `${ff.noDuration ? '' : `  Duration: ${hhmmss(ff.durationS)}, start: 0.000000, bitrate: 256 kb/s\n`}${ff.silenceStderr}`;
   else if (call.kind === 'probe') stderr = ff.noDuration ? 'no duration to be found' : `Duration: ${hhmmss(ff.durationS)}, start: 0.000000`;
   else if (call.kind === 'keyframes') {
     for (let i = 1; i <= ff.frames; i++) fs.writeFileSync(call.last.replace('%06d', String(i).padStart(6, '0')), `jpeg-${i}`);

@@ -83,7 +83,7 @@ function fakeFfmpeg(args) {
   proc.stderr = new EventEmitter();
   const last = String(args[args.length - 1]);
   let stderr = '';
-  if (args.includes('-af')) stderr = '';                                  // silencedetect: no silence, one chunk
+  if (args.includes('-af')) stderr = '  Duration: 00:00:10.00, start: 0.000000, bitrate: 256 kb/s\n'; // silencedetect: no silence, one chunk; its Duration line, as the real ffmpeg prints (Q-984)
   else if (last === '-') stderr = 'Duration: 00:00:10.00, start: 0.000000'; // the duration probe
   else if (last.includes('%06d')) fs.writeFileSync(last.replace('%06d', '000001'), 'jpeg'); // one keyframe, at 0 s
   else fs.writeFileSync(last, 'wav');                                     // an extracted segment or audio track
