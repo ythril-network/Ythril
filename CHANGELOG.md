@@ -238,13 +238,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** a member that joins a club, closed or democratic network holds each joined space with the network's types and validation mode as that network's layer; one without them, or with only a passed vote's changed fields, takes them from its admitter on its next cycle.
 - **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`, and the sender offers it again an hour later.
 - **Sync:** a sync run queued behind a running one for a network that is deleted before it starts ends with one info line.
-- **Sync:** a peer's upload over a file that changed here lands beside it as a conflict copy instead of overwriting it.
+- **Sync:** a peer's upload over a file that changed here lands beside it as a conflict copy, not over it.
 
 ### Security
 
 - **Sync:** a peer token reaches only the sync doors; every other route and MCP answer `403 peer_door`. The file door also needs a network carrying the space and, to upload, push rights here.
 - **Sync:** each sync read asks the area of its rows, `knowledge` or `files` (`merkle` both): `403 <area>_rung`.
-- **Tokens:** only an instance admin binds a token to a peer (`peerInstanceId`); the audit row names the peer.
+- **Tokens:** only an instance admin binds (`peerInstanceId`), rotates or edits a peer token; the audit row names the peer.
 - **Embedding:** reindex asks what reembed asks: MFA on REST, `knowledge: admin` on MCP (was instance admin), where a PAT asked for MFA is refused.
 - **Networks:** on a pub/sub network only the publisher's cast decides a round: a subscriber's yes or veto counts nothing, and the publisher adopts and passes only rounds it opened. Every 6.5.x let one subscriber change the network's schema for every member.
 - **Networks:** a pub/sub subscriber's schema edit lands in its own definitions, opens no round and never reaches the publisher; the publisher's schema outranks it.
