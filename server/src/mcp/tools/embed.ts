@@ -244,7 +244,7 @@ export const retry_embed_mediaTool: ToolHandler = {
 export const space_reindexTool: ToolHandler = {
   name: 'space_reindex',
   description: 'Re-embed every record in a space with the currently configured embedding model — the recovery path '
-    + 'after changing embedder, model, dimensions or prefix scheme. Requires an admin token. Every record is rebuilt, '
+    + 'after changing embedder, model, dimensions or prefix scheme. Needs `knowledge: admin` on the space, as `space_reembed` does. Every record is rebuilt, '
     + 'including the passages of converted documents and the captions and transcripts of media, even when its text is '
     + 'unchanged. Returns as soon as the run STARTS: the records are queued and rebuilt in the background, behind any '
     + 'write somebody is waiting on, so poll `space_meta` — its `reindexRun` field ({running, remaining, failed}) — '
@@ -253,7 +253,6 @@ export const space_reindexTool: ToolHandler = {
     + 'one is answered as an unknown space, before any work. Recall in a space '
     + 'whose `needsReindex` is true refuses until its run finishes.',
   mutating: true,
-  admin: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
     type: 'object',

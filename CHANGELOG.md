@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | No 200-type limit per kind: a schema that grows at the storage hard limit is refused `507`, one over 10 MiB `413`; a single-type write over the rule limits `400` | Keep a schema within storage and the rule limits |
 | The audit row of a call a guard refused names the token it refused; it was empty | None; read `tokenId` on `403` and `429` rows |
 | An edit other writes outran three times answers `409 write_race_lost`, not `404`; so does an upload (it was `500`), its bytes stored | Retry it |
+| On an instance with MFA on, `POST /api/brain/spaces/:spaceId/reindex` with a personal token and no `X-TOTP-Code` is refused `403 MFA_REQUIRED`, as reembed is | Send the code from scripts and integrations that reindex; the web app asks for it |
 
 ### Added
 
@@ -238,6 +239,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Embedding:** a reindex asks what a reembed asks, on both doors: `POST /api/brain/spaces/:spaceId/reindex` asks the second factor of a personal token on an instance with MFA on, and MCP `space_reindex` is open to a token with `knowledge: admin` on the space, not only to an instance admin. A peer-bound token is refused a reindex or a reembed of a space that is held.
 - **Networks:** on a pub/sub network only the publisher's cast decides a round: a subscriber's yes or veto counts nothing, and the publisher adopts and passes only rounds it opened. Every 6.5.x let one subscriber change the network's schema for every member.
 - **Networks:** a pub/sub subscriber's schema edit lands in its own definitions, opens no round and never reaches the publisher; the publisher's schema outranks it.
 - **Networks:** a join or removal round on a club or pub/sub network, and a space addition on a pub/sub one, is never adopted and never passes. A club round passes on its proposer's yes: any member's yes passes that member's own round.

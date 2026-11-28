@@ -52,6 +52,12 @@ keeps its copy, and one that still holds the bytes sends the file back as an ord
 file whose record you want to keep** (restore the files volume from a backup); `filesAwaitingBytes` on the space's stats counts the records
 waiting for their bytes, and the audit log names what each pass removed (`file.absent_bytes.sweep`).
 
+**After upgrading, a reindex over REST asks the second factor, as a reembed does.** On an instance with MFA on,
+`POST /api/brain/spaces/:spaceId/reindex` with a personal token and no `X-TOTP-Code` header is answered `403 MFA_REQUIRED`; a script or an
+integration that reindexes with a personal token sends the code. The web app asks for it. A peer-bound token is refused a reindex or a reembed of a
+space that is held. The MCP tool `space_reindex` is open to a token with `knowledge: admin` on the space, not only to an instance admin
+([Brain Ops API](04d-brain-ops-api.md#reindex-space)).
+
 **After upgrading to the release that repairs stale embeddings, run `POST /api/spaces/:id/reembed` once per space.** It now also queues
 every record whose stored text is not its current text (`stale` in its answer): a record whose text changed while its embedding job could
 not be queued, which kept the vector and the lexical text of its previous content, and a record a peer sent that this instance

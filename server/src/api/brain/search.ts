@@ -4,7 +4,7 @@
  * Split out of the api/brain.ts monolith (A17.3); handlers are unchanged.
  */
 import { Router } from 'express';
-import { requireSpaceAuth, denyReadOnly, requireAuth } from '../../auth/middleware.js';
+import { requireSpaceAuth, requireSpaceAuthMfaScoped, denyReadOnly, requireAuth } from '../../auth/middleware.js';
 import { callTool } from '../../mcp/call-tool.js';
 import { restToolCaller } from '../rest-tool-caller.js';
 import { summariseActivity } from '../../metrics/space-activity-store.js';
@@ -216,7 +216,11 @@ searchRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpac
 //
 // The response is sent as soon as the run is RECORDED, with zeroed counters (kept for older clients; progress is
 // `reindexRun` on reindex-status). Awaiting the rebuild here would turn a multi-minute job into a request timeout.
-searchRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+//
+// The guard is reembed's (`requireSpaceAuthMfaScoped`): the space's `knowledge: admin` rung (its ROUTE_RIGHTS row), the token's scope, the second
+// factor of a PAT on an instance with MFA on, and the hold a peer-bound token meets on a held space (Q-181). `denyReadOnly` stays: the rung check
+// is not what refuses a read-only token.
+searchRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuthMfaScoped('spaceId'), denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const space = getConfig().spaces.find(s => s.id === spaceId);
 
