@@ -41,7 +41,7 @@ const TOOL_SENTENCES = {
   // Two calls in one file (round-1 finding F2): `space_reindex` and `space_reembed`, whose REST routes ask the second factor.
   'server/src/mcp/tools/embed.ts': [
     'Rebuilding a space\'s vectors needs MFA step-up, which this door cannot present; use the web UI or POST /api/brain/spaces/:spaceId/reindex',
-    'Repairing a space\'s embeddings needs MFA step-up, which this door cannot present; use the web UI or POST /api/spaces/:id/reembed',
+    'Repairing a space\'s embeddings needs MFA step-up, which this door cannot present; use the web UI (Space settings > Danger)',
   ],
 };
 
