@@ -96,12 +96,12 @@ describe('the rule refuses a planted copy of each defect', () => {
     '      - name: first',
     '        id: dl',
     '        uses: actions/download-artifact@v4',
-    '        timeout-minutes: 5',
+    '        timeout-minutes: 3',
     '        continue-on-error: true',
     '        with: { name: ythril-test-image-1 }',
     '      - uses: actions/download-artifact@v4',
     '        if: steps.dl.outcome == \'failure\'',
-    '        timeout-minutes: 5',
+    '        timeout-minutes: 3',
     '        with: { name: ythril-test-image-1 }',
   ];
   const withLines = (edit) => plant(edit(GOOD).join('\n') + '\n');
@@ -128,7 +128,7 @@ describe('the rule refuses a planted copy of each defect', () => {
   });
 
   it('a timeout beyond the cap', () => {
-    const v = violations(withLines((l) => l.map((x) => x.replace('timeout-minutes: 5', 'timeout-minutes: 44'))));
+    const v = violations(withLines((l) => l.map((x) => x.replace('timeout-minutes: 3', 'timeout-minutes: 44'))));
     assert.ok(v.some((m) => /no step timeout-minutes/.test(m)), JSON.stringify(v));
   });
 
