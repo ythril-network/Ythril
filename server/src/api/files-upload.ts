@@ -380,7 +380,7 @@ export function registerUploadRoute(router: Router): void {
           res.status(200).json({ tombstoned: true });
           return;
         }
-        const inputFormat =typeof req.body?.inputFormat === 'string' ? req.body.inputFormat as InputFormat : 'auto';
+        const inputFormat = typeof req.body?.inputFormat === 'string' ? req.body.inputFormat as InputFormat : 'auto';
 
         // A destination a regular file blocks is refused before quota or bytes (`409`, the answer every door gives).
         await assertDestinationReachable(targetSpace, filePath);
