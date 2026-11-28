@@ -95,7 +95,7 @@ import {
 } from '../rdf/import-spool.js';
 import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
 import { ImportMemoryMeter, importMemoryRoom } from '../rdf/import-memory.js';
-import { MintedEnds } from '../rdf/import-ends.js';
+import { MintedEnds, mintedEndsOf } from '../rdf/import-ends.js';
 import { EdgeReadSets } from '../rdf/import-edge-plan.js';
 import { windowBudgetOf, windowsOf } from '../rdf/import-window.js';
 import { TripletSets, assertRecordsWithinBound, type DigestSet } from '../rdf/import-count.js';
@@ -398,21 +398,6 @@ async function* opWindows(folder: ImportFolder): AsyncGenerator<RecordOp[], void
 }
 
 /**
- * The records the import inserts, by id: what the dry plan and the commit seed as present (with an entity's type). The act's second phase: the
- * index and the sets of the first are gone, and each end is charged to `meter`, a room of its own (`import-ends.ts`).
- */
-async function mintedEndsOf(folder: ImportFolder, meter: ImportMemoryMeter): Promise<MintedEnds> {
-  const ends = new MintedEnds(meter);
-  for await (const w of opWindows(folder)) {
-    for (const op of w) {
-      if (op.op !== 'insert' || op.kind === 'edge') continue;
-      ends.set(op.id, op.kind === 'entity' ? { kind: 'entity', type: op.fields.type ?? null } : { kind: op.kind });
-    }
-  }
-  return ends;
-}
-
-/**
  * One dry plan over every operation, with `seeds` as the records the import brings: refusals go to `builder`, the counts of what would land
  * are kept. Answers the ids of the records it refused (the planner took back their seed within a window; the others are named here, since
  * the records of other kinds and windows were planned in read sets of their own).
@@ -456,7 +441,7 @@ async function dryPlanPass(run: Run, minted: MintedEnds): Promise<ReportBuilder>
   const base = run.builder.report;
   for (;;) {
     const attempt = new ReportBuilder(structuredClone(base));
-    const refused = await dryPlanOnce(run, attempt, seeds, minted.meter.fork());
+    const refused = await dryPlanOnce(run, attempt, seeds, minted.meter.resumed());
     // A seed taken out is a record the next run plans without: `delete` says whether this run's refusals still had it.
     if (![...refused].map(id => seeds.delete(id)).some(Boolean)) return attempt;
   }
@@ -508,7 +493,7 @@ async function planAndCommit(run: Run): Promise<'refused' | 'planned' | 'complet
   // Metered only where a dry plan runs (a dry run, or an act that has translated): from `planned` on records were or are being written, and a refusal then would
   // end the import with part of it landed and its folder gone. What the second phase held fitted when it ran; a resume on a smaller instance finishes.
   const planning = !state || state.phase === 'translated';
-  const minted = await mintedEndsOf(run.folder, new ImportMemoryMeter(planning ? knobs.bounds?.memoryBytes ?? importMemoryRoom().bytes : Number.POSITIVE_INFINITY));
+  const minted = await mintedEndsOf(opWindows(run.folder), new ImportMemoryMeter(planning ? knobs.bounds?.memoryBytes ?? importMemoryRoom().bytes : Number.POSITIVE_INFINITY));
   if (planning) {
     run.builder = await dryPlanPass(run, minted);
     if (run.builder.refused) return 'refused';
