@@ -57,7 +57,7 @@ const flag = (args, name) => { const i = args.indexOf(name); return i >= 0 ? arg
  * Replace `ffmpeg` for this process. `spawn(cmd, args)` for any other command goes to the real one.
  *
  * @param {object} o
- * @param {number|((call: object) => number)} [o.durationS]  what the duration probe reports, and the length the input holds (a function of the call, so the video's audio track can be shorter than the video)
+ * @param {number|((call: object) => number)} [o.durationS]  the length the decode pass reports, and the length the input holds (a function of the call, so the video's audio track can be shorter than the video)
  * @param {string} [o.silenceStderr]  what the silence-detection pass prints (default: no silence at all)
  * @param {(call: object) => boolean} [o.wedge]  true = this call never ends by itself (it ends only when it is killed)
  * @param {(call: object) => void} [o.onCall]  told of each call as it starts, before it answers
