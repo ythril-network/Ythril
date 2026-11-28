@@ -809,6 +809,9 @@ export function requireSpaceAuthMfaScoped(paramName: string) {
     if (!enforceSpaceScope(res, record, spaceId)) return;
     if (!enforceMfa(req, res, bearer, record)) return;
     if (!enforceAreaRung(res, record, req, spaceId ? [spaceId] : [])) return;
+    // After the rung, as `requireSpaceAuthScoped` asks it: this guard admits a space's own rung (reembed, reindex), so a peer-bound token
+    // on a held space would otherwise reach them (Q-181). A token without the rung gets its 403 and never learns a space is held.
+    if (refuseHeldPeer(res, spaceId, record)) return;
 
     authAttemptsTotal.inc({ result: 'success' });
     req.resolvedSpaceId = spaceId;

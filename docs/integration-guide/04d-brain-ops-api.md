@@ -182,7 +182,13 @@ GET /api/brain/spaces/:spaceId/reindex-status
 
 ```http
 POST /api/brain/spaces/:spaceId/reindex
+Authorization: Bearer <token with knowledge:admin on the space>
+X-TOTP-Code: <code>        # a personal token on an instance with MFA on
 ```
+
+Asks what [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill) asks: `knowledge: admin` on the space, a token
+that is not read-only, and, on an instance with MFA on, the second factor of a personal token (`403 MFA_REQUIRED` without the code,
+`403 MFA_INVALID` with a wrong one). A peer-bound token is refused on a space that is held. The `space_reindex` tool asks the same rung.
 
 Re-computes **every** embedding in the space with the current configuration — including the passages of converted documents and the captions and transcripts of media — even where a record's text has not changed, because a new prefix scheme, a new dimension or new weights behind the same model name make a different vector from the same text. **Runs in the background:** the call records the run and returns; every record is then queued and rebuilt by the embedding worker, behind any write somebody is waiting to search for. A run survives a restart and continues where it was. A run whose space could not be read while the server was starting is picked up by a watcher that looks every **5 seconds**, and a run whose sweeper died is taken over after **a minute** (an atomic lease on the run: only one sweeper ever works on a run); each such space is named in the server log (`Reindex resume failed for space '…' … — retried next tick`), and `ythril_reindex_in_progress` keeps its last value while a space cannot be read. Poll [`reindex-status`](#check-reindex-status) for progress.
 
