@@ -13,13 +13,13 @@ import { pageAcrossMembers } from '../spaces/page-across-members.js';
 import { PROXY_PAGE_CEILING } from './query.js';
 import type { BrainEmbedJobDoc } from '../config/types.js';
 import { limitRefusal, skipRefusal } from '../util/strict-limit.js';
-import { EMBED_JOB_STATUSES } from '../metrics/embed-claim-age.js';
+import { EMBED_JOB_STATUSES, zeroEmbedJobCounts, type EmbedJobCounts } from './embed-job-names.js';
 
 /** The page size when the caller names none. */
 export const DEFAULT_JOB_PAGE = 50;
 /** The largest page — the one `listEmbedJobs` itself will read. */
 export const MAX_JOB_PAGE = 200;
-/** The statuses a caller may filter by: the queue's one list (`metrics/embed-claim-age.ts`). */
+/** The statuses a caller may filter by: the queue's one list (`brain/embed-job-names.ts`). */
 export const JOB_STATUSES = EMBED_JOB_STATUSES;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
@@ -48,7 +48,7 @@ export type ListedJob = ReturnType<typeof jobOnTheWire>;
 
 export type EmbedJobsPage =
   | { ok: false; error: string }
-  | { ok: true; body: { counts: { pending: number; processing: number; failed: number }; jobs: ListedJob[]; limit: number; skip: number; status?: JobStatus } };
+  | { ok: true; body: { counts: EmbedJobCounts; jobs: ListedJob[]; limit: number; skip: number; status?: JobStatus } };
 
 export async function embedJobsPage(
   members: readonly string[],
@@ -66,10 +66,10 @@ export async function embedJobsPage(
   const effectiveLimit = (limit as number | undefined) ?? DEFAULT_JOB_PAGE;
   const effectiveSkip = (skip as number | undefined) ?? 0;
 
-  const counts = { pending: 0, processing: 0, failed: 0 };
+  const counts = zeroEmbedJobCounts();
   for (const mid of members) {
     const c = await getEmbedJobCounts(mid);
-    counts.pending += c.pending; counts.processing += c.processing; counts.failed += c.failed;
+    for (const status of EMBED_JOB_STATUSES) counts[status] += c[status];
   }
   const page = await pageAcrossMembers<ListedJob>({
     members: [...members],

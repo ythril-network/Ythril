@@ -47,7 +47,10 @@ import { isSpillPath } from './spill-path.js';
 import { classifyEmbedFailure, embedFailureMessage, type EmbedVerdict } from './embed-errors.js';
 import { embedJobsFailedTotal, type EmbedJobFailedReason } from '../metrics/embed-job-failed-count.js';
 import { embedJobsHandedBackTotal } from '../metrics/embed-job-handed-back-count.js';
-import { embedClaimAge, embedLaneOf, EMBED_LANE_NAMES, EMBED_JOB_STATUSES, type EmbedLaneName } from '../metrics/embed-claim-age.js';
+import { embedClaimAge } from '../metrics/embed-claim-age.js';
+import {
+  embedLaneOf, zeroEmbedJobCounts, EMBED_LANE_NAMES, EMBED_JOB_STATUSES, type EmbedJobCounts, type EmbedLaneCounts,
+} from './embed-job-names.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
@@ -120,6 +123,7 @@ function jobs(spaceId: string) {
  * Every caller states its lane (`enqueueEmbedJob` takes it as a required argument), because a lane that defaults is
  * a decision nobody made at the call site.
  */
+// The same set as `EMBED_LANE_NAMES` (`brain/embed-job-names.ts`), keyed by priority: the lane at index i is claimed at priority i, held by a test.
 export const EMBED_PRIORITY = { write: 0, background: 1, rebuild: 2 } as const;
 export type EmbedPriority = typeof EMBED_PRIORITY[keyof typeof EMBED_PRIORITY];
 
@@ -820,13 +824,10 @@ export async function getEmbedJobCounts(
   only: { rebuild?: true } = {},
 ): Promise<EmbedJobCounts> {
   const byLane = await countEmbedJobsByLane(spaceId, only);
-  const out = { pending: 0, processing: 0, failed: 0 };
+  const out = zeroEmbedJobCounts();
   for (const lane of EMBED_LANE_NAMES) for (const status of EMBED_JOB_STATUSES) out[status] += byLane[lane][status];
   return out;
 }
-
-/** A space's embed jobs by status. */
-export type EmbedJobCounts = { pending: number; processing: number; failed: number };
 
 /**
  * Per-lane, per-status counts for one space: THE one aggregation of the queue's size (Q-182). `getEmbedJobCounts` sums it (space meta,
@@ -838,14 +839,14 @@ export type EmbedJobCounts = { pending: number; processing: number; failed: numb
 export async function countEmbedJobsByLane(
   spaceId: string,
   only: { rebuild?: true } = {},
-): Promise<Record<EmbedLaneName, EmbedJobCounts>> {
+): Promise<EmbedLaneCounts> {
   const rows = await jobs(spaceId)
     .aggregate([
       ...(only.rebuild ? [{ $match: { rebuild: true } }] : []),
       { $group: { _id: { status: '$status', priority: '$priority' }, n: { $sum: 1 } } },
     ])
     .toArray() as Array<{ _id: { status?: unknown; priority?: unknown }; n: number }>;
-  const out = Object.fromEntries(EMBED_LANE_NAMES.map(lane => [lane, { pending: 0, processing: 0, failed: 0 }])) as Record<EmbedLaneName, EmbedJobCounts>;
+  const out = Object.fromEntries(EMBED_LANE_NAMES.map(lane => [lane, zeroEmbedJobCounts()])) as EmbedLaneCounts;
   for (const r of rows) {
     const status = r._id.status;
     if ((EMBED_JOB_STATUSES as readonly unknown[]).includes(status)) out[embedLaneOf(r._id.priority)][status as keyof EmbedJobCounts] += r.n;

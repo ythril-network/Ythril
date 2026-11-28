@@ -96,7 +96,7 @@ type ScanState = NonNullable<SpaceConfig['leakedRowScan']>;
 export interface RepairOutcome {
   derivedRemoved: number;
   linksRemoved: number;
-  kept: { depth: number; recent: number; live: number };
+  kept: Record<typeof LEAKED_ROW_KEPT_REASONS[number], number>;
   /** The scan reached its end in this pass. */
   completed: boolean;
 }
@@ -237,7 +237,7 @@ async function deletedFileLinksPage(spaceId: string, after: string | undefined, 
  * @param deadlineAt epoch ms after which no new page starts: the step's own, shared by the spaces of a tick
  */
 export async function repairLeakedRows(spaceId: string, now: Date, opts: { deadlineAt?: number } = {}): Promise<RepairOutcome> {
-  const outcome: RepairOutcome = { derivedRemoved: 0, linksRemoved: 0, kept: { depth: 0, recent: 0, live: 0 }, completed: false };
+  const outcome: RepairOutcome = { derivedRemoved: 0, linksRemoved: 0, kept: Object.fromEntries(LEAKED_ROW_KEPT_REASONS.map(reason => [reason, 0])) as RepairOutcome['kept'], completed: false };
   const state = getConfig().spaces.find(s => s.id === spaceId)?.leakedRowScan;
   if (!scanIsOwed(state, now)) return outcome;
   const deadlineAt = opts.deadlineAt ?? sweepStepDeadline();
