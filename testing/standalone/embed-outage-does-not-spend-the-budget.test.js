@@ -108,7 +108,8 @@ describe('the two counters answer different questions', () => {
     assert.match(fn, /transientFailures: 0/, 'and the outage counter with it, or a new write inherits an old backoff');
     const outside = src.replace(fn, '');
     assert.doesNotMatch(outside, /attempts: 0/, 'an attempt reset written outside freshBudget can drop the wait');
-    const uses = [...outside.matchAll(/freshBudget\(\)/g)].length;
+    // `freshBudget(now)` since Q-182 (bundle-41): the budget carries `queuedAt`, the moment it was granted.
+    const uses = [...outside.matchAll(/freshBudget\(now\)/g)].length;
     assert.ok(uses >= 3, `expected enqueue, revive and retry to take the budget from freshBudget, found ${uses} use(s)`);
   });
 });
