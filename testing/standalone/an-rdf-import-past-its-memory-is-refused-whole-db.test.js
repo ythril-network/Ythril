@@ -25,7 +25,8 @@ const skip = await mongoSkipReason();
 const DOOR = 'rdfmemdoor';
 const ACT = 'rdfmemact';
 const DIFF = 'rdfmemdiff';
-const SPACES = [DOOR, ACT, DIFF];
+const RESUME = 'rdfmemresume';
+const SPACES = [DOOR, ACT, DIFF, RESUME];
 const LABEL = '<http://www.w3.org/2000/01/rdf-schema#label>';
 
 /** The id of an addressed record of the file: a text id of 124 characters, dearer for the index than a minted one. */
@@ -54,7 +55,30 @@ describe('an RDF import past its memory is refused whole (real routes, real Mong
   });
   after(async () => { act.setRdfImportKnobsForTest?.(null); await d?.close(); });
 
-  const asked = (body) => ({ bound: body?.bound, limit: body?.limit, need: body?.need });
+  it('a commit resumed under a smaller room finishes: once an import has planned, its second phase is never refused (finding 3)', async () => {
+    const runner = await import('../../server/dist/spaces/space-act-runner.js');
+    let failures = 0;
+    act.setRdfImportKnobsForTest({
+      window: 1,
+      hooks: { afterCommitWindow: () => { if (failures === 0) { failures += 1; throw new Error('planted: the process stops after the first window'); } } },
+    });
+    try {
+      const first = await d.importRest(writer.key, RESUME, goodTurtle(RESUME));
+      assert.equal(first.status, 202, `the failed attempt stays owed: ${first.status} ${first.text.slice(0, 300)}`);
+      const [entry] = d.actsOf(RESUME);
+      assert.ok(entry, 'the act is owed');
+      assert.ok((await d.records(RESUME, 'entities')).length >= 1, 'the first window landed before the failure');
+      // The room fell while the act waited (a restart on a smaller instance): a refusal now would end the import with part of it written and its folder gone.
+      act.setRdfImportKnobsForTest({ bounds: { memoryBytes: 100 } });
+      const settled = await runner.runSpaceAct(entry.id);
+      assert.equal(settled.ok, true, settled.error);
+    } finally { act.setRdfImportKnobsForTest(null); }
+    assert.deepEqual((await d.records(RESUME, 'entities')).map(e => e.name).sort(), ['Alice', 'Bob'], 'the resumed import did not land whole');
+    assert.equal((await d.records(RESUME, 'edges')).length, 1);
+    assert.deepEqual(d.actsOf(RESUME), []);
+  });
+
+  const asked =(body) => ({ bound: body?.bound, limit: body?.limit, need: body?.need });
 
   it('the door\'s path: the count refuses on REST and on MCP with the bound, the room and the need, registering no act and writing nothing', async () => {
     assert.equal(typeof act.setRdfImportKnobsForTest, 'function', 'the act module exports its test knobs');
@@ -107,7 +131,7 @@ describe('an RDF import past its memory is refused whole (real routes, real Mong
   it('the door\'s need is never below what the act\'s index finally took, for a first import (ids minted) and a second (records stored, text ids kept)', async () => {
     const seen = [];
     // The door's figure (`need`) comes first and the act's (`used`) after it, once per import.
-    const hooks = { memory: (figure) => { if ('need' in figure) seen.push({ need: figure.need }); else seen[seen.length - 1].used = figure.used; } };
+    const hooks = { memory: (figure) => { if ('need' in figure) seen.push({ need: figure.need, first: figure.first }); else seen[seen.length - 1].used = figure.used; } };
     act.setRdfImportKnobsForTest({ bounds: { memoryBytes: 10_000_000 }, hooks });
     try {
       // First: the addressed records are not stored, so the act mints an id for each. Second, after the store is cleared and holds the three records
@@ -120,9 +144,10 @@ describe('an RDF import past its memory is refused whole (real routes, real Mong
       assert.equal(second.status, 200, `second: ${second.text.slice(0, 400)}`);
     } finally { act.setRdfImportKnobsForTest(null); }
     assert.equal(seen.length, 2, 'the hooks did not fire once per import');
-    for (const [at, { need, used }] of seen.entries()) {
-      assert.ok(Number.isInteger(need) && Number.isInteger(used) && used > 0, `import ${at + 1}: need ${need}, used ${used}`);
-      assert.ok(need >= used, `import ${at + 1}: the door counted ${need} bytes and the act's index then took ${used}: a file the door lets in could be refused by the act`);
+    // The first phase's figure, not the larger of the two phases: the second is dearer on a file this small whatever the first is charged (finding 4).
+    for (const [at, { first, used }] of seen.entries()) {
+      assert.ok(Number.isInteger(first) && Number.isInteger(used) && used > 0, `import ${at + 1}: first ${first}, used ${used}`);
+      assert.ok(first >= used, `import ${at + 1}: the door counted ${first} bytes for the first phase and the act's index then took ${used}: a file the door lets in could be refused by the act`);
     }
     assert.ok(seen[1].used > seen[0].used, 'the second import found no stored record, so it kept no text id (a probe that charges nothing proves nothing)');
     assert.equal((await d.records(DIFF, 'entities')).length, 5, 'the three stored records converged and the two foreign ones landed once');
