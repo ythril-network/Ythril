@@ -194,6 +194,12 @@ export interface BrainEmbedJobDoc {
   priority?: 0 | 1 | 2;
   /** Set by a reindex: rebuild the vector even when its text and model name are unchanged. */
   rebuild?: boolean;
+  /**
+   * ISO8601 — when the job's current attempt budget was granted: its insert, a rewrite, a revive or a retry (`freshBudget`). The
+   * claim-age histogram times the first claim after it (Q-182). LOCAL-ONLY: the embed jobs collection is this instance's work list, never
+   * synced, exported or hashed, so the field has no `Incoming` schema. Absent on a job queued before it existed, which is not observed.
+   */
+  queuedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

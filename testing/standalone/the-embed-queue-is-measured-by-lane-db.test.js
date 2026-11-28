@@ -15,6 +15,8 @@
  *     processing.
  *  3. A second claim of the same job after an outage hand-back (the attempt given back) does not move the histogram: the age is the wait
  *     before the FIRST claim since the job's budget was granted, never once per retry.
+ *  3b. A job revived for a new server version (a fresh budget) is observed once at its next claim, timed from the revive: a job failed an
+ *     hour after it was queued reports the wait since its revive, not its whole life (`createdAt` is set on insert only).
  *  4. A space that fails to read removes the gauge's series for that scrape (absent, so a dashboard shows a gap and `absent()` can alert),
  *     never a sum that reads as a drained queue; the next scrape that reads every space sets them again.
  *
@@ -71,6 +73,7 @@ function samples(text, metric) {
 }
 const gaugeOf = (text, lane, status) => samples(text, GAUGE).get(`lane=${lane},status=${status}`);
 const claimCount = (text, lane) => samples(text, `${HISTOGRAM}_count`).get(`lane=${lane}`);
+const claimSum = (text, lane) => samples(text, `${HISTOGRAM}_sum`).get(`lane=${lane}`);
 
 /** The gauge as the registry declares it; a plain failure when it does not. */
 function gauge() {
@@ -155,6 +158,25 @@ describe('the embed queue is measured by lane (real MongoDB, the registry\'s own
     assert.equal(second?.recordId, 'f-outage', 'fixture: the handed-back job was not claimed again');
     assert.equal(second.attempts, 1, 'fixture: the second claim does not look like a first attempt, so it would not tempt an observation');
     assert.equal(claimCount(await scrape(), 'write'), afterFirst, 'a claim after an outage hand-back was observed again: the age counts retries, not the wait before the first claim');
+  });
+
+  it('a job revived for a new server version is observed once at its next claim, timed from the revive, not from its insert', async () => {
+    await queue.enqueueEmbedJob(SPACE, 'fact', 'f-revived', { priority: queue.EMBED_PRIORITY.write });
+    const anHourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    await jobs().updateOne({ recordId: 'f-revived' }, { $set: { status: 'failed', attempts: 5, createdAt: anHourAgo, queuedAt: anHourAgo } });
+    gauge();
+    const before = await scrape();
+    const [count0, sum0] = [claimCount(before, 'write'), claimSum(before, 'write')];
+    assert.equal(typeof count0, 'number', `${HISTOGRAM}{lane="write"} is not declared`);
+
+    const { revived } = await queue.reviveFailedEmbedJobs([SPACE], 'q182-revive');
+    assert.equal(revived, 1, 'fixture: the failed job was not revived');
+    const job = await queue.claimNextEmbedJob([SPACE]);
+    assert.equal(job?.recordId, 'f-revived', 'fixture: the revived job was not claimed');
+    const after = await scrape();
+    assert.equal(claimCount(after, 'write') - count0, 1, 'the first claim after a revive was not observed once');
+    const waited = claimSum(after, 'write') - sum0;
+    assert.ok(waited >= 0 && waited < 60, `the revived job's claim age is ${waited} s: timed from its insert an hour ago, not from the revive`);
   });
 
   it('a space that fails to read removes the gauge\'s series for that scrape; the next full read sets them again', async () => {

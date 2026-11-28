@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Operations:** new metrics `ythril_embed_jobs{lane,status}`, the embed jobs waiting, running and failed in the `write`, `background` and `rebuild` lanes, and `ythril_embed_job_claim_age_seconds{lane}`, how long a job waited before its first claim. Together they show whether writes wait behind a reindex. The gauge is absent for a scrape in which a space could not be read.
 - **Operations:** every answer carries `Server-Timing` per phase, one refused before routing (a body that is not JSON, one over the size limit) too; MCP tool results carry it in `_meta` under `ythril/server-timing`.
 - **Operations:** new metrics `ythril_cache_lookups_total{cache,result}` and `ythril_cache_entries{cache}` count the lookups and entries of the recall query-vector, SPARQL planning-count and RDF schema caches.
 - **Operations:** `ythril_write_group_aborts_total{reason}` counts SPARQL Update write groups that landed nothing; a delete still referenced is refused whole (`referenced`).
