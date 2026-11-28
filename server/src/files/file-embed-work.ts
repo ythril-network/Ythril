@@ -63,7 +63,8 @@ const changedRowNotQueued = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
  *    deletes the job as `gone`. The caller calls it once its write has settled.
  *  - **Bounded and never throws**, as {@link requeueEmbedWorkOfMovedRows} is: the write has landed, so a store that stopped answering must
  *    not hold the writer, and a throw would be read by the writer as its own write failing (the media worker logged "failed to write
- *    description" and, the description being set, never wrote it again). A failure is said once per space per window, naming the file and
+ *    description" and, the description being set, never wrote it again). A failure of the queue is said by the queue (one line, naming the repair);
+ *    a throw that is not the queue's is said here once per space per window, naming the file and
  *    that a reembed repairs it.
  *
  * The derived description forgot its re-queue when each writer queued its own job (Q-428): a caption written as an image's description
@@ -76,8 +77,8 @@ export async function requeueEmbedWorkOfChangedRow(spaceId: string, fileId: stri
       + `(${EMBED_REPAIR_ROUTE}).`));
   };
   try {
-    const { failed } = await withinWriteBound(() => enqueueWriteEmbedJobs(spaceId, [{ recordType: 'file', recordId: fileId }], { priority: EMBED_PRIORITY.write }));
-    if (failed > 0) say('the queue refused the write');
+    await withinWriteBound(() => enqueueWriteEmbedJobs(spaceId, [{ recordType: 'file', recordId: fileId }], { priority: EMBED_PRIORITY.write }));
+    // A batch the queue refuses is said by `enqueueWriteEmbedJobs` itself, naming the repair: said again here it would be two lines for one failure.
   } catch (err) {
     say(err);
   }
