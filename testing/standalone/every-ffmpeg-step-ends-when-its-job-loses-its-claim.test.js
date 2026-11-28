@@ -48,7 +48,8 @@ describe('every ffmpeg step ends when its job loses its claim', () => {
     .flatMap(f => callsIn(stripComments(readFileSync(f, 'utf8'))).map(text => ({ f, text })));
 
   it('finds the calls it is about (floor)', () => {
-    assert.ok(calls.length >= 5, `only ${calls.length} runFfmpeg calls found outside ${OWN_MODULE} — re-anchor the search`);
+    // Four since Q-984 (bundle-41) removed the audio job's separate duration probe: its one silencedetect pass reads the length too.
+    assert.ok(calls.length >= 4, `only ${calls.length} runFfmpeg calls found outside ${OWN_MODULE} — re-anchor the search`);
   });
 
   it('the worker hands its claim to every media route: each options object naming a route\'s `steps` carries `signal`', () => {
