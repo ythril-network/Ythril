@@ -317,7 +317,7 @@ POST /api/tokens
 | `name` | Required. Human-readable label. |
 | `rights` | The per-space permission matrix. **This is how scope, admin and read-only are all expressed** — see *The three fields 4.0 removed* below. |
 | `expiresAt` | ISO 8601 expiry timestamp. Omit for non-expiring. |
-| `peerInstanceId` | Bind this token to a network peer (UUID). Required for tokens a peer will present on the `/api/sync/*` **data-write** endpoints in manually-configured networks — the invite handshake sets it automatically. **Only an instance administrator may send it**; any other caller is answered `403`, and the `token.create` audit entry records the bound peer id. A token bound to a peer is that peer to every sync door, so the administrator of one space cannot hand one out. |
+| `peerInstanceId` | Bind this token to a network peer (UUID). Required for tokens a peer will present on the `/api/sync/*` **data-write** endpoints in manually-configured networks — the invite handshake sets it automatically. **Only an instance administrator may send it**; any other caller is answered `403`, and the `token.create` audit entry records the bound peer id. A token bound to a peer is that peer to every sync door, so the administrator of one space cannot hand one out, and cannot rotate, edit or revoke one either (`403`). |
 | `schemaLibrary` | `true` to issue a **library access token**. See below. |
 
 #### The three fields 4.0 removed
