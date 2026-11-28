@@ -305,7 +305,10 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
         assert.deepEqual(without(after, ['description', 'descriptionSource', 'seq', 'updatedAt', ...await landingKeys(after)]),
           without(before, ['description', 'seq', 'updatedAt']),
           'the derived description write changed a field it does not own (author included: it never claims a legacy row)');
-        assert.equal(await jobs().countDocuments({}), 0, 'a derived description write enqueues no embed job of its own');
+        // Since Q-428 (bundle-41) a description that lands re-queues its file row, so the caption is findable by meaning: exactly one job,
+        // for this row, and nothing else.
+        const queued = (await jobs().find({}).toArray()).map(j => `${j.recordType}:${j.recordId}`);
+        assert.deepEqual(queued, ['file:docs/a.md'], 'a derived description that lands re-queues its own file row, and only it');
       });
     }
 

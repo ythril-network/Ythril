@@ -26,7 +26,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openRdfExportDoors, rdfMeta } from './_rdf-export-doors.mjs';
-import { mountedRoutes } from './_routes.mjs';
+import { MFA_GUARDED_ROUTES_DRIVEN as DRIVEN } from './_mfa-guarded-routes-driven.mjs';
 
 const skip = await mongoSkipReason();
 const HELD = 'mfaheld';
@@ -35,12 +35,8 @@ const PEER = 'mfa-held-peer';
 const NET = 'mfa-held-net';
 const HOUR = 3_600_000;
 
-/** The routes driven: one of each guard's families, as the route table spells them (`:id` the space). */
-const DRIVEN = [
-  { method: 'POST', path: '/api/brain/spaces/:spaceId/reindex', body: {} },
-  { method: 'POST', path: '/api/spaces/:id/reembed', body: {} },
-  { method: 'POST', path: '/api/spaces/:id/validate-schema', body: {} },
-];
+// The routes driven (DRIVEN) are shared with the pure test that holds them to the route table:
+// the-routes-the-held-space-test-drives-stand-behind-the-second-factor-guard.test.js.
 const url = (path, space) => path.replace(/:\w+/, space);
 const isHeld = (r) => r.status === 423 && r.body?.code === 'space_held';
 const fmt = (r) => `${r.status} ${r.text.slice(0, 160)}`;
@@ -76,14 +72,6 @@ describe('a held space is refused to a peer token on every route that asks the s
   after(async () => { await d?.close(); });
 
   const drive = (route, key, space) => d.rest(key, route.method, url(route.path, space), route.body);
-
-  it('the routes driven stand behind requireSpaceAuthMfaScoped in the route table, and so do at least as many more', () => {
-    const behind = mountedRoutes().filter(r => /\brequireSpaceAuthMfa(?:Scoped)?\b/.test(r.chain));
-    const named = new Set(behind.map(r => `${r.method} ${r.path}`));
-    const missing = DRIVEN.filter(r => !named.has(`${r.method} ${r.path}`)).map(r => `${r.method} ${r.path}`);
-    assert.deepEqual(missing, [], 'a route driven here no longer stands behind the second-factor guard: this case would hold nothing');
-    assert.ok(behind.length > DRIVEN.length, `only ${behind.length} route(s) stand behind the guard: the scan stopped seeing them`);
-  });
 
   it('a peer token with the rung is answered 423 space_held on each route driven', async () => {
     const notHeld = [];
