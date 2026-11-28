@@ -105,7 +105,8 @@ read from either) and the same refusals. Nothing is lost when an index is missin
 
 **Rebuilds.** Ythril builds the index itself, in the background, and needs no action: after an upgrade from a release that kept no index,
 after a restore, for a new space, and after a change of the space's schema. It also compares the index with the records from time to
-time and rebuilds it when they differ. While the build runs, queries, reads and writes work as before and the space is read from its
+time and rebuilds it when they differ. While an RDF import, a restore, a wipe or a rename holds the space, the rebuild waits, the log says
+so once, and it runs within a minute after. While the build runs, queries, reads and writes work as before and the space is read from its
 records. The index is a derived copy: it is not part of a backup, and it takes extra storage in the instance's database in proportion to
 the statements the space's records make. An admin rebuilds one space at once with `space_rdf_rebuild` (MCP, `POST /api/space_rdf_rebuild`
 with `{"space": "<id>"}`, or `POST /api/brain/spaces/:spaceId/rdf-index/rebuild`; the knowledge `admin` right on the space; `409 rdf_off`
