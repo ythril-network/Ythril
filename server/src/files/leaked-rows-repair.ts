@@ -57,7 +57,7 @@ import { LEAKED_ROWS_REPAIR_OPERATION } from '../audit/middleware.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { removeFileLinksThisInstanceWrote } from '../brain/links.js';
 import { fileLinkSourcesAfter } from '../brain/link-adjacency.js';
-import { leakedRowsKeptTotal, leakedRowsRemovedTotal, leakedRowsRepairPendingSpaces } from '../metrics/registry.js';
+import { leakedRowsKeptTotal, leakedRowsRemovedTotal, leakedRowsRepairPendingSpaces, LEAKED_ROW_KEPT_REASONS } from '../metrics/registry.js';
 import { inChunks } from '../util/chunks.js';
 import { log, peerText } from '../util/log.js';
 import type { FileMetaDoc, SpaceConfig } from '../config/types.js';
@@ -268,7 +268,7 @@ export async function repairLeakedRows(spaceId: string, now: Date, opts: { deadl
   } finally {
     leakedRowsRemovedTotal.labels({ kind: 'derived' }).inc(outcome.derivedRemoved);
     leakedRowsRemovedTotal.labels({ kind: 'link' }).inc(outcome.linksRemoved);
-    for (const reason of ['depth', 'recent', 'live'] as const) leakedRowsKeptTotal.labels({ reason }).inc(outcome.kept[reason]);
+    for (const reason of LEAKED_ROW_KEPT_REASONS) leakedRowsKeptTotal.labels({ reason }).inc(outcome.kept[reason]);
     // One entry per space per pass that removed anything — in the `finally`, so rows removed by pages before a failing one are audited too.
     if (outcome.derivedRemoved + outcome.linksRemoved > 0) {
       logInternalAudit({ method: 'SWEEP', path: 'internal:leaked-rows-repair', spaceId, operation: LEAKED_ROWS_REPAIR_OPERATION, startedAt });

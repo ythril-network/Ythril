@@ -13,12 +13,14 @@ import { pageAcrossMembers } from '../spaces/page-across-members.js';
 import { PROXY_PAGE_CEILING } from './query.js';
 import type { BrainEmbedJobDoc } from '../config/types.js';
 import { limitRefusal, skipRefusal } from '../util/strict-limit.js';
+import { EMBED_JOB_STATUSES } from '../metrics/embed-claim-age.js';
 
 /** The page size when the caller names none. */
 export const DEFAULT_JOB_PAGE = 50;
 /** The largest page — the one `listEmbedJobs` itself will read. */
 export const MAX_JOB_PAGE = 200;
-export const JOB_STATUSES = ['pending', 'processing', 'failed'] as const;
+/** The statuses a caller may filter by: the queue's one list (`metrics/embed-claim-age.ts`). */
+export const JOB_STATUSES = EMBED_JOB_STATUSES;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
 /**

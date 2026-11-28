@@ -40,12 +40,12 @@
  * the reason a fifth area would have compiled fine here while failing everywhere that reads the list.
  * Found by `Q-6`, 2026-09-07, alongside two modules keeping their own array of the names.
  */
-import type { SpaceArea } from '../config/rights-shape.js';
+import type { SpaceArea, Rung } from '../config/rights-shape.js';
 export type { SpaceArea };
 
-/** Rungs, lowest first. Each CONTAINS the one below, so "write but not read" is unrepresentable. */
-export const RUNGS = ['none', 'read', 'write', 'admin'] as const;
-export type Rung = (typeof RUNGS)[number];
+/** Rungs, lowest first. Each CONTAINS the one below, so "write but not read" is unrepresentable. The one list is the rights shape's. */
+export { RUNGS } from '../config/rights-shape.js';
+export type { Rung };
 
 /** How a route learns which space it is acting on. See the note above — this is not cosmetic. */
 export type ScopeShape = 'path' | 'iterates' | 'body' | 'resolved';
