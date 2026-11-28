@@ -48,14 +48,18 @@ const withoutComments = (text) =>
  * "what goes into a file's embedding" existed and two disagreed. Listing both is what stops a fix to one
  * leaving the other behind, which is exactly how they came to disagree.
  */
+/** A file row is re-queued through `requeueEmbedWorkOfChangedRow` (`files/file-embed-work.ts`, Q-428), which enqueues on the write lane. */
+const FILE_REQUEUE = 'requeueEmbedWorkOfChangedRow(spaceId,';
 const UPDATES = [
   { type: 'entity', file: 'server/src/brain/entities.ts', fn: 'updateEntityById', builder: 'entityEmbedText' },
   { type: 'fact', file: 'server/src/brain/fact.ts', fn: 'updateFact', builder: 'factEmbedText' },
   { type: 'edge', file: 'server/src/brain/edges.ts', fn: 'updateEdgeById', builder: 'edgeEmbedText' },
   { type: 'chrono', file: 'server/src/brain/chrono.ts', fn: 'updateChrono', builder: 'chronoEmbedText' },
-  { type: 'file', file: 'server/src/files/file-meta.ts', fn: 'updateFileMeta', builder: 'fileEmbedText' },
-  { type: 'file', file: 'server/src/files/file-meta.ts', fn: 'upsertFileMeta', builder: 'fileEmbedText' },
+  { type: 'file', file: 'server/src/files/file-meta.ts', fn: 'updateFileMeta', builder: 'fileEmbedText', enqueue: FILE_REQUEUE },
+  { type: 'file', file: 'server/src/files/file-meta.ts', fn: 'upsertFileMeta', builder: 'fileEmbedText', enqueue: FILE_REQUEUE },
 ];
+/** The call that queues a re-embed: `enqueueEmbedJob(spaceId, '<type>'`, or for a file row the one re-queue of a changed row (Q-428). */
+const enqueueCall = (u) => u.enqueue ?? `enqueueEmbedJob(spaceId, '${u.type}'`;
 
 /**
  * The body of an exported async function.
@@ -108,7 +112,7 @@ describe('an update never embeds from its own read', () => {
       assert.doesNotMatch(body, /await embed\(/,
         `${u.fn} calls embed() directly. Same reason: the only text available here is stale.`);
 
-      assert.match(body, new RegExp(`enqueueEmbedJob\\(spaceId, '${u.type}'`),
+      assert.ok(body.includes(enqueueCall(u)),
         `${u.fn} does not enqueue a re-embed, so an edit would leave the previous vector in place forever`);
     });
   }
@@ -119,7 +123,7 @@ describe('an update never embeds from its own read', () => {
     // reasoning that made the inline embedding wrong, reintroduced one level up.
     for (const u of UPDATES) {
       const body = withoutComments(functionBody(withoutComments(read(u.file)), u.fn));
-      const line = body.split('\n').find(l => l.includes('enqueueEmbedJob'));
+      const line = body.split('\n').find(l => l.includes(enqueueCall(u)));
       assert.ok(line, `${u.fn}: no enqueue line found`);
       assert.doesNotMatch(line, /^\s*if\s*\(/,
         `${u.fn} enqueues conditionally (${line.trim()}). The condition can only be computed from the stale `
