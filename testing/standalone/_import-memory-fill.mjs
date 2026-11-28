@@ -1,5 +1,5 @@
 /**
- * The child process of `the-import-memory-room-keeps-the-process-alive-at-its-bound.test.js`: it fills every holder of an RDF import to the room the
+ * The child process of `_import-memory-alive.mjs` (one test file per container size): it fills every holder of an RDF import to the room the
  * instance gives it, as the worst moment of two imports that can exist at once (a door that infers a schema from the file's data, and the act that
  * translates it, then plans it), in a process whose heap limit the parent set (`--max-old-space-size`) to the one a container of that size gets.
  *

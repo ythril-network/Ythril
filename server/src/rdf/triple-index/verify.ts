@@ -17,7 +17,8 @@
  * - `unused-terms`: the verify's passes over the dictionary found more than {@link UNUSED_TERMS_SHARE} of its terms used by no statement
  *   (the dictionary never frees an id; a rebuild starts a fresh one).
  * A reason starts a rebuild (`rebuild.ts` `launchTripleIndexRebuild`), at most one per tick and none while one runs in this process
- * ({@link upkeepTripleIndexes}, finding F5); the reason is logged. A space whose rebuilds keep failing is retried after longer waits
+ * ({@link upkeepTripleIndexes}, finding F5), none while a space act holds the space (an RDF import holds it for its whole length; that the
+ * rebuild waits is said once per hold); the reason is logged, and an outcome other than built too. A space whose rebuilds keep failing is retried after longer waits
  * (`rebuild-backoff.ts`).
  *
  * ## The drift verify
@@ -50,6 +51,8 @@ import { formMetaOf, projectionOf, statementsOf } from './follow.js';
 import { filterOf, lagOf } from './read.js';
 import { anyRebuildRunsHere, launchTripleIndexRebuild, requestTripleIndexRebuild, type RebuildReason, type RebuildResult } from './rebuild.js';
 import { rebuildBackoff } from './rebuild-backoff.js';
+import { spaceWriteRefusal } from '../../spaces/space-write-gate.js';
+import { warnOnce } from '../../util/warn-once.js';
 
 /** The records one verify run recomputes, at most. */
 export const VERIFY_SAMPLE_RECORDS = 200;
@@ -263,7 +266,8 @@ export interface UpkeepOptions { now?: () => number; launch?: typeof launchTripl
  * process (finding F5): on an upgrade every RDF space is `missing`, and a tick that rebuilt them all, each awaited, ran for as long as all of
  * them together and left the verify of every other space waiting. The rebuild is started and not awaited; the walk goes on, and a space that
  * needs one meanwhile waits for a later tick. Nor does a tick verify a space it cannot rebuild: a verify that found drift would have
- * moved its cursor past it. A space whose rebuilds failed is left alone for the wait `rebuild-backoff.ts` gives.
+ * moved its cursor past it. A space whose rebuilds failed is left alone for the wait `rebuild-backoff.ts` gives, and a space an act holds
+ * until the act ends ({@link waitsForAnAct}).
  */
 export async function upkeepTripleIndexes(opts: UpkeepOptions = {}): Promise<void> {
   const clock = opts.now ?? Date.now;
@@ -272,6 +276,7 @@ export async function upkeepTripleIndexes(opts: UpkeepOptions = {}): Promise<voi
     if (started || anyRebuildRunsHere()) return;
     const now = clock();
     if (!backoff.mayStart(s.id, now)) return;
+    if (await waitsForAnAct(s.id)) return;
     if (!verifiedAt.has(s.id)) verifiedAt.set(s.id, now - Math.floor(Math.random() * VERIFY_EVERY_MS));
     const due = now - verifiedAt.get(s.id)! >= VERIFY_EVERY_MS;
     const reason = await upkeepReasonOf(s.id, due);
@@ -282,8 +287,32 @@ export async function upkeepTripleIndexes(opts: UpkeepOptions = {}): Promise<voi
     // The launch is written out here, in the walk's own unit, so the walk gates see the rebuild this tick starts.
     const launched = opts.launch ? opts.launch(s.id, 'the upkeep', reason) : launchTripleIndexRebuild(s.id, 'the upkeep', reason);
     const { run, joined } = await launched.catch((err: unknown) => { backoff.settled(s.id, null, clock()); throw err; });
-    if (!joined) run.result.then(r => backoff.settled(s.id, r.outcome, clock()), () => backoff.settled(s.id, null, clock()));
+    if (!joined) {
+      run.result.then(r => {
+        backoff.settled(s.id, r.outcome, clock());
+        // Every "rebuilding" line gets its outcome: a built one says `rebuilt` itself (`rebuild.ts`), a failed one is warned there.
+        if (r.outcome !== 'built') log.info(`Triple index of space '${peerText(s.id)}': the rebuild ended without a swap (${r.outcome})`);
+      }, () => backoff.settled(s.id, null, clock()));
+    }
   });
+}
+
+/** The spaces whose rebuild waits for an act, said once per hold and reason (bundle-385, Q-985). */
+const waitSaid = warnOnce<string>();
+
+/**
+ * Whether a space act (an RDF import, a restore, a wipe, a rename) holds `spaceId`, so the tick leaves it alone: no verify (one that found drift
+ * would move its cursor past a space it cannot rebuild) and no rebuild, which the act would refuse at its first line (`rebuild.ts`, `held`). An
+ * RDF import holds its space for its whole length: the tick logged "rebuilding" and the rebuild ended unsaid every minute of it (bundle-384
+ * drives, 39 times in one import). When the index needs a rebuild meanwhile, that it waits is said once per hold; the first tick after the act
+ * finds the reason again and rebuilds.
+ */
+async function waitsForAnAct(spaceId: string): Promise<boolean> {
+  const why = spaceWriteRefusal(spaceId);
+  if (why === null) { waitSaid.forget(spaceId); return false; }
+  const reason = await tripleIndexRebuildReason(spaceId);
+  if (reason !== null) waitSaid(spaceId, () => log.info(`Triple index of space '${peerText(spaceId)}': its rebuild (${reason}) waits, since ${why}`), why);
+  return true;
 }
 
 const upkeepJob = intervalJob('Triple index upkeep', UPKEEP_INTERVAL_MS, () => upkeepTripleIndexes());
