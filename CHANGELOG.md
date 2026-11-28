@@ -190,6 +190,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Build:** the OIDC settings types live in a file of their own, which brings the settings file back under its size limit; no behaviour changes.
 - **Repository:** the contributor licence agreement, its signing workflow and the pull-request template are removed, and a standalone test fails if a guide, agreement or template for outside code returns.
 - **RDF:** no user-facing effect yet: the server reads an address the export writes back to its record or term, for the import that follows; it accepts exactly the spellings the export writes and nothing else.
+- **Media:** a media job's `ffmpeg` uses at most as many decoder and filter threads as the container has CPUs, and never more than 16; in a CPU-limited container it no longer starts one thread per host core and starves the instance's other work.
 
 ### Fixed
 
