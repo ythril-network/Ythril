@@ -32,7 +32,7 @@
  * ## The share, and its measurement
  *
  * A quarter of the smaller of the heap limit and half the container's limit stays the room, and the door and the act together may then hold half of
- * that: measured by `the-import-memory-room-keeps-the-process-alive-at-its-bound.test.js` and a probe in containers of 1, 2 and 4 GiB, with the door's
+ * that: measured by `the-import-memory-room-keeps-the-process-alive-at-<n>-gib.test.js` and a probe in containers of 1, 2 and 4 GiB, with the door's
  * inference, the act's first phase (its window at its share) and then its second phase each filled to the room, each refused just past it, the process
  * alive. The heap peaked at 249 of 524 MiB (1 GiB container), 645 of 1 048 (2 GiB) and 1 273 of 2 096 (4 GiB), 0.48 to 0.62 of the limit, leaving the
  * rest for the instance's own heap, a collection and the memory outside the heap; a share above a quarter was not measured. An eighth would refuse

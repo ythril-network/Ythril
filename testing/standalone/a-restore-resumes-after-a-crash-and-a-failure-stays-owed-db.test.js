@@ -24,6 +24,11 @@
  *
  * On 14005a5c `POST /restore` answers 200 having restored inline, so no row reaches an act; the route-level row answers 500, not 400.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 7 to 11 s (measured twice 2026-11-28). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads about six times that (60 s on main CI 46112179133): the time of the crowd, not of this file.
+ *
  * Run: a Mongo the harness accepts, then `node --test testing/standalone/a-restore-resumes-after-a-crash-and-a-failure-stays-owed-db.test.js`
  * (a prior `npm run build` in server/).
  */
