@@ -26,7 +26,7 @@ import { parseSource, walkEveryNode, ts } from '../_shared/syntax-tree.mjs';
 
 const built = await import('../../server/dist/auth/mfa-asked.js').catch(() => ({}));
 const MODULE = 'server/src/auth/mfa-asked.ts';
-const TOOLS = ['rdf-import', 'schema-rdf-import', 'networks', 'views'].map(t => `server/src/mcp/tools/${t}.ts`);
+const TOOLS = ['rdf-import', 'schema-rdf-import', 'networks', 'views', 'embed'].map(t => `server/src/mcp/tools/${t}.ts`);
 /** The words every refusal shares (a tool's description says "it needs MFA step-up" in its own words, so the whole clause is read). */
 const SENTENCE = 'needs MFA step-up, which this door cannot present';
 /** A token that sets the second factor `required` is asked whatever the instance's switch says. */
@@ -38,6 +38,11 @@ const TOOL_SENTENCES = {
   'server/src/mcp/tools/schema-rdf-import.ts': 'Building a schema from an RDF file needs MFA step-up, which this door cannot present; use the web UI or POST /api/spaces/:id/schema-rdf',
   'server/src/mcp/tools/networks.ts': 'Re-reading a network needs MFA step-up, which this door cannot present; use the web UI (Settings > Networks)',
   'server/src/mcp/tools/views.ts': 'Giving a view to a token needs MFA step-up, which this door cannot present; use the web UI (Settings > Tokens)',
+  // Two calls in one file (round-1 finding F2): `space_reindex` and `space_reembed`, whose REST routes ask the second factor.
+  'server/src/mcp/tools/embed.ts': [
+    'Rebuilding a space\'s vectors needs MFA step-up, which this door cannot present; use the web UI or POST /api/brain/spaces/:spaceId/reindex',
+    'Repairing a space\'s embeddings needs MFA step-up, which this door cannot present; use the web UI or POST /api/spaces/:id/reembed',
+  ],
 };
 
 /** The action and the place a tool's calls of the helper pass, read from its source; `null` for an argument that is not a plain literal. */
@@ -77,10 +82,13 @@ describe('the refusal for a caller asked for a second factor is built once', () 
     // R3: the case above pins the helper for arguments chosen here; what a tool passes is read from its source, so a changed action or place fails.
     for (const [file, expected] of Object.entries(TOOL_SENTENCES)) {
       const calls = helperCallsOf(file);
-      assert.equal(calls.length, 1, `${file} calls mfaStepUpRefusalFor ${calls.length} times`);
-      const [call] = calls;
-      assert.ok(call.action !== null && call.place !== null, `${file} passes an action or a place that is not a plain literal: ${JSON.stringify(call)}`);
-      assert.equal(sentence(ASKED, call.action, call.place), expected, file);
+      const wanted = [].concat(expected);
+      assert.equal(calls.length, wanted.length, `${file} calls mfaStepUpRefusalFor ${calls.length} times, expected ${wanted.length}`);
+      const built = calls.map((call) => {
+        assert.ok(call.action !== null && call.place !== null, `${file} passes an action or a place that is not a plain literal: ${JSON.stringify(call)}`);
+        return sentence(ASKED, call.action, call.place);
+      });
+      assert.deepEqual(built, wanted, file);
     }
   });
 
