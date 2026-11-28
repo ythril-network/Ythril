@@ -74,8 +74,11 @@ cp.spawn = (cmd, ...rest) => {
   proc.stderr = new EventEmitter();
   const last = String(args[args.length - 1]);
   let stderr = '';
-  if (args.includes('-af')) stderr = ff.silenceStderr;
-  else if (last === '-') stderr = `Duration: 00:00:${String(ff.durationS).padStart(2, '0')}.00, start: 0.000000`;
+  // Every pass that opens the input prints its Duration line, the silencedetect pass included (probe P1, ffmpeg 5.1.9): the one decode an
+  // audio job makes reads its length from that pass, so a fake that prints it on the bare `-` probe alone cuts one chunk where two are owed.
+  const durationLine = `  Duration: 00:00:${String(ff.durationS).padStart(2, '0')}.00, start: 0.000000, bitrate: 256 kb/s\n`;
+  if (args.includes('-af')) stderr = durationLine + ff.silenceStderr;
+  else if (last === '-') stderr = durationLine;
   else if (last.includes('%06d')) fs.writeFileSync(last.replace('%06d', '000001'), 'jpeg');
   else fs.writeFileSync(last, 'wav');
   setImmediate(() => { if (stderr) proc.stderr.emit('data', Buffer.from(stderr)); proc.emit('close', 0); });
