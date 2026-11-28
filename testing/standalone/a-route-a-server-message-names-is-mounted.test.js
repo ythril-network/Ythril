@@ -12,7 +12,8 @@
  *
  * The string and template literals of every tracked server source (comments are not read: the other gate holds them), each `METHOD /api/...`
  * pair in them (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`). Each must resolve through `_route-match.mjs`, the matcher the client and comment gates use:
- * a `:param` or `${...}` is one segment, and `POST /api/:tool` resolves only for a tool in the registry. A pair written to say a route is gone
+ * a `:param` or `${...}` is one segment, and `POST /api/:tool` resolves only for a tool in the registry. A path a template part ends on (the route
+ * continues in the next part) is held to the weaker question that some route begins so. A pair written to say a route is gone
  * is a row of `MEANT_TO_MISS` with its reason. At least a dozen pairs have to be read, and one has to resolve, before a clean result means anything.
  *
  * Seen red on f3cd49548: `POST /api/spaces/:id/reindex` in `files/file-embed-work.ts`.
@@ -25,18 +26,24 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { parseSource, walkEveryNode, ts } from '../_shared/syntax-tree.mjs';
-import { resolves } from './_route-match.mjs';
+import { resolves, shape, ROUTES, HOLE } from './_route-match.mjs';
 
 /** A route a message names on purpose although no route serves it, as `METHOD path`, with the reason. */
 const MEANT_TO_MISS = new Map([]);
 
 const PAIR = /\b(GET|POST|PUT|PATCH|DELETE)\s+(\/api\/[^\s`'"),;|]*)/g;
 
-/** The path of a pair as the matcher reads it: `<tool>` is a name the caller fills in, and a path a template part ends on is continued by its `${...}`. */
-const pathOf = (raw, endsTheText, open) => {
-  const path = raw.replace(/[.:]+$/, '').replace(/<[^>]*>/g, ':x');
-  return open && endsTheText ? `${path}\${x}` : path;
-};
+/** The path of a pair as the matcher reads it: `<tool>` is a name the caller fills in. */
+const pathOf = (raw) => raw.replace(/[.:]+$/, '').replace(/<[^>]*>/g, ':x');
+
+/**
+ * Does some mounted route under `method` start with these segments? A path a template part ends on (`.../spaces/` then `${id}/entities`) is the
+ * front of a route written across several parts, so it is held to the weaker question: a route begins like this.
+ */
+function resolvesAsFront(path, method) {
+  const segs = shape(path).split('/');
+  return ROUTES.some(r => r.method === method && r.segs.length >= segs.length && segs.every((s, i) => s === r.segs[i] || s === HOLE || r.segs[i] === HOLE));
+}
 
 /** The text of every string and template literal in a source, in order, with the line it starts on. */
 function literalsOf(file) {
@@ -54,7 +61,7 @@ function literalsOf(file) {
 function pairsIn(file) {
   const found = [];
   for (const { text, open, line } of literalsOf(file)) {
-    for (const m of text.matchAll(PAIR)) found.push({ file, line, method: m[1], path: pathOf(m[2], m.index + m[0].length === text.length, open) });
+    for (const m of text.matchAll(PAIR)) found.push({ file, line, method: m[1], path: pathOf(m[2]), front: open && m.index + m[0].length === text.length });
   }
   return found;
 }
@@ -70,16 +77,17 @@ describe('every route a server message names is mounted', () => {
 
   it('the detector reads a pair out of a log line the way a reader does', () => {
     const line = 'They keep the vectors of their old paths until the space is reindexed (POST /api/spaces/:id/reindex).';
-    const got = [...line.matchAll(PAIR)].map(m => `${m[1]} ${pathOf(m[2], false, false)}`);
+    const got = [...line.matchAll(PAIR)].map(m => `${m[1]} ${pathOf(m[2])}`);
     assert.deepEqual(got, ['POST /api/spaces/:id/reindex']);
-    assert.equal(pathOf('/api/files/', true, true), '/api/files/${x}', 'a template part that ends on a path continues it with a hole');
-    assert.equal(pathOf('/api/<tool>', false, false), '/api/:x', 'a <name> is a hole');
+    assert.equal(pathOf('/api/<tool>'), '/api/:x', 'a <name> is a hole');
+    assert.equal(resolvesAsFront('/api/brain/spaces/', 'GET'), true, 'the front of a route written across template parts');
+    assert.equal(resolvesAsFront('/api/brain/spacez/', 'GET'), false, 'a front no route begins with');
     assert.equal(resolves('/api/spaces/:id/reindex', 'POST'), false, 'the route the warning named exists: this case no longer holds the gate');
     assert.equal(resolves('/api/brain/spaces/:spaceId/reindex', 'POST'), true, 'the real reindex route does not resolve');
   });
 
   it('each `METHOD /api/path` in a string the server says resolves to a route', () => {
-    const offenders = PAIRS.filter(p => !MEANT_TO_MISS.has(`${p.method} ${p.path}`) && !resolves(p.path, p.method))
+    const offenders = PAIRS.filter(p => !MEANT_TO_MISS.has(`${p.method} ${p.path}`) && !(p.front ? resolvesAsFront(p.path, p.method) : resolves(p.path, p.method)))
       .map(p => `${p.file}:${p.line} says ${p.method} ${p.path}, which no mounted route serves`);
     assert.deepEqual(offenders, [],
       'a message names a route that does not exist:\n  ' + offenders.join('\n  ')

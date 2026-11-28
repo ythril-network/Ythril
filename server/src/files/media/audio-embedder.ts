@@ -139,7 +139,7 @@ const DURATION_LINE = /Duration:\s*(\d+):(\d+):([\d.]+)/;
 const PROGRESS_TIME = /time=(\d+):(\d+):([\d.]+)/g;
 
 /** `HH`, `MM` and `SS.ss` of a matched ffmpeg clock as seconds. */
-const clockSeconds = (m: RegExpExecArray | RegExpMatchArray): number =>
+const clockSeconds = (m: RegExpMatchArray): number =>
   parseInt(m[1]!, 10) * 3600 + parseInt(m[2]!, 10) * 60 + parseFloat(m[3]!);
 
 /**
