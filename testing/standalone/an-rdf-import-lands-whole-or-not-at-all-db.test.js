@@ -167,7 +167,7 @@ describe('an RDF import lands whole or not at all (real routes, real MongoDB)', 
   it('a bound only the translation meets (records past the index, a bare edge among them) is answered 413 by the door, the space never held', async () => {
     // Two subjects pass the door's reading pass (110 bytes each of 300); the bare edge and its statement set do not fit (the-rdf-import-act-works-on-the-
     // review-fixes-db.test.js holds that no act was registered).
-    act.setRdfImportKnobsForTest({ memoryBytes: 300 });
+    act.setRdfImportKnobsForTest({ bounds: { memoryBytes: 300 } });
     try {
       const r = await d.importRest(writer.key, BOUND, goodTurtle(BOUND));
       assert.equal(r.status, 413, r.text.slice(0, 300));

@@ -20,10 +20,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import v8 from 'node:v8';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { importOrFail } from '../_shared/import-or-fail.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { REPO_ROOT, SERVER_CODE_ROOTS, trackedSources } from './_sources.mjs';
 
 const memory = () => importOrFail('server/dist/rdf/import-memory.js', 'the import\'s memory room (Q-983)');
 
@@ -85,18 +85,16 @@ describe('the room one import has follows the instance', () => {
   });
 
   it('no module asks for the room at load: every call sits inside a function (a room kept at load is frozen at the first container)', () => {
-    const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    const files = execFileSync('git', ['ls-files', 'server/src'], { cwd: root, encoding: 'utf8' }).split('\n').filter(f => f.endsWith('.ts'));
     const asking = [];
-    for (const file of files) {
-      const text = stripComments(fs.readFileSync(`${root}/${file}`, 'utf8').replaceAll('\r\n', '\n'));
+    for (const file of trackedSources(SERVER_CODE_ROOTS, { untracked: true })) {
+      const text = stripComments(fs.readFileSync(`${REPO_ROOT}/${file}`, 'utf8').replaceAll('\r\n', '\n'));
       if (!text.includes('importMemoryRoom(')) continue;
       asking.push(file);
       // A statement that starts in column 0 and calls it, other than the declaration itself: a call made when the module loads.
       const atLoad = text.split('\n').filter(l => /^\S/.test(l) && l.includes('importMemoryRoom(') && !/^export function importMemoryRoom\(/.test(l));
       assert.deepEqual(atLoad, [], `${file} asks for the room when the module loads`);
     }
-    assert.ok(asking.includes('server/src/spaces/rdf-import-act.ts'), 'the act asks for the room (a probe that finds no asker proves nothing)');
+    assert.ok(asking.includes('server/src/rdf/import-index.ts'), 'the index asks for the room when no meter or budget is handed to it (a probe that finds no asker proves nothing)');
     assert.ok(asking.includes('server/src/rdf/import-spool.ts'), 'the spool asks for the room when no budget is handed to it');
   });
 });

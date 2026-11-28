@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Operations:** `ythril_embed_jobs{lane,status}` and `ythril_embed_job_claim_age_seconds{lane}` show whether writes wait behind a reindex.
 - **Operations:** every answer carries `Server-Timing` per phase, one refused before routing (a body that is not JSON, one over the size limit) too; MCP tool results carry it in `_meta` under `ythril/server-timing`.
-- **Operations:** new metrics `ythril_cache_lookups_total{cache,result}` and `ythril_cache_entries{cache}` count the lookups and entries of the recall query-vector, SPARQL planning-count and RDF schema caches.
+- **Operations:** new metrics `ythril_cache_lookups_total{cache,result}` and `ythril_cache_entries{cache}` count the lookups and entries of the recall, SPARQL planning-count and RDF schema caches.
 - **Operations:** `ythril_write_group_aborts_total{reason}` counts SPARQL Update write groups that landed nothing; a delete still referenced is refused whole (`referenced`).
 - **Performance:** a recall repeated by the same token within ten minutes no longer calls the embedding model again; the saved query vector is private to that token, and no token can tell from its timing what another searched.
 - **Schema:** every schema violation row carries a stable `code` and its `params` beside its `reason` on every REST door and MCP tool, and the web app words it in your language; a bulk warning row gains `warning`. The integration guide lists the codes; an older unconverted item has none.
@@ -66,20 +66,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
 - **Files:** the Brain page's Files tab, a view's Overview and the Danger zone show "+N awaiting bytes" beside the file count when some records wait for their bytes.
 - **Files:** metrics `ythril_files_absent_bytes_removed_total`, `ythril_files_awaiting_bytes` and `ythril_files_absent_bytes_held`.
-- **Files:** a text window of `read_file` and of `converted` on `GET /api/brain/spaces/:spaceId/files/extract` that was cut carries `budgetBoundBy`, naming `maxChars`, `maxTokens` or `maxBytes` to raise.
-- **Spaces:** `GET /api/spaces?counts=true` and MCP `list_spaces` name a space whose count failed in `countsIncomplete` beside `spaces` and give it no `counts`; MCP answers no zeros for it. The key is absent when every count succeeded.
+- **Files:** a cut text window of `read_file` and of `converted` on `GET /api/brain/spaces/:spaceId/files/extract` carries `budgetBoundBy`, naming `maxChars`, `maxTokens` or `maxBytes` to raise.
+- **Spaces:** `GET /api/spaces?counts=true` and MCP `list_spaces` name a space whose count failed in `countsIncomplete` beside `spaces` and give it no `counts`; MCP answers no zeros for it; the key is absent when all counts succeeded.
 - **Web:** the Schema tab converts records. A pencil renames a property (the row says "was" the old name); Save asks what to do with the records of a type you changed (convert now, or save only) and shows the steps, the counts and the run as it goes.
-- **Web:** each type has a labelled "Convert records" button, locked without the space's admin right, and a note when records wait on an older version of its schema; in a networked space Save submits the conversion with the vote and the type says it is waiting for it.
+- **Web:** each type has a "Convert records" button, locked without the space's admin right, and a note when records wait on an older schema version; in a networked space Save submits the conversion with the vote and the type says it is waiting for it.
 - **Web:** Review has an "Unconverted" section: the records a conversion left, by reason, with Open the record, Dismiss, "Dismiss all N shown" and Convert again, and the open count on the Review tab.
-- **Web:** a vote that comes with a conversion shows its steps in words and this instance's own record counts before a member votes.
-- **Web:** Settings → About has a "Third-party software" card, and Settings → Help offers the third-party notices as a document readable inside the instance.
-- **Web:** the namespace field of the Schema Library says an address ending in `/` with no `#`.
+- **Web:** a vote that comes with a conversion shows its steps in words and this instance's record counts before a member votes.
+- **Web:** Settings → About has a "Third-party software" card, and Settings → Help shows the third-party notices inside the instance.
+- **Web:** the namespace field of the Schema Library says an address ends in `/`, no `#`.
 - **Web:** a SPARQL CONSTRUCT view says, in your language, that only the RDF doors read it.
-- **RDF:** SPARQL queries of an RDF space, joins above all, are faster with the same answers; the speed-up is derived data, left out of backups and rebuilt after a restore or upgrade, while queries read the records, slower.
-- **RDF:** that data is rebuilt in the background without slowing writes, a failing rebuild retried at most hourly; `space_rdf_rebuild` (knowledge `admin`, audited as `space.rdf.rebuild`) rebuilds one space now, `space_rdf_index` reads its state (`unbuilt` until built).
+- **RDF:** SPARQL queries of an RDF space, joins above all, are faster with the same answers; the speed-up is derived data, left out of backups and rebuilt after a restore or upgrade (queries read the records meanwhile).
+- **RDF:** that data is rebuilt in the background without slowing writes, a failing rebuild retried hourly at most; `space_rdf_rebuild` (knowledge `admin`, audited) rebuilds one space now, `space_rdf_index` reads its state (`unbuilt` until built).
 - **RDF:** config key `sparql.maxIndexRowsRead` (default 20 times `sparql.maxRecordsRead`) bounds the index statements one query reads (`413 sparql_too_much_read`).
-- **RDF:** a personal view can be a SPARQL CONSTRUCT (`sparql: { query }`): the export, SPARQL and `/ld/@<name>/` read its statements over what you read (at most 50 000); other doors answer `409 view_is_construct`. Its export ends as the others do.
-- **RDF:** the statements a SPARQL Update removes and inserts are read into record writes by the import's rules, or refused with a named reason (`server-owned-removed`, `edge-ends-change`, `not-writable-here`, `field-not-removable`, `subject-not-an-address-here`).
+- **RDF:** a personal view can be a SPARQL CONSTRUCT (`sparql: { query }`): the export, SPARQL and `/ld/@<name>/` read its statements over what you read (at most 50 000); other doors answer `409 view_is_construct`.
+- **RDF:** the statements a SPARQL Update removes and inserts become record writes by the import's rules, or are refused with a named reason (`server-owned-removed`, `edge-ends-change`, `not-writable-here`, `field-not-removable`, `subject-not-an-address-here`).
 - **RDF:** SPARQL 1.1 Update on one space: `POST /api/brain/spaces/:spaceId/sparql/update` and MCP `sparql_update` (`knowledge: write`), through the write rules every door keeps, whole or not at all ([SPARQL Update](docs/integration-guide/04j-sparql-api.md#sparql-update)).
 - **RDF:** an Update names a refused statement (`422 sparql_update_refused`), refuses to delete an entity still named (`409 sparql_update_referenced`), and retries a lost race up to 3 times (`409 sparql_update_conflict`).
 - **RDF:** in an Update a removal no record holds is a no-op, and the answer's `statements` count what was taken, a no-op or not taken (`reasons` and `notTaken` name them).
@@ -92,14 +92,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** an export names the values it left out and the shapes of each graph, and gives file statements only with `files: read`; a base two spaces of one instance hold is refused (`rdf_base_shared`) at the save and by the exports.
 - **RDF:** `GET /api/spaces/:id/schema-rdf` and MCP `space_schema_rdf` export a space's schema as OWL and SHACL in Turtle or JSON-LD, every description included.
 - **RDF:** a base a network of a voted kind offers at a higher epoch is recorded beside that network and refused by the exports (`rdf_base_conflict`); the record follows its space when it leaves the network or is renamed.
-- **RDF:** the web app has RDF names (Settings tab), Export RDF (Schema tab) and an RDF export (space and view Overview).
-- **RDF:** a rebase proposal on a space in a network answers a `members_may_not_read_round` warning naming the members below 6.6.0 (or never heard from), who neither vote on nor apply it; a rebase round's vote row shows its base, vocabulary and epoch (en, de, pl).
-- **RDF:** the server carries the reader the RDF import will use (Turtle, TriG, N-Quads, JSON-LD, plain or gzipped). It fetches nothing (a remote JSON-LD `@context` is refused) and refuses a malformed or oversized file with its line and column.
+- **RDF:** the web app has RDF names (Settings), Export RDF (Schema tab) and an RDF export (space and view Overview).
+- **RDF:** a rebase proposal on a networked space answers a `members_may_not_read_round` warning naming the members below 6.6.0 (or unheard), who neither vote on nor apply it; a rebase round's vote row shows its base, vocabulary and epoch.
+- **RDF:** the server carries the reader the RDF import will use (Turtle, TriG, N-Quads, JSON-LD, plain or gzipped). It fetches nothing (a remote JSON-LD `@context` is refused) and refuses a malformed or oversized file, with line and column.
 - **RDF:** `POST /api/brain/spaces/:spaceId/import/rdf` and MCP `import_rdf` import RDF all or nothing; a strict space refuses a statement it cannot hold. `dryRun` writes nothing. `knowledge: write`; peer tokens get `403` ([Exports](docs/integration-guide/06f-exports.md#rdf-import)).
-- **RDF:** while an import lands, its space takes no other write and no sync (`409 space_being_rdf_imported`); it resumes after a restart. MCP `import_rdf_status` and `GET .../import/rdf/:importId` answer its report.
-- **RDF:** `POST /api/spaces/:id/schema-rdf` and MCP `import_schema_rdf` build type schemas from an OWL, RDFS or SHACL file, without data; only types the file adds or changes are written, and a networked space is refused (`409 schema_rdf_networked`).
+- **RDF:** while an import lands, its space takes no other write or sync (`409 space_being_rdf_imported`); it resumes after a restart. MCP `import_rdf_status` and `GET .../import/rdf/:importId` answer its report.
+- **RDF:** an import's records are bounded by memory, not a count: a file past it is `413 rdf_bound_exceeded` (`bound: RDF_IMPORT_MAX_MEMORY`, `limit`, `need`) ([Exports](docs/integration-guide/06f-exports.md#rdf-import)).
+- **RDF:** `POST /api/spaces/:id/schema-rdf` and MCP `import_schema_rdf` build type schemas from an OWL, RDFS or SHACL file, without data; only types the file adds or changes are written, and a networked space is `409 schema_rdf_networked`.
 - **RDF:** `import_rdf` with `schema` and `from: data` infers types, datatypes and edge labels from the records, pruned by `inferMinSupport` and `inferMinConfidence`, each term with its support and confidence; declared terms win ([Exports](docs/integration-guide/06f-exports.md#rdf-import)).
-- **RDF:** the stream of a whole export is sent uncompressed, whatever `Accept-Encoding` asks; a slow or idle cut and a refusal for want of an export slot each leave one log line (space and rule, no record).
+- **RDF:** a whole export streams uncompressed, whatever `Accept-Encoding`; a slow or idle cut and a refused export slot each log one line (space and rule, no record).
 - **RDF:** the user guide describes the "RDF namespaces of schema groups" card of the Schema Library page.
 - **RDF:** the Ythril vocabulary is published under `docs/rdf/`, with decision record 23: a property holds one plain value; structure is an edge or a link.
 - **RDF:** SPARQL 1.1 over a space's records or your own view: `GET`/`POST /api/brain/spaces/:spaceId/sparql` and MCP `sparql_query`, read at query time with your rights; an answer is whole or refused ([SPARQL API](docs/integration-guide/04j-sparql-api.md)).

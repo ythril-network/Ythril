@@ -504,6 +504,8 @@ it runs in a child process of the same container (started on the first embed, en
 what returns the model's memory to the operating system). If you run a larger embedding model, size this for the model
 as well as the server.
 
+The same limit bounds one RDF import: its index and record sets may hold a quarter of the smaller of Node's heap limit and half this ceiling (see [the RDF import](integration-guide/06f-exports.md#rdf-import)). Node's own cap on the heap stops following the container at 4 GiB, so past that `YTHRIL_MEM_LIMIT` adds no room for an import; `--max-old-space-size` in `NODE_OPTIONS` does.
+
 A job that exceeds its memory ceiling is OOM-killed by the kernel: the affected caption/transcription/
 extraction fails and is reported as such, the rest of the stack keeps running. To confirm that is what
 happened, check the container rather than guessing:

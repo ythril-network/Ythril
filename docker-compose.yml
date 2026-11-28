@@ -6,8 +6,9 @@
     # A memory ceiling, so one instance cannot take a shared host down with it. Node sizes its heap from
     # the container limit, so the app runs inside it rather than into it. The ceiling covers the server AND
     # its embedding process (the bundled model runs in a child process that exits after ten idle minutes),
-    # not one each. Raise YTHRIL_MEM_LIMIT in .env for very large ingests or document batches; an infra
-    # deployment sets its own pod limit instead.
+    # not one each. Raise YTHRIL_MEM_LIMIT in .env for very large ingests or document batches (it also sets
+    # the room one RDF import has, until Node's heap limit stops following it at 4 GiB; past that only
+    # --max-old-space-size in NODE_OPTIONS adds room); an infra deployment sets its own pod limit instead.
     mem_limit: ${YTHRIL_MEM_LIMIT:-4g}
     # Confined like the sidecars behind it. It holds every token and reaches the database, so what a flaw in it
     # can do to its own container matters most here. Each control is measured against a running instance, not

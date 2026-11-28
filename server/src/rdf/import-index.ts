@@ -4,18 +4,20 @@
  *
  * ## Why it is shaped so
  *
- * It is the one structure the import keeps in memory for the whole file, so its size per record is what bounds an import: the plan's figure is
- * about 200 bytes per record (1 000 000 records in about 200 MB), and its test measures it on the live heap. A foreign file's addresses may be
- * long, so a subject is held by a 128-bit digest of its key ({@link quadGroupKey} of `import-spool.ts`), never by its text: the size does not grow
- * with the address, and a collision among 10^6 keys is a 2^-88 chance. The value is one string: a code for kind and stored flag, then the id.
+ * It is the one structure the import keeps in memory for the whole file, so its size per record is what bounds an import: each entry is charged to
+ * the import's {@link ImportMemoryMeter} at what it takes on the heap (`indexEntryBytes` of `import-memory.ts`, measured on the live heap by its
+ * test). A foreign file's addresses may be long, so a subject is held by a 128-bit digest of its key ({@link quadGroupKey} of `import-spool.ts`),
+ * never by its text: the size does not grow with the address, and a collision among 10^6 keys is a 2^-88 chance. The value is one string: a code
+ * for kind and stored flag, then the id.
  *
  * ## What a caller cannot forget, because it is inside
  *
- * - **The record bound** ({@link RDF_IMPORT_MAX_RECORDS}): a new record past it is refused naming the bound, as is an index read back past it;
- *   setting a held record again is no new record. The door's subject bound (`RDF_IMPORT_MAX_SUBJECTS`) is this same constant, never a second
- *   literal, so a file of subjects alone never meets this refusal. An asserted triple no reifier names is an edge the index holds too (under its
+ * - **The memory bound**: a new record whose charge passes the meter's room is refused naming `RDF_IMPORT_MAX_MEMORY`; setting a held record
+ *   again charges only what its entry grows by, never a second entry. The door's subject bound is the same room (`floor(room / MINTED_ENTRY_BYTES)`
+ *   subjects), so a file of subjects alone never meets this refusal. An asserted triple no reifier names is an edge the index holds too (under its
  *   triplet key), so a file within the subject bound can still reach this one: the refusal is then the index's, by name, with the door's own error
- *   class (`RdfImportBoundExceeded`, a 413), and the importer builds the index before it registers an act (review U4).
+ *   class (`RdfImportBoundExceeded`, a 413), and the importer builds the index before it registers an act (review U4). The meter is the import's:
+ *   its sets and its pass-two bare edges spend the same room. An index read back charges nothing (`read` has no product caller).
  * - **Two subjects are never one entry** (review U7): a subject is looked up by its digest, and each entry carries a second, independent check of
  *   its key; a `set` whose digest is held by another key is refused, a `get` of a key that is not the one held answers nothing.
  * - **A resumed import finds the ids it minted**: {@link ImportIndex.write} writes the index whole (to a temporary name, then renamed), through
@@ -26,19 +28,17 @@
 import crypto from 'node:crypto';
 import type { RecordKind } from './term-iri.js';
 import { recordKindsRead } from './term-reverse.js';
-import { RDF_IMPORT_MAX_SUBJECTS, RdfImportBoundExceeded, readSpoolLines, writeWholeSpoolFile, type ImportFolder } from './import-spool.js';
-
-/**
- * The records of one import: the plan's bound (question (b)), about 200 MB of index at 200 bytes per record. The door's subject bound, one
- * constant: the index holds a record per subject at least, so the two can never be set apart.
- */
-export const RDF_IMPORT_MAX_RECORDS = RDF_IMPORT_MAX_SUBJECTS;
+import { ImportMemoryMeter, MINTED_ID, importMemoryRoom, indexEntryBytes } from './import-memory.js';
+import { readSpoolLines, writeWholeSpoolFile, type ImportFolder } from './import-spool.js';
 
 /** What the index says of one subject. */
 export interface IndexedRecord { kind: RecordKind; id: string; stored: boolean }
 
-/** Options of an index. `lookupDigest` is a seam for a test that forces two keys onto one digest: never set outside a test. */
-export interface ImportIndexOptions { maxRecords?: number; lookupDigest?: (key: string) => string }
+/**
+ * Options of an index. `meter` is the import's room, shared with its sets; without one the index makes its own, of `memoryBytes` or else of the room this
+ * instance gives one import, asked now. `lookupDigest` is a seam for a test that forces two keys onto one digest: never set outside a test.
+ */
+export interface ImportIndexOptions { meter?: ImportMemoryMeter; memoryBytes?: number | undefined; lookupDigest?: (key: string) => string }
 
 const KINDS: readonly RecordKind[] = recordKindsRead();
 const INDEX_FILE = 'index.spool';
@@ -58,9 +58,6 @@ const digest = (key: string): string => crypto.createHash('sha256').update(key, 
 const CHECK_BYTES = 8;
 const checkOf = (key: string): string => crypto.createHash('sha256').update('check\u0000', 'utf8').update(key, 'utf8').digest().subarray(0, CHECK_BYTES).toString('latin1');
 
-/** An id the instance mints: held as its 16 bytes. */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
 /**
  * The one string an entry is held as: the key's check (second, independent hash bytes), a code (kind, stored, packed) and the id, a minted id as
  * its 16 bytes. Built through a Buffer so it is a
@@ -72,7 +69,7 @@ function encode(record: IndexedRecord, check: string): string {
   if (kind < 0) throw new TypeError('an indexed record is of a record kind');
   if (typeof record.id !== 'string' || record.id === '') throw new TypeError('an indexed record has an id');
   if (typeof record.stored !== 'boolean') throw new TypeError('an indexed record says whether it is stored');
-  const packed = UUID.test(record.id);
+  const packed = MINTED_ID.test(record.id);
   const code = CODE_BASE + kind * KIND_STEP + (record.stored ? STORED_BIT : 0) + (packed ? PACKED_BIT : 0);
   if (packed) return Buffer.concat([Buffer.from(check, 'latin1'), Buffer.from([code]), Buffer.from(record.id.replaceAll('-', ''), 'hex')]).toString('latin1');
   return Buffer.from(check + String.fromCharCode(code) + record.id, 'utf16le').toString('utf16le');
@@ -92,11 +89,13 @@ function decode(value: string): IndexedRecord {
 /** The subjects of one import and the record each becomes. */
 export class ImportIndex {
   readonly #records = new Map<string, string>();
-  readonly #max: number;
   readonly #lookup: (key: string) => string;
+  /** The import's meter: this index's entries are charged to it, as are the sets that share it. */
+  readonly meter: ImportMemoryMeter;
 
   constructor(options: ImportIndexOptions = {}) {
-    this.#max = options.maxRecords ?? RDF_IMPORT_MAX_RECORDS;
+    // The room is asked when the index is made, once per import, never when the module loads.
+    this.meter = options.meter ?? new ImportMemoryMeter(options.memoryBytes ?? importMemoryRoom().bytes);
     this.#lookup = options.lookupDigest ?? digest;
   }
 
@@ -109,8 +108,8 @@ export class ImportIndex {
   }
 
   /**
-   * Say what `key`'s subject becomes; a new subject past the record bound is refused, and so is a key whose digest another key holds (two
-   * subjects are never one entry).
+   * Say what `key`'s subject becomes; a subject whose charge passes the meter's room is refused, and so is a key whose digest another key holds
+   * (two subjects are never one entry). A held key is charged what its entry grows by, nothing when it does not grow.
    */
   set(key: string, record: IndexedRecord): void {
     const check = checkOf(key);
@@ -120,7 +119,10 @@ export class ImportIndex {
     if (present !== undefined && present.slice(0, CHECK_BYTES) !== check) {
       throw new Error('Two subjects of the file have one digest in the import index: it cannot tell them apart, and nothing was imported.');
     }
-    if (present === undefined && this.#records.size >= this.#max) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_RECORDS', this.#max);
+    // The charge comes before the entry is kept: a refused record is not held. A smaller replacement frees heap the meter does not take back (it
+    // measures the most the import needs).
+    const cost = indexEntryBytes(record.id);
+    this.meter.charge(present === undefined ? cost : Math.max(0, cost - indexEntryBytes(decode(present.slice(CHECK_BYTES)).id)));
     this.#records.set(at, value);
   }
 
@@ -139,7 +141,7 @@ export class ImportIndex {
     })());
   }
 
-  /** The index written into `folder`; throws when there is none, and refuses one past the record bound. */
+  /** The index written into `folder`; throws when there is none. It charges nothing: no product code reads an index back. */
   static async read(folder: ImportFolder, options: ImportIndexOptions = {}): Promise<ImportIndex> {
     const index = new ImportIndex(options);
     for await (const line of readSpoolLines(folder, INDEX_FILE)) {
@@ -150,7 +152,6 @@ export class ImportIndex {
       if (entry[1].length <= CHECK_BYTES) throw new Error('An import index entry is malformed.');
       decode(entry[1].slice(CHECK_BYTES));
       const at = Buffer.from(entry[0], 'hex').toString('latin1');
-      if (!index.#records.has(at) && index.#records.size >= index.#max) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_RECORDS', index.#max);
       index.#records.set(at, entry[1]);
     }
     return index;

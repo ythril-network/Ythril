@@ -7,8 +7,9 @@
  * The room one import has (`import-memory.ts`) is spent per entry of the import's index and of its two digest sets, so each charge must not be
  * below what the entry takes, or an import the room admits could outgrow it. A Map's table doubles when it is full, so an entry costs most just
  * after a doubling (the table is half empty) and least just before the next: the charge is pinned at both, for each kind of id the index holds
- * (a minted id as its 16 bytes, a short text id, a 1 000-character text id, a non-ASCII text id: two bytes a character). The measured heap per
- * entry is at most the charge (the headroom) and at least 0.7 of it (a charge that is far above the cost refuses imports that fit).
+ * (a minted id as its 16 bytes, a short text id, a 1 000-character text id, a text id with characters above U+00FF: V8 holds an entry with a character
+ * above U+00FF as a two-byte string, any other as one byte a character). The measured heap per entry is at most the charge (the headroom) and at
+ * least 0.65 of it (a charge that is far above the cost refuses imports that fit).
  *
  * A key set again charges only the growth of its entry (a subject is set again when its record turns out stored), and the index, the sets and the
  * pass-two bare edges spend one meter.
@@ -32,8 +33,11 @@ const countModule = () => importOrFail('server/dist/rdf/import-count.js', 'the i
 const POWER = 2 ** 14;
 const JUST_PAST = POWER + 1;
 const NEAR_FULL = POWER - 64;
-/** The measured heap per entry may be this share of the charge at the least: a charge far above the cost refuses imports that fit. */
-const AT_LEAST = 0.7;
+/**
+ * The measured heap per entry may be this share of the charge at the least: a charge far above the cost refuses imports that fit. A charge that
+ * covers an entry just after its Map doubled (a half-empty table) is about a third above what the same entry costs just before the next doubling.
+ */
+const AT_LEAST = 0.65;
 
 const liveHeap = () => { gc(); gc(); return process.memoryUsage().heapUsed; };
 
@@ -41,7 +45,8 @@ const IDS = {
   'a minted id': () => crypto.randomUUID(),
   'a short text id': (i) => `rec-${i}`,
   'a 1 000-character text id': (i) => `${'p'.repeat(980)}${String(i).padStart(12, '0')}`,
-  'a non-ASCII text id': (i) => `Übergröße-日本語-${i}`,
+  'a Latin-1 non-ASCII text id': (i) => `Übergröße-${i}`,
+  'a text id with characters above U+00FF': (i) => `Übergröße-日本語-${i}`,
 };
 
 const keyOf = (i) => JSON.stringify([`http://www.example.org/instances/dataFromProducer${i % 997}/Product${i}`, '']);
@@ -53,27 +58,34 @@ describe('an index entry is charged what it costs on the heap', { timeout: 120_0
         const { ImportMemoryMeter, indexEntryBytes } = await memory();
         const { ImportIndex } = await indexModule();
         const meter = new ImportMemoryMeter(Number.MAX_SAFE_INTEGER);
-        const ids = Array.from({ length: count }, (_, i) => idOf(i));
-        const keys = Array.from({ length: count }, (_, i) => keyOf(i));
+        // The ids and keys are made as the index takes them and kept nowhere else: a UUID from crypto is a rope of its hex pieces (about 500 bytes) until
+        // something flattens it, and a baseline taken with ropes alive would shrink when the index flattens them.
         const before = liveHeap();
         const index = new ImportIndex({ meter });
-        for (let i = 0; i < count; i += 1) index.set(keys[i], { kind: 'entity', id: ids[i], stored: false });
-        const after = liveHeap();
-        const perEntry = (after - before) / count;
-        const charged = indexEntryBytes(ids[0]);
+        let expected = 0;
+        let charged = 0;
+        for (let i = 0; i < count; i += 1) {
+          const id = idOf(i);
+          charged = indexEntryBytes(id);
+          expected += charged;
+          index.set(keyOf(i), { kind: 'entity', id, stored: false });
+        }
+        const perEntry = (liveHeap() - before) / count;
         console.log(`index, ${what}, ${count} entries: ${perEntry.toFixed(1)} B per entry, charged ${charged} B`);
         assert.equal(index.size, count);
         assert.ok(perEntry <= charged, `an entry takes ${perEntry.toFixed(1)} bytes and is charged ${charged}: an import could outgrow its room`);
         assert.ok(perEntry >= AT_LEAST * charged, `an entry takes ${perEntry.toFixed(1)} bytes and is charged ${charged}: the charge refuses imports that fit`);
-        assert.equal(meter.used, ids.reduce((n, id) => n + indexEntryBytes(id), 0), 'the index charged something other than the entries\' own charges');
+        assert.equal(meter.used, expected, 'the index charged something other than the entries\' own charges');
       });
     }
   }
 
-  it('the charge of a text id grows with its length at two bytes a character, and a minted id costs the same whatever its digits', async () => {
+  it('the charge of a text id grows with its length at a byte a character, two when a character is above U+00FF, and a minted id costs the same whatever its digits', async () => {
     const { indexEntryBytes } = await memory();
-    assert.equal(indexEntryBytes('a'.repeat(101)) - indexEntryBytes('a'.repeat(1)), 200);
-    assert.equal(indexEntryBytes('ü'.repeat(51)) - indexEntryBytes('ü'.repeat(1)), 100, 'a non-ASCII character is charged as an ASCII one');
+    assert.equal(indexEntryBytes('a'.repeat(101)) - indexEntryBytes('a'.repeat(1)), 100, 'an ASCII text id is held one byte a character');
+    assert.equal(indexEntryBytes('ü'.repeat(51)) - indexEntryBytes('ü'.repeat(1)), 50, 'a character up to U+00FF is held in one byte');
+    assert.equal(indexEntryBytes('日'.repeat(101)) - indexEntryBytes('日'.repeat(1)), 200, 'a character above U+00FF is held in two');
+    assert.equal(indexEntryBytes(`${'a'.repeat(99)}日`) - indexEntryBytes(`${'a'.repeat(99)}b`), 100, 'one wide character makes the whole entry a two-byte string');
     assert.equal(indexEntryBytes(crypto.randomUUID()), indexEntryBytes(crypto.randomUUID()));
     assert.ok(indexEntryBytes('a'.repeat(200)) > indexEntryBytes(crypto.randomUUID()), 'a long text id was charged less than a minted one');
   });
@@ -84,10 +96,9 @@ describe('a digest set entry is charged what it costs on the heap', { timeout: 1
     it(`${count} entries (${at}): the heap per entry is within the charge and at least ${AT_LEAST} of it`, async () => {
       const { SET_ENTRY_BYTES } = await memory();
       const { DigestSet } = await countModule();
-      const keys = Array.from({ length: count }, (_, i) => JSON.stringify([`http://x.example/s${i}`, 'http://x.example/p', `http://x.example/o${i}`, '']));
       const before = liveHeap();
       const set = new DigestSet();
-      for (const key of keys) set.add(key);
+      for (let i = 0; i < count; i += 1) set.add(JSON.stringify([`http://x.example/s${i}`, 'http://x.example/p', `http://x.example/o${i}`, '']));
       const perEntry = (liveHeap() - before) / count;
       console.log(`set, ${count} entries: ${perEntry.toFixed(1)} B per entry, charged ${SET_ENTRY_BYTES} B`);
       assert.equal(set.size, count);

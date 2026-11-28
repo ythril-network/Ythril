@@ -1,22 +1,24 @@
 /**
- * What an RDF import's door can know of a file's record count from the sorted spool alone, with no read of the store (bundle-270, second review
+ * What an RDF import's door can know of a file's memory need from the sorted spool alone, with no read of the store (bundle-270, second review
  * F1 and F7), and the digest set the act's passes keep a file's triplets in.
  *
  * ## What it prevents
  *
- * The index bound (`RDF_IMPORT_MAX_RECORDS`) counts a record per subject and one per bare edge (an asserted triple no reifier names), and a bare
- * edge is only found by a pass over the file. That pass used to run in the request together with the store reads of the translation, so a request
- * for the largest file the bounds allow held the server for minutes before a byte was answered. The count is made here, from the spool alone:
- * it reads no store, so the door answers 413 at once for a file that cannot fit, and the translation, which does read the store, runs in the act
- * under its hold.
+ * The index holds a record per subject and one per bare edge (an asserted triple no reifier names), the two sets hold a digest per statement, and a
+ * bare edge is only found by a pass over the file. That pass used to run in the request together with the store reads of the translation, so a request
+ * for the largest file the bounds allow held the server for minutes before a byte was answered. The count is made here, from the spool alone: it
+ * reads no store, so the door answers 413 at once for a file that cannot fit in the memory one import is given (`import-memory.ts`), and the
+ * translation, which does read the store, runs in the act under its hold.
  *
- * The count is an upper bound of the records the translation makes (a subject that is no record, and an edge a translation refuses, are counted
- * too): it never refuses a file the index would take, and the index, which holds the exact figure, is the act's own judge.
+ * The need is an upper bound of what the translation's index and sets take (a subject that is no record, an edge a translation refuses, and a record
+ * whose stored id is shorter than the address are charged as the dearest case): it never refuses a file the index would take, and the index, which
+ * charges the exact figure, is the act's own judge. In particular an addressed subject is charged `max(minted entry, its text id's entry)`, whichever
+ * the index will hold, so the door's need is never below the act's.
  */
 import { createHash } from 'node:crypto';
-import type { AddressNames } from './term-reverse.js';
-import { RDF_IMPORT_MAX_RECORDS } from './import-index.js';
-import { RdfImportBoundExceeded, type QuadGroup } from './import-spool.js';
+import { MINTED_ENTRY_BYTES, SET_ENTRY_BYTES, ImportMemoryMeter, indexEntryBytes } from './import-memory.js';
+import { recordOfAddress, type AddressNames } from './term-reverse.js';
+import type { QuadGroup } from './import-spool.js';
 import type { Quad } from './literals.js';
 import { edgeLabelOf, tripletsOfGroup } from './quads-to-ops.js';
 
@@ -30,35 +32,29 @@ export const digestOfKey = (key: string): string => createHash('sha256').update(
 export class DigestSet extends Set<string> {
   override add(key: string): this { return super.add(digestOfKey(key)); }
   override has(key: string): boolean { return super.has(digestOfKey(key)); }
+
+  /** Add `key` unless it is held, charging {@link SET_ENTRY_BYTES} to `meter` first: a refused charge adds nothing. The key is digested once. */
+  addCharged(key: string, meter: ImportMemoryMeter): void {
+    const held = digestOfKey(key);
+    if (Set.prototype.has.call(this, held)) return;
+    meter.charge(SET_ENTRY_BYTES);
+    Set.prototype.add.call(this, held);
+  }
 }
 
 /**
- * How many labelled asserted edge statements a file may hold per unit of the record bound before its records cannot be met (lens finding L5).
- *
- * A file whose records can be met has at most `max` bare edges (each is a record) plus the edges a reifier names (each reifier is a subject,
- * and subjects are bounded by the same figure through `RDF_IMPORT_MAX_SUBJECTS`): two times the bound. Past that the sets below are refused
- * as the statement arrives, so they never hold more than this multiple of the bound each. The price is a hand-made file whose reifiers each
- * name several triples, which the translation drops (`several-values`) and which the unbounded count let through: it is refused by the record
- * bound's name like any file too large for the index. Measured heap per entry of a set (a 128-bit digest as a string, the Set's slot): 53 bytes,
- * 150 bytes resident, so the largest set a file can build is 2 000 000 entries, about 106 MB of heap, where the ten million statements the reader
- * admits held 530 MB of heap and 1.5 GB resident per set.
- */
-export const RDF_IMPORT_EDGE_STATEMENT_MULTIPLE = 2;
-
-/**
- * The labelled edge statements a file asserts and reifies, as digests (the passes' two sets), fed group by group: {@link addGroup} refuses the
- * file by the record bound's name the moment either set would pass {@link RDF_IMPORT_EDGE_STATEMENT_MULTIPLE} times the bound, so no caller can
- * fill a set with the whole file before looking. Only a statement whose predicate names one edge label is kept: the translation asks the sets
- * only about those, so a file of other links fills nothing.
+ * The labelled edge statements a file asserts and reifies, as digests (the passes' two sets), fed group by group: {@link addGroup} charges each new
+ * statement to the import's meter and refuses the file by `RDF_IMPORT_MAX_MEMORY` the moment a charge would pass the room, so no caller can fill a
+ * set with the whole file before looking. Only a statement whose predicate names one edge label is kept: the translation asks the sets only about
+ * those, so a file of other links fills nothing and is charged nothing. The meter is the import's, shared with its index: the sets are not capped
+ * by a multiple of any count, only by what they cost.
  */
 export class TripletSets {
   readonly asserted = new DigestSet();
   readonly reified = new DigestSet();
-  constructor(private readonly max: number = RDF_IMPORT_MAX_RECORDS) {}
+  constructor(private readonly meter: ImportMemoryMeter) {}
 
-  private get cap(): number { return this.max * RDF_IMPORT_EDGE_STATEMENT_MULTIPLE; }
-
-  /** Take the statements of one group read under `names`; throws {@link RdfImportBoundExceeded} (`RDF_IMPORT_MAX_RECORDS`) past the cap. */
+  /** Take the statements of one group read under `names`; throws {@link RdfImportBoundExceeded} (`RDF_IMPORT_MAX_MEMORY`) past the room. */
   addGroup(quads: readonly Quad[], names: AddressNames): void {
     const t = tripletsOfGroup(quads);
     for (const key of t.asserted) this.#take(this.asserted, key, names);
@@ -68,8 +64,7 @@ export class TripletSets {
   #take(set: DigestSet, key: string, names: AddressNames): void {
     const label = edgeLabelOf((JSON.parse(key) as string[])[1] ?? '', names);
     if (label === null || label === 'shared') return;
-    if (set.size >= this.cap && !set.has(key)) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_RECORDS', this.max);
-    set.add(key);
+    set.addCharged(key, this.meter);
   }
 
   /** The asserted statements no reifier names: each is an edge of its own. */
@@ -80,15 +75,28 @@ export class TripletSets {
   }
 }
 
+/** The heap bytes the index will take for a subject: its minted id, or the text of its address when it is a record of the space (a stored one). */
+function subjectBytes(group: QuadGroup, names: AddressNames): number {
+  if (group.subject.kind !== 'iri') return MINTED_ENTRY_BYTES;
+  const read = recordOfAddress(group.subject.value, names);
+  return read.answer === 'record' && read.of === 'space' ? Math.max(MINTED_ENTRY_BYTES, indexEntryBytes(read.id)) : MINTED_ENTRY_BYTES;
+}
+
 /**
- * Throw {@link RdfImportBoundExceeded} (`RDF_IMPORT_MAX_RECORDS`, a 413) when `subjects` plus the file's bare edges are over `max`, or as soon as
- * the file's edge statements make that certain ({@link TripletSets}). Reads only `groups` (the sorted spool); `namesOf` says which address
- * names a group's graph is read under.
+ * Throw {@link RdfImportBoundExceeded} (`RDF_IMPORT_MAX_MEMORY`, a 413) when the file's subjects, its statement sets and its bare edges need more than
+ * `memoryBytes`, or as soon as the subjects and statements read so far make that certain. Answers the need when the file fits. Reads only `groups`
+ * (the sorted spool); `namesOf` says which address names a group's graph is read under.
  */
 export async function assertRecordsWithinBound(
-  groups: AsyncIterable<QuadGroup>, namesOf: (graph: string | undefined) => AddressNames, subjects: number, max: number = RDF_IMPORT_MAX_RECORDS,
-): Promise<void> {
-  const sets = new TripletSets(max);
-  for await (const group of groups) sets.addGroup(group.quads, namesOf(group.graph?.value));
-  if (subjects + sets.bare() > max) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_RECORDS', max);
+  groups: AsyncIterable<QuadGroup>, namesOf: (graph: string | undefined) => AddressNames, memoryBytes: number,
+): Promise<{ need: number }> {
+  const meter = new ImportMemoryMeter(memoryBytes);
+  const sets = new TripletSets(meter);
+  for await (const group of groups) {
+    const names = namesOf(group.graph?.value);
+    meter.charge(subjectBytes(group, names));
+    sets.addGroup(group.quads, names);
+  }
+  meter.charge(sets.bare() * MINTED_ENTRY_BYTES);
+  return { need: meter.used };
 }

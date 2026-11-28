@@ -103,7 +103,7 @@ describe('the RDF import act works on top of the review fixes (real routes, real
 
   it('H3: records past the memory room through bare edges are a 413 at the door, before an act is registered', async () => {
     // Two subjects fit the 300 bytes (110 each) the door's subject bound takes; the bare edge and its statement set (110 and 53) do not.
-    act.setRdfImportKnobsForTest({ memoryBytes: 300 });
+    act.setRdfImportKnobsForTest({ bounds: { memoryBytes: 300 } });
     const before = reportCount();
     try {
       const r = await d.importRest(writer.key, H3, goodTurtle(H3));
