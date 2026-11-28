@@ -263,8 +263,8 @@ export const space_reindexTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    // Authorised by `admin: true` in the dispatcher, which refuses this tool unless the token's matrix says
-    // `instanceAdmin`. The `if (!isAdmin)` that stood here was a second copy of that rule, reading the legacy
+    // Authorised by the dispatcher: this tool's TOOL_RIGHTS row asks `knowledge: admin` on the space, as `space_reembed`'s row does.
+    // The `if (!isAdmin)` that stood here was a second copy of that rule, reading the legacy
     // boolean — and a second copy of an authorization rule is what this codebase pays most for.
     const { callSpace } = ctx;
 
@@ -319,14 +319,14 @@ export const space_reembedTool: ToolHandler = {
     + 'ONCE PER CALL (`limit` bounds what is queued, never what is read), so a large space pays for a pass over its '
     + 'records each time. Calling again re-reads from the start: what you queued stays owed until the worker has drained '
     + 'it, so `enqueued` and `remaining` do not move before then.\n\n'
-    // NAMING THE OTHER TOOL WOULD BE THE DEFECT HERE. Rebuilding every vector is instance-admin, this is
-    // not, so a standard token sees this description and cannot see that tool — and a description that
-    // sends a caller to something they will be refused is worse than one that describes the boundary.
+    // Naming `space_reindex` is safe here: it asks the same rung (`knowledge: admin` on the space, as this tool does), so a caller who can
+    // see this description can call that tool. A description that would send a caller to a tool they are refused is worse than one that
+    // describes the boundary.
     // `readonly-tool-descriptions-cannot-name-mutating-tools` is the same rule one rung down.
     + 'IT DOES NOT REBUILD VECTORS THAT ARE CURRENT, and that is the distinction to get right: a record that holds a '
     + 'vector made from its current text is left alone, even one made by an earlier model, and one whose text has '
     + 'changed is owed as above. Rebuilding every vector in a space — the recovery path after changing embedder or '
-    + 'model — is a separate and more privileged operation; `help()` lists it if your token can reach it. This one '
+    + 'model — is `space_reindex`, a separate operation on the same rung. This one '
     + 'touches only the owed records above, is AWAITED, and the counts it returns are the answer rather than a '
     + 'receipt.\n\n'
     + 'SUPPRESSION IS NEVER UNDONE HERE: a suppressed record whose lexical text is current and that holds no vector '
