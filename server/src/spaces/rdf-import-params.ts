@@ -14,7 +14,7 @@
 import { z } from 'zod';
 import { RDF_FORMATS, type RdfFormat } from '../rdf/serialize.js';
 import { rdfParamBool, rdfParamList } from '../rdf/rdf-document.js';
-import { RDF_IMPORT_MAX_SUBJECTS } from '../rdf/import-spool.js';
+import { RDF_IMPORT_MAX_QUADS } from '../rdf/import-spool.js';
 import { RDF_IMPORT_ADDRESS_MAX } from './rdf-import-files.js';
 
 /** The most per-graph source bases one request names (and the most graph addresses a refusal names). */
@@ -24,8 +24,11 @@ export const RDF_IMPORT_GRAPH_BASE_MIN_CHARS = 3;
 export const RDF_IMPORT_GRAPH_BASE_MAX_CHARS = RDF_IMPORT_ADDRESS_MAX * 2 + 1;
 /** What an import with `schema` reads the schema from: the file's OWL and RDFS declarations, its shapes, and its records (`data`, Q-755). */
 export const IMPORT_SCHEMA_SOURCES =['declared', 'shacl', 'data'] as const;
-/** The largest support threshold a caller may ask: the most subjects an import holds (`RDF_IMPORT_MAX_SUBJECTS`). */
-export const RDF_IMPORT_INFER_SUPPORT_MAX = RDF_IMPORT_MAX_SUBJECTS;
+/**
+ * The largest support threshold a caller may ask: more subjects than a file of `RDF_IMPORT_MAX_QUADS` quads can have (a subject has at least one
+ * quad), a static figure. The most subjects an import holds is the memory room's, which differs per instance, so it cannot be the schema's maximum.
+ */
+export const RDF_IMPORT_INFER_SUPPORT_MAX = RDF_IMPORT_MAX_QUADS;
 
 /** A source base per graph: `"<graph address> <source base>"`, one value each. */
 const GRAPH_BASE = z.string().min(RDF_IMPORT_GRAPH_BASE_MIN_CHARS).max(RDF_IMPORT_GRAPH_BASE_MAX_CHARS).regex(/^\S+ \S+$/, 'a graph base is "<graph address> <source base>"');

@@ -165,7 +165,6 @@ const decidedOf = (by: object): Pick<TranslateRun, 'skip' | 'notAsked' | 'leaveO
 
 interface RdfImportKnobs {
   window?: number;
-  maxRecords?: number;
   /** Replaces `SCHEMA_RDF_MAX_QUADS` as the bound of the schema groups an import with `schema` collects. */
   schemaMaxQuads?: number;
   /** Replaces `SCHEMA_INFER_MAX_PREDICATES` as the most distinct predicates a file's records may use for a schema to be inferred (Q-755). */
@@ -185,6 +184,11 @@ interface RdfImportKnobs {
     duringTranslation?: () => unknown;
     /** When a door has taken the one place to read an upload in (a seam for a second import that must meet it held). */
     afterDoorTaken?: () => void;
+    /**
+     * The memory figures of an import, in bytes: `need` after the door counted what the file needs (before the act is registered), `used` after
+     * the translation's index and sets took their last entry. The door's need is held to be never below the act's use.
+     */
+    memory?: (figure: { need: number } | { used: number }) => void;
     /** After the door sorted the file and before the act is registered. */
     beforeRegister?: () => unknown;
     /** After the act is registered and before it runs (a seam for a change a network makes to the space in between). */
@@ -288,9 +292,9 @@ interface Run {
  */
 async function indexPass(run: TranslateRun): Promise<{ index: ImportIndex; asserted: DigestSet; reified: DigestSet }> {
   const names = namesByGraph(run.meta, run.options);
-  const index = new ImportIndex(knobs.maxRecords !== undefined ? { maxRecords: knobs.maxRecords } : {});
-  // The door's count held the same sets under the same bound before this act was registered, so they cannot pass it here.
-  const triplets = new TripletSets(knobs.maxRecords);
+  // One meter for the index, the sets and (through the index) the bare edges of pass 2: the room is asked now, when the act runs.
+  const index = new ImportIndex({ memoryBytes: knobs.bounds?.memoryBytes });
+  const triplets = new TripletSets(index.meter);
   for await (const window of windowsOf(run.groups(), windowSize())) {
     const candidates: Array<{ key: string; kind: RecordKind; id: string }> = [];
     const fresh: Array<{ key: string; kind: RecordKind }> = [];
@@ -379,6 +383,7 @@ async function translateStage(run: TranslateRun): Promise<void> {
   try {
     const { index, asserted, reified } = await indexPass(run);
     await translatePass(run, index, asserted, reified);
+    knobs.hooks?.memory?.({ used: index.meter.used });
   } catch (err) {
     if (!(err instanceof StoredRecordUnreadable)) throw err;
     run.builder.planner(err.kind, err.id, { code: STORED_RECORD_LINKS_OVER_BOUND });
@@ -599,7 +604,7 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
       try {
         await translateStage({ spaceId: entry.localId, folder, meta: by.meta, options: state.options, groups, builder: run.builder, ...decidedOf(by) });
       } catch (err) {
-        if (err instanceof RdfImportBoundExceeded) return gone(HTTP.TOO_LARGE, err.code, `the file is over the import's bound ${err.bound} (${err.limit}).`);
+        if (err instanceof RdfImportBoundExceeded) return gone(HTTP.TOO_LARGE, err.code, err.message, err.detail);
         throw err;
       }
       if (run.builder.refused) return refused(run);
@@ -792,7 +797,7 @@ async function readAndRun(
     const fileBase = defaultSourceBase(options.format, seen, options, meta);
     if (fileBase !== null) {
       options = { ...options, source: { base: fileBase } };
-      sorted = await resortedSpool(sorted, folder, { names: addressNames(meta, options.source), bounds: knobs.bounds ?? {} });
+      sorted = await resortedSpool(sorted, folder, { names: addressNames(meta, options.source), bounds: { ...knobs.bounds, memoryBytes: sorted.memoryBytes } });
     }
     // The schema the file builds (Q-955), proposed now that the source base is settled, and judged as its write would be: a refusal here writes
     // nothing and registers nothing.
@@ -807,9 +812,9 @@ async function readAndRun(
     const by = built
       ? await rdfImportSchemaStep().translationBy(built.merged, meta, sorted.groups, built.asked.from, { skip: built.keys, notAsked: built.notAsked, leaveOut: built.leaveOut })
       : { planSchema: meta.typeSchemas ?? {}, meta };
-    // The records the file will make, subjects and bare edges, counted from the spool alone: a file that cannot fit is answered 413 here. With a
-    // schema the edges are counted under the names the proposal gives (Q-755 F8): a label the file declares or infers is a label here too.
-    await assertRecordsWithinBound(sorted.groups(), namesByGraph(by.meta, options), sorted.subjects, knobs.maxRecords);
+    // The memory the file's records need (subjects, statement sets and bare edges), counted from the spool alone: a file that cannot fit is answered
+    // 413 here. With a schema the edges are counted under the names the proposal gives (Q-755 F8): a label the file declares or infers is a label here too.
+    knobs.hooks?.memory?.(await assertRecordsWithinBound(sorted.groups(), namesByGraph(by.meta, options), sorted.memoryBytes));
     const report: RdfImportReport = {
       importId, space: input.spaceId, status: dryRun ? 'dry-run' : 'running', dryRun, format: options.format, mode: options.mode,
       quads: sorted.quads, subjects: sorted.subjects, kinds: emptyKinds(), unchanged: emptyUnchanged(), reasons: [], reasonCount: 0, reasonsByCode: {}, notTaken: {},
@@ -871,9 +876,7 @@ function doorRefusalOf(err: unknown, format: RdfFormat): RdfImportRefusal | null
     const what = err.what === 'schema' ? "The space's schema" : "The space's RDF base or vocabulary";
     return refusal(HTTP.CONFLICT, RDF_IMPORT_SPACE_CHANGED, `${what} changed while the file was being read; nothing was imported: send the file again`);
   }
-  if (err instanceof RdfImportBoundExceeded) {
-    return refusal(HTTP.TOO_LARGE, err.code, `The file is over the import's bound ${err.bound} (${err.limit}); nothing was imported`, { bound: err.bound, limit: err.limit });
-  }
+  if (err instanceof RdfImportBoundExceeded) return refusal(HTTP.TOO_LARGE, err.code, err.message, err.detail);
   // A stalled upload, a body over the byte bound, a file the reader refuses: the document's own failures, answered as every RDF door answers them.
   return rdfDocumentRefusalOf(err, format, NOTHING_IMPORTED);
 }

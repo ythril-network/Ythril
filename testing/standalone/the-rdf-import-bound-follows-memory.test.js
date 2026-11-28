@@ -7,9 +7,10 @@
  *
  * - **No fixed count** (S3): a file of 1 000 100 subjects, more than the old bound of one million, goes through the door's own pass
  *   (`sortedSpool`) and its count (`assertRecordsWithinBound`) under `memoryBytes` (the test budget that replaces the old count knob), and passes
- *   at exactly what it needs and is refused one byte under, by `RDF_IMPORT_MAX_MEMORY`, nothing kept. This runs through the spool and the count
- *   only, not through the act and the database: those are held by the -db files beside it, and a million records through the database is not a
- *   test's time. The first line of its output states the seconds it took.
+ *   at exactly what it needs and is refused by `RDF_IMPORT_MAX_MEMORY` under a budget of a thousand subjects (a refusal one byte under a budget is
+ *   held on the small files below). This runs through the spool and the count only, not through the act and the database: those are held by the
+ *   -db files beside it, and a million records through the database is not a test's time. Its output states the seconds it took (about 24 s of the
+ *   file's 25 on the build machine's container, 14 of them the sort).
  * - **The door charges as the index will** (G1): every subject at least as dear as the index's entry for it, an addressed subject by its text id
  *   when that is dearer than a minted one (`max(minted, text id)`), every bare edge as a minted entry and every statement of the two sets.
  * - **No multiple of a bound** (S4): the sets are not capped at a multiple of a record count; a file whose statements are all reified (no bare
@@ -41,6 +42,9 @@ const REIFIES = iri('http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies');
 const OLD_FIXED_COUNT = 1_000_000;
 const SUBJECTS = OLD_FIXED_COUNT + 100;
 const WITH_EDGES = 100;
+/** One short quad per subject: the file is as small as a file past a million subjects can be, since its time is the sort's. */
+const NAME = iri('http://p.example/n');
+const LITERAL = { kind: 'literal', value: 'n' };
 
 const made = [];
 after(() => { for (const dir of made.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
@@ -55,7 +59,7 @@ const groupOf = (i, per, predicate = KNOWS) => {
 const asGroups = (list) => async function* () { yield* list; };
 
 describe('a file past the old fixed count is bounded by memory alone', { timeout: 300_000 }, () => {
-  it(`${SUBJECTS} subjects: through the door's spool and count, passes at what it needs and is refused one byte under`, async () => {
+  it(`${SUBJECTS} subjects: through the door's spool and count, passes at what it needs and is refused under a small budget`, async () => {
     const started = Date.now();
     const { MINTED_ENTRY_BYTES, SET_ENTRY_BYTES } = await memory();
     const { assertRecordsWithinBound } = await countModule();
@@ -69,22 +73,27 @@ describe('a file past the old fixed count is bounded by memory alone', { timeout
     function* quads() {
       for (let i = 0; i < SUBJECTS; i += 1) {
         const subject = iri(`http://people.example/s${i}`);
-        yield { subject, predicate: iri('http://people.example/name'), object: { kind: 'literal', value: `n${i}` } };
+        yield { subject, predicate: NAME, object: LITERAL };
         if (i < WITH_EDGES) yield { subject, predicate: KNOWS, object: iri(`http://people.example/o${i}`) };
       }
     }
     const huge = Number.MAX_SAFE_INTEGER;
     const spool = await sortedSpool(streamOf(quads()), folder, { names, bounds: { memoryBytes: huge } });
+    const sortedAt = Date.now();
+    console.log(`${SUBJECTS} subjects sorted on disk: ${((sortedAt - started) / 1000).toFixed(1)} s`);
     assert.equal(spool.subjects, SUBJECTS, 'the door counted a different number of subjects');
     assert.ok(spool.subjects > OLD_FIXED_COUNT, 'the file is not past the old fixed count');
     const need = SUBJECTS * MINTED_ENTRY_BYTES + WITH_EDGES * SET_ENTRY_BYTES + WITH_EDGES * MINTED_ENTRY_BYTES;
     const answer = await assertRecordsWithinBound(spool.groups(), () => names, need);
     assert.equal(answer.need, need, 'the door charged something other than every subject, every set entry and every bare edge');
+    console.log(`${SUBJECTS} subjects through the spool and the count: ${((Date.now() - started) / 1000).toFixed(1)} s`);
+    // The same file under a budget of a thousand subjects is refused as soon as the count passes it: a small budget refuses a file past it (the
+    // refusal one byte past a budget is held on the small files below, which do not cost a million records each).
+    const small = 1_000 * MINTED_ENTRY_BYTES;
     await assert.rejects(
-      assertRecordsWithinBound(spool.groups(), () => names, need - 1),
-      (err) => err?.name === 'RdfImportBoundExceeded' && err.bound === 'RDF_IMPORT_MAX_MEMORY' && err.limit === need - 1 && err.need > need - 1,
+      assertRecordsWithinBound(spool.groups(), () => names, small),
+      (err) => err?.name === 'RdfImportBoundExceeded' && err.bound === 'RDF_IMPORT_MAX_MEMORY' && err.limit === small && err.need > small,
     );
-    console.log(`${SUBJECTS} subjects through the spool and the count twice: ${((Date.now() - started) / 1000).toFixed(1)} s`);
   });
 
   it('the door\'s early refusal in the sort: a budget under what the subjects alone take is refused before the sort ends, naming the memory bound', async () => {
@@ -171,11 +180,12 @@ describe('the count refuses as soon as the budget cannot be met', () => {
     const count = await countModule();
     const { addressNames } = await reverseModule();
     const names = addressNames(meta);
-    const budget = 50 * SET_ENTRY_BYTES + 400 * MINTED_ENTRY_BYTES;
+    // Each group is a subject (a minted entry) with 10 statements: the budget holds five of them whole, so the sixth group is the one that cannot be met.
+    const budget = 5 * (MINTED_ENTRY_BYTES + 10 * SET_ENTRY_BYTES);
     let pulled = 0;
     async function* groups() { for (let i = 0; i < 400; i += 1) { pulled += 1; yield groupOf(i, 10); } }
     await assert.rejects(count.assertRecordsWithinBound(groups(), () => names, budget), (err) => err?.bound === 'RDF_IMPORT_MAX_MEMORY' && err.limit === budget);
-    assert.ok(pulled <= Math.ceil(50 / 10) + 1, `the count read ${pulled} of 400 groups: it went on past the point where the budget could not be met`);
+    assert.ok(pulled <= 6, `the count read ${pulled} of 400 groups: it went on past the point where the budget could not be met (6)`);
   });
 
   it('holds each set within the budget the moment it refuses', async () => {
@@ -208,8 +218,7 @@ describe('the count refuses as soon as the budget cannot be met', () => {
     const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
     const src = stripComments(fs.readFileSync(`${root}/server/src/spaces/rdf-import-act.ts`, 'utf8').replaceAll('\r\n', '\n'));
     const pass = src.slice(src.indexOf('async function indexPass'), src.indexOf('function nodesOf'));
-    assert.match(pass, /new TripletSets\(meter\)/, 'the index pass builds its sets by hand or on a meter of their own: they grow with the file before any bound is looked at');
-    assert.match(pass, /new ImportIndex\(\{[^}]*meter/, 'the index and the sets do not share one meter');
+    assert.match(pass, /new TripletSets\(index\.meter\)/, 'the index pass builds its sets by hand or on a meter of their own: they grow with the file before any bound is looked at');
     assert.doesNotMatch(pass, /new DigestSet\(/);
   });
 });

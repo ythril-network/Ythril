@@ -860,6 +860,7 @@ MongoDB Atlas Local runs a `mongot` sidecar for vector search. This adds ~300 MB
 Its first boot restarts `mongod` once more after the replica set already has a primary, so the compose healthcheck runs the image's own `/usr/local/bin/runner healthcheck` before it asks for a primary: `docker compose up --wait` returns only after that restart. A healthcheck you write for your own deployment should begin the same way.
 On the bundled configuration the embedding model runs in a child process of the server, which counts against the `ythril` container's `mem_limit` (`YTHRIL_MEM_LIMIT`) and shares its cores;
 it sizes its threads to the container's CPU quota (`cpus:`, a pod's CPU limit), not the host's cores (640 ms per text against 54 ms on one CPU of sixteen): see [the inference process](05b-media-embedding.md#configuration).
+One RDF import may hold a quarter of the smaller of Node's heap limit and half the container's memory limit, so a small `mem_limit` gives a small import room; Node's heap limit stops following the container past 4 GiB, and a larger room then needs `--max-old-space-size` in `NODE_OPTIONS` ([the RDF import](06f-exports.md#rdf-import)).
 
 ### Upgrading
 

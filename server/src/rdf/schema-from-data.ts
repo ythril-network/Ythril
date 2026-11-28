@@ -22,7 +22,8 @@
  * - **An unbounded read.** The distinct predicates and the distinct classes of a file's subjects are counted while it is read and the file is
  *   refused past {@link SCHEMA_INFER_MAX_PREDICATES} and {@link SCHEMA_INFER_MAX_CLASSES}, and the pairs the second pass remembers for subjects
  *   stated by several graphs past {@link SCHEMA_INFER_MAX_PAIRS}, each at the statement that passes it; the map of subjects to their classes holds a 128-bit digest and a few class indices per subject, bounded
- *   by the door's own subject bound; every list the answer names is capped at {@link INFERRED_NAMED_MAX} and counted whole.
+ *   by the door's own subject bound (the subjects the import's memory room holds, `import-memory.ts`: it scales with the instance, and a subject
+ *   here costs less than its entry in the import's index); every list the answer names is capped at {@link INFERRED_NAMED_MAX} and counted whole.
  *
  * Two passes over the sorted spool, read again for each ({@link gatherClasses}, then {@link inferFromData}'s second pass), at the door.
  */
@@ -46,8 +47,9 @@ export const SCHEMA_INFER_MAX_PREDICATES = 1000;
 export const SCHEMA_INFER_MAX_CLASSES = 1000;
 /**
  * The most distinct (subject, predicate) pairs of subjects stated by several graphs the second pass remembers, so each is one subject of its
- * pair. The set holds a short string per pair (about 100 bytes with its entry), so the bound is about 100 MB at most; the import's own subject
- * bound (a million) is the number of subjects that can repeat, and a pair is at least one statement of one of them.
+ * pair. The set holds a short string per pair (about 100 bytes with its entry), so the bound is about 100 MB at most, a figure of its own: the
+ * subjects that can repeat are bounded by the import's memory room (`import-memory.ts`, which differs per instance), and a pair is at least one
+ * statement of one of them, so this bound is no multiple of any count of subjects.
  */
 export const SCHEMA_INFER_MAX_PAIRS = 1_000_000;
 /** The knob (and `bound` a refusal names) of each bound a schema inferred from data is refused at. */

@@ -79,6 +79,7 @@ const NOT_A_SETTING = new Map([
   ['MFA_REQUIRED', 'API error code'],
   ['MFA_INVALID', 'API error code'],
   ['MFA_LOCKED', 'API error code'],
+  ['RDF_IMPORT_MAX_MEMORY', 'the value of `bound` in the RDF import\'s 413 rdf_bound_exceeded body: a refusal name, derived from the instance\'s memory, not a setting'],
   ['MERKLE_DIVERGENCE', 'sync conflict code'],
   ['FILE_REPLACED', 'sync log code: a peer edit replaced an untouched local file'],
   ['REPARENT_REVERT_AVAILABLE', 'network notification code'],

@@ -98,7 +98,7 @@ describe('an RDF import inferring a schema is bounded and judged on both doors (
     const declared = ttl('ex:knows a owl:ObjectProperty .', 'ex:Person a owl:Class .', people(2, { extra: (i) => `ex:knows p:person${1 - i}` }));
     for (const [space, file, from] of [[id('20a'), declared, ['declared']], [id('20b'), TICKET_FILE, ['data']]]) {
       let registered = 0;
-      const r = await withKnobs({ memoryBytes: 300, hooks: { beforeRegister: () => { registered += 1; } } },
+      const r = await withKnobs({ bounds: { memoryBytes: 300 }, hooks: { beforeRegister: () => { registered += 1; } } },
         () => d.importRestOne(writer.key, space, file, { schema: 'generate', from }));
       assert.equal(r.status, 413, `${from}: ${r.text.slice(0, 400)}`);
       assert.equal(r.code, 'rdf_bound_exceeded');

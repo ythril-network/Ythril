@@ -43,6 +43,8 @@ import {
 import { FILE_MODE, mkdirPrivate } from '../util/fs-modes.js';
 import { isMissingPath } from '../util/path-present.js';
 import { renameOverSync } from '../util/rename-over.js';
+import { RdfImportBoundExceeded } from './import-bound.js';
+import { MINTED_ENTRY_BYTES, importMemoryRoom } from './import-memory.js';
 import type { BlankTerm, IriTerm, Quad, Term } from './literals.js';
 import { recordOfAddress, type AddressNames } from './term-reverse.js';
 
@@ -50,8 +52,6 @@ import { recordOfAddress, type AddressNames } from './term-reverse.js';
 
 /** The quads of one file: the parser's inflated cap (1 GiB) at about 100 bytes per N-Quads line. */
 export const RDF_IMPORT_MAX_QUADS = 10_000_000;
-/** The distinct subjects of one file: the index's record bound, so the index can never be refused after the door let a file in. */
-export const RDF_IMPORT_MAX_SUBJECTS = 1_000_000;
 /** The quads of one subject: room for a record's links of every kind (1 000 each), its tags (100) and its properties; a group is held whole. */
 export const RDF_IMPORT_MAX_SUBJECT_QUADS = 10_000;
 /** The characters of one subject's quads (every string they carry): a group is held whole in memory while it is translated. */
@@ -69,33 +69,24 @@ export const RDF_IMPORT_SORT_RUN_BYTES = 33_554_432;
 /** The runs one merge reads at once: one open file and one buffered line each. */
 export const SORT_FAN_IN = 32;
 
-/** The bounds of one pass over a file; `runBytes` bounds memory and refuses nothing. */
+/**
+ * The bounds of one pass over a file; `runBytes` bounds memory and refuses nothing. `memoryBytes` is the room one import's index and record sets
+ * have (`import-memory.ts`): the subjects the file may hold are what that room holds as minted entries of the index. It is the one bound with no
+ * default here, since a default frozen at load would be the first container's figure: {@link sortedSpool} asks for the room when it is not given.
+ */
 export interface ImportSpoolBounds {
-  maxQuads: number; maxSubjects: number; maxSubjectQuads: number; maxSubjectChars: number; maxSpoolBytes: number; runBytes: number;
+  maxQuads: number; memoryBytes: number; maxSubjectQuads: number; maxSubjectChars: number; maxSpoolBytes: number; runBytes: number;
 }
 
-export const DEFAULT_IMPORT_SPOOL_BOUNDS: Readonly<ImportSpoolBounds> = Object.freeze({
+export const DEFAULT_IMPORT_SPOOL_BOUNDS: Readonly<Omit<ImportSpoolBounds, 'memoryBytes'>> = Object.freeze({
   maxQuads: RDF_IMPORT_MAX_QUADS,
-  maxSubjects: RDF_IMPORT_MAX_SUBJECTS,
   maxSubjectQuads: RDF_IMPORT_MAX_SUBJECT_QUADS,
   maxSubjectChars: RDF_IMPORT_MAX_SUBJECT_CHARS,
   maxSpoolBytes: RDF_IMPORT_MAX_SPOOL_BYTES,
   runBytes: RDF_IMPORT_SORT_RUN_BYTES,
 });
 
-/** The name of a bound an import refuses at: the constant's own name. */
-export type ImportBoundName =
-  | 'RDF_IMPORT_MAX_QUADS' | 'RDF_IMPORT_MAX_SUBJECTS' | 'RDF_IMPORT_MAX_SUBJECT_QUADS' | 'RDF_IMPORT_MAX_SUBJECT_CHARS'
-  | 'RDF_IMPORT_MAX_SPOOL_BYTES' | 'RDF_IMPORT_MAX_RECORDS';
-
-/** A file, or the import's index, over a named bound: the door's 413. */
-export class RdfImportBoundExceeded extends Error {
-  readonly code = 'rdf_bound_exceeded' as const;
-  constructor(readonly bound: ImportBoundName, readonly limit: number) {
-    super(`The file is over the import's bound ${bound} (${limit}); nothing was imported.`);
-    this.name = 'RdfImportBoundExceeded';
-  }
-}
+export { RdfImportBoundExceeded, type ImportBoundName } from './import-bound.js';
 
 // ── The folder ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -330,6 +321,8 @@ export interface SortedSpool {
   readonly quads: number;
   readonly subjects: number;
   readonly largestSubjectQuads: number;
+  /** The room the pass held its subject bound to: what the door's count and a second pass over the same file are held to as well (one figure per import). */
+  readonly memoryBytes: number;
   /** The sorted file's name in the folder: what an act that was handed the folder reads its groups back with ({@link reopenSortedGroups}). */
   readonly file: string;
   /** The groups in key order; may be read any number of times. */
@@ -348,7 +341,10 @@ export interface SortedSpoolOptions {
  * and removes every file it wrote, as it does when the reader throws (with the reader's own error).
  */
 export async function sortedSpool(quads: AsyncIterable<Quad>, folder: ImportFolder, options: SortedSpoolOptions): Promise<SortedSpool> {
-  const bounds: ImportSpoolBounds = { ...DEFAULT_IMPORT_SPOOL_BOUNDS, ...options.bounds };
+  // The room is asked now, once per pass, never kept from when the module loaded; a caller that holds the import's room hands it in.
+  const bounds: ImportSpoolBounds = { ...DEFAULT_IMPORT_SPOOL_BOUNDS, memoryBytes: importMemoryRoom().bytes, ...options.bounds };
+  /** The subjects the room holds as minted entries of the index: each subject is at least that, so a file past it cannot fit. */
+  const maxSubjects = Math.floor(bounds.memoryBytes / MINTED_ENTRY_BYTES);
   const { names } = options;
   const nonce = crypto.randomBytes(6).toString('hex');
   const created = new Set<string>();
@@ -445,7 +441,7 @@ export async function sortedSpool(quads: AsyncIterable<Quad>, folder: ImportFold
     await merge(runs, writer, (entry) => {
       if (!prev || compare(prev, entry) !== 0) {
         subjects += 1;
-        if (subjects > bounds.maxSubjects) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_SUBJECTS', bounds.maxSubjects);
+        if (subjects > maxSubjects) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_MEMORY', bounds.memoryBytes, subjects * MINTED_ENTRY_BYTES);
         groupQuads = 0;
         groupChars = 0;
       }
@@ -458,7 +454,7 @@ export async function sortedSpool(quads: AsyncIterable<Quad>, folder: ImportFold
     });
     await finish(writer);
     for (const input of runs) await drop(input);
-    return { quads: total, subjects, largestSubjectQuads: largest, file: sorted, groups: () => groupsOf(folder, sorted) };
+    return { quads: total, subjects, largestSubjectQuads: largest, memoryBytes: bounds.memoryBytes, file: sorted, groups: () => groupsOf(folder, sorted) };
   } catch (err) {
     for (const writer of open) await writer.abort();
     for (const name of [...created]) await drop(name);
