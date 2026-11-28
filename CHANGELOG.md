@@ -29,11 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | No 200-type limit per kind: a schema that grows at the storage hard limit is refused `507`, one over 10 MiB `413`; a single-type write over the rule limits `400` | Keep a schema within storage and the rule limits |
 | The audit row of a call a guard refused names the token it refused; it was empty | None; read `tokenId` on `403` and `429` rows |
 | An edit other writes outran three times answers `409 write_race_lost`, not `404`; so does an upload (it was `500`), its bytes stored | Retry it |
-| On an instance with MFA on, `POST /api/brain/spaces/:spaceId/reindex` with a personal token and no `X-TOTP-Code` is refused `403 MFA_REQUIRED`, as reembed is | Send the code from scripts and integrations that reindex; the web app asks for it |
+| A REST reindex with a personal token and MFA on asks `X-TOTP-Code` (`403 MFA_REQUIRED`) | Send the code from scripts |
 
 ### Added
 
-- **Operations:** new metrics `ythril_embed_jobs{lane,status}`, the embed jobs waiting, running and failed in the `write`, `background` and `rebuild` lanes, and `ythril_embed_job_claim_age_seconds{lane}`, how long a job waited before its first claim. Together they show whether writes wait behind a reindex. The gauge is absent for a scrape in which a space could not be read.
+- **Operations:** `ythril_embed_jobs{lane,status}` and `ythril_embed_job_claim_age_seconds{lane}` show whether writes wait behind a reindex.
 - **Operations:** every answer carries `Server-Timing` per phase, one refused before routing (a body that is not JSON, one over the size limit) too; MCP tool results carry it in `_meta` under `ythril/server-timing`.
 - **Operations:** new metrics `ythril_cache_lookups_total{cache,result}` and `ythril_cache_entries{cache}` count the lookups and entries of the recall query-vector, SPARQL planning-count and RDF schema caches.
 - **Operations:** `ythril_write_group_aborts_total{reason}` counts SPARQL Update write groups that landed nothing; a delete still referenced is refused whole (`referenced`).
@@ -185,19 +185,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tooling:** `machine:free -Wipe` asks every refusal of the wipe (data guard, pending record, free space, registries) before it removes the test stack or prunes; the workstation guide names what the guard cannot see.
 - **Docs:** fixed: the integration guide's examples of the storage-limit and incomplete space-delete errors quote the messages the server sends.
 - **Docs:** fixed: the integration guide names every parameter and answer field the probes found missing, among them `skipTlsVerify`, `merkle`, `superseded`, `mediaCeilings` and `temporary`.
-- **Docs:** changed: the contribution guide is replaced by a short dev guide (setup, building, tests); the README says Ythril takes no outside code and welcomes issues; Settings → Help lists the dev guide.
+- **Docs:** changed: the contribution guide is replaced by a short dev guide; the README says Ythril takes no outside code and welcomes issues; Settings → Help lists the dev guide.
 - **Docs:** changed: the upgrading guide names the removal of records whose file bytes are gone, its timings and holds, and putting lost bytes back before upgrading.
-- **Docs:** added: the integration guide's Converting Records page (the steps, what a run does to a record, the Convert act, the unconverted list, the network case) and the upgrading note for members below 6.6.0.
+- **Docs:** added: the integration guide's Converting Records page and the upgrading note for members below 6.6.0.
 - **Build:** the build stops with one line naming the package and `run npm ci` when the install differs from package-lock.json or lacks a package the build needs, instead of failing with misleading type errors.
-- **Build:** the OIDC settings types live in a file of their own, which brings the settings file back under its size limit; no behaviour changes.
 - **Repository:** the contributor licence agreement, its signing workflow and the pull-request template are removed, and a standalone test fails if a guide, agreement or template for outside code returns.
-- **RDF:** no user-facing effect yet: the server reads an address the export writes back to its record or term, for the import that follows; it accepts exactly the spellings the export writes and nothing else.
-- **Media:** a media job's `ffmpeg` uses at most as many decoder and filter threads as the container has CPUs, and never more than 16; in a CPU-limited container it no longer starts one thread per host core and starves the instance's other work.
-- **Media:** an audio file, and a video's soundtrack, is decoded once before it is cut into segments, not twice. A file whose container states no length is cut over the length its decode reached, not one guessed from its size, so compressed audio keeps its tail. A file `ffmpeg` cannot decode fails its job's attempt instead of completing as one guessed segment.
+- **Media:** `ffmpeg` uses at most the container's CPUs (16 threads) and decodes audio once; a file it cannot decode fails its attempt instead of completing as one guessed segment.
 
 ### Fixed
 
-- **Media:** an image's caption, written as the description of a file that had none, is findable by meaning: the file is queued for embedding again when the caption lands. It used to wait for a reindex. A file whose re-queue fails says so once in the log, naming the file; `POST /api/spaces/:id/reembed` repairs it.
 - **Recall:** a recall that fails or finds nothing to rank no longer leaves its text search running, and the text search ends at the recall's own `maxTimeMS`.
 - **Audit:** a request to a brain route of a space called `files`, `facts`, `entities`, `edges` or `chrono` was recorded under another route's operation (the records export of such a space left no entry with read logging off); the audit rules read the one path form the server serves.
 - **Brain:** a `$ref:` key in a bulk item's link field is refused saying a key is resolved only at an edge's `from` or `to`: save the record first and pass its id, or connect the records by an edge. `save_bulk` and the guides no longer say a link field takes a key.
@@ -216,8 +212,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spaces:** `update_space` refused for a face width the space's stored descriptors rule out answers 409 and `Error: <sentence>` on MCP and `POST /api/update_space`, as `PATCH /api/spaces/:id` does; it read `Error: Error (409): …` with status 400.
 - **Spaces:** a refused rename leaves the space whole; of a create and a rename to one id, the second gets `409`.
 - **Housekeeping:** a space set aside after a slow answer is checked again after its pause, even while it builds its positions; before, nothing checked it until a restart.
-- **Media:** a file whose run was cut short by, or met throughout, an unavailable embedder waits without spending an attempt, and no file is started until a probe finds the embedder back; counted by `ythril_media_jobs_handed_back_total` and `ythril_media_embedder_probes_total`.
+- **Media:** a file whose run met an unavailable embedder waits without spending an attempt, and no file starts until a probe finds it back; counted by `ythril_media_jobs_handed_back_total` and `ythril_media_embedder_probes_total`.
 - **Media:** a file whose analysis becomes due at the moment the queue is looking is picked up at once. Before, a replaced or retried file could wait up to 30 seconds for the queue's next full look, and an embedding job the same way.
+- **Media:** an image's caption written as a file's description is findable by meaning without a reindex.
 - **Embeddings:** an embed job whose call could not reach its HTTP endpoint keeps its attempts and waits with back-off, and the worker pauses until the embedder answers; `ythril_embed_jobs_handed_back_total` counts each hand-back.
 - **Embeddings:** an embed job's fate is decided by the failure's class and its HTTP status, not by words in an embedder's error body; statuses 408, 429, 502 to 504, 520 to 524, 529 and 530 wait.
 - **Embeddings:** a reindex whose embed fails keeps a record's stored vector while its job is tried again and the text is unchanged, and drops it on the last try, a 413 or a changed text.
@@ -232,14 +229,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database:** a transaction the write bound ends after it retried a write conflict always keeps that conflict as the timeout's cause; before, it was lost when the bound ended an attempt instead of the pause between two.
 - **Database:** a transaction the database ends at the write bound's deadline, or a moment before Ythril's clock reads it (a write or a single-document read), answers the bound's timeout, not the database's raw time-limit error.
 - **Workstation:** `npm run local-connector:dev` builds the schema package it imports first and starts the local connector from a fresh clone, as the guide says.
-- **Testing:** the source-hygiene gates read the schema package's source with the server's, and the standalone runner refuses a schema build older than its source or missing.
 - **Sync:** a member that joins a club, closed or democratic network holds each joined space with the network's types and validation mode as that network's layer; one without them, or with only a passed vote's changed fields, takes them from its admitter on its next cycle.
 - **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`, and the sender offers it again an hour later.
 - **Sync:** a sync run queued behind a running one for a network that is deleted before it starts ends with one info line; it used to end as an unhandled rejection.
 
 ### Security
 
-- **Embedding:** a reindex asks what a reembed asks, on both doors: `POST /api/brain/spaces/:spaceId/reindex` asks the second factor of a personal token on an instance with MFA on, and MCP `space_reindex` is open to a token with `knowledge: admin` on the space, not only to an instance admin. A peer-bound token is refused a reindex or a reembed of a space that is held.
+- **Embedding:** reindex asks what reembed asks: MFA on REST, `knowledge: admin` on MCP (was instance admin); a held space refuses peer tokens.
 - **Networks:** on a pub/sub network only the publisher's cast decides a round: a subscriber's yes or veto counts nothing, and the publisher adopts and passes only rounds it opened. Every 6.5.x let one subscriber change the network's schema for every member.
 - **Networks:** a pub/sub subscriber's schema edit lands in its own definitions, opens no round and never reaches the publisher; the publisher's schema outranks it.
 - **Networks:** a join or removal round on a club or pub/sub network, and a space addition on a pub/sub one, is never adopted and never passes. A club round passes on its proposer's yes: any member's yes passes that member's own round.
