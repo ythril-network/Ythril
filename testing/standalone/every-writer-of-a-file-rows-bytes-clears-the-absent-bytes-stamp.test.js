@@ -41,7 +41,7 @@ const NAMES_REASON = /\bRETIRED_BY\b/;
 
 /** Writers of a bytes field that put no bytes at a path, each with why. */
 const EXEMPT = new Map([
-  ['server/src/sync/file-sync.ts:recordSyncBase', 'writes `syncBase.<peer>`, the hash this instance and a peer last agreed on: a fact about the agreement, written after a pull whose own record write cleared the stamp'],
+  ['server/src/sync/file-agreement.ts:recordSyncBase', 'writes `syncBase.<peer>`, the hash this instance and a peer last agreed on: a fact about the agreement, written after a pull or an accepted push whose own record write cleared the stamp (moved from sync/file-sync.ts in bundle-47)'],
 ]);
 
 const writers = () => [...INDEX.bodies].filter(([key, { body }]) => key.startsWith('server/src/') && WRITES.test(body) && FILES.test(body) && BYTES.test(body));

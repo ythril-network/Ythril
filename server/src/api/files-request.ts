@@ -15,6 +15,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getConfig } from '../config/loader.js';
 import { writeSpaceOf } from './write-target-answer.js';
+import { refusePeerFileDoor } from './sync/_shared.js';
 
 /** Extract token identification from the request for webhook payloads. */
 export function webhookToken(req: Request): { tokenId?: string; tokenLabel?: string } {
@@ -72,6 +73,18 @@ export function requireWritePath(req: Request, res: Response): WritePath | null 
   if (target === null) return null;
   const p = requireQueryPath(req, res);
   return p === null ? null : { ...target, path: p };
+}
+
+/**
+ * The file door's peer guard as a middleware (Q-244): a peer token reaches only a space a network shared with that peer carries, and for
+ * `write` only where the network lets it push here (`refusePeerFileDoor`, the sync doors' own checks). A token bound to no peer passes.
+ * Placed after the auth guard, so `req.authToken` is set; a space this peer cannot reach is answered `403` before the handler looks it up.
+ */
+export function peerFileDoor(act: 'read' | 'write') {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (refusePeerFileDoor(res, String(req.params['spaceId'] ?? ''), req.authToken, act)) return;
+    next();
+  };
 }
 
 /**
