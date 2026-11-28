@@ -228,6 +228,9 @@ export const RightsMatrix = z.object({
  * A permissive body schema is a silent failure anywhere. On the endpoint that mints CREDENTIALS it hands out
  * access nobody intended and reports success while doing it.
  */
+/** The answer to a peer binding asked by anyone but an instance administrator (Q-243): authenticated, not permitted. */
+const PEER_BINDING_REFUSED_STATUS = 403;
+
 export const CreateTokenBody = z.object({
   name: z.string().min(1).max(200),
   expiresAt: z.string().datetime().nullish(),
@@ -361,7 +364,7 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
   // instance's credential for P there) and casts P's unsigned votes. Only an instance administrator, who holds the whole configuration
   // anyway, binds one here; the invite and join handshakes bind theirs without this route (Q-243). The bound peer is audited below.
   if (peerInstanceId !== undefined && !isInstanceAdmin(req.authToken as Parameters<typeof isInstanceAdmin>[0])) {
-    res.status(403).json({ error: 'Only an instance administrator can bind a token to a peer (peerInstanceId); a network join binds its own.' });
+    res.status(PEER_BINDING_REFUSED_STATUS).json({ error: 'Only an instance administrator can bind a token to a peer (peerInstanceId); a network join binds its own.' });
     return;
   }
 

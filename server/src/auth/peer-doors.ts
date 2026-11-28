@@ -7,7 +7,7 @@
  * pushes. Read by the rest of the API as an ordinary token, those rights let a pub/sub subscriber write its publisher's records and
  * files, a braintree child write its parent, and a peer that left one of two shared networks keep reading the space it left, through
  * any route or tool its matrix reached. Every guard resolves its token through one function (`resolveAuthTimed`), which asks this one
- * and answers `403 { code: 'peer_door' }` everywhere else, so a route added later is closed to peers by default rather than open.
+ * and answers the refusal below ({@link PEER_DOOR_STATUS}, {@link PEER_DOOR_CODE}) everywhere else, so a route added later is closed to peers by default rather than open.
  *
  * ## The doors, and where they come from
  *
@@ -39,6 +39,9 @@ export function peerDoorAdmits(method: string, path: string): boolean {
 
 /** The refusal's code, for a client that branches on it. */
 export const PEER_DOOR_CODE = 'peer_door';
+
+/** The refusal's status: the token is authenticated and not permitted here (RFC 9110 15.5.4). */
+export const PEER_DOOR_STATUS = 403;
 
 /** The refusal's words: what the token is for, and what to use instead. */
 export const PEER_DOOR_MESSAGE = 'This token is bound to a peer (a sync credential) and reaches only the sync doors: '

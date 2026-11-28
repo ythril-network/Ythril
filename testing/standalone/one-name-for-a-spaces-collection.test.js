@@ -153,6 +153,7 @@ describe('and nothing builds one by hand any more', () => {
     ['files_faceEmbedding', 'the face gallery vector index'],
     ['_swap', "the stand-in NAME a vector index definition is swapped in under (spaces/vector-index.ts `swapNameFor`), appended to an index name, not a collection"],
     ['GIB', 'the tail of a STORAGE_<area>_<tier>_GIB env var name, built the same way and not a collection'],
+    ['rung', "the tail of a refusal code `<area>_rung` (api/sync/_shared.ts `refuseSyncRung`, bundle-47): the prefix is a rights area, never a space id, and the result is a wire code, not a collection"],
     ['present', "the tail of the retired partial index name `${SCHEMA_FINGERPRINT_FIELD}_present` (spaces/schema-snapshot-carried.ts, REPLACED_STAMP_INDEX): the prefix is the stamp field's name, never a space id, and the result names an index, not a collection"],
     ['type_present', "the tail of the stamp index name `${SCHEMA_FINGERPRINT_FIELD}_type_present` (spaces/schema-snapshot-carried.ts, STAMP_INDEX, bundle-267): the prefix is the stamp field's name, never a space id, and the result names an index, not a collection"],
     ['abandoned', "the state an act-set report gives a space whose act was abandoned (`${kind}_abandoned` in spaces/act-set-report.ts): the prefix is an act KIND, restore or migrate, never a space id, and the result names no collection"],

@@ -32,7 +32,7 @@ import { createSpacesRefusal } from './create-spaces.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { admitPeerOnResponse } from '../sync/peer-space-admission.js';
 import { peerBoundTo } from './peer-bound.js';
-import { peerDoorAdmits, PEER_DOOR_CODE, PEER_DOOR_MESSAGE } from './peer-doors.js';
+import { peerDoorAdmits, PEER_DOOR_CODE, PEER_DOOR_MESSAGE, PEER_DOOR_STATUS } from './peer-doors.js';
 import { decorateJsonAnswer } from '../api/decorate-json-answer.js';
 import { timePhase } from '../http/phase-timer.js';
 
@@ -238,7 +238,7 @@ async function resolveAuthTimed(
   // A peer-bound token is a sync credential: refused here, on every route and tool but the sync doors, so a route added later is closed to
   // peers by default (bundle-47, Q-244; `peerDoorAdmits` names the doors and why).
   if (peerBoundTo(record) !== undefined && !peerDoorAdmits(req.method, pathOf(req))) {
-    res.status(403).json({ error: PEER_DOOR_MESSAGE, code: PEER_DOOR_CODE });
+    res.status(PEER_DOOR_STATUS).json({ error: PEER_DOOR_MESSAGE, code: PEER_DOOR_CODE });
     return null;
   }
   return { record, bearer };
@@ -590,7 +590,7 @@ export async function acceptSchemaLibraryToken(
 
   // A peer token is refused as on every other door that is not a sync door (Q-244), with the same code.
   if (peerBoundTo(record) !== undefined) {
-    res.status(403).json({ error: PEER_DOOR_MESSAGE, code: PEER_DOOR_CODE });
+    res.status(PEER_DOOR_STATUS).json({ error: PEER_DOOR_MESSAGE, code: PEER_DOOR_CODE });
     return;
   }
   if (!('schemaLibrary' in record) || !record.schemaLibrary) {
