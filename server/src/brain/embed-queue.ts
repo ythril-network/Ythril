@@ -47,6 +47,7 @@ import { isSpillPath } from './spill-path.js';
 import { classifyEmbedFailure, embedFailureMessage, type EmbedVerdict } from './embed-errors.js';
 import { embedJobsFailedTotal, type EmbedJobFailedReason } from '../metrics/embed-job-failed-count.js';
 import { embedJobsHandedBackTotal } from '../metrics/embed-job-handed-back-count.js';
+import { embedClaimAge, embedLaneOf, EMBED_LANE_NAMES, type EmbedLaneName } from '../metrics/embed-claim-age.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
@@ -235,9 +236,13 @@ function releasedClaim(now: string) {
   };
 }
 
-/** A clean attempt budget: what a retry, a revive and new content each grant. */
-function freshBudget() {
-  return { attempts: 0, transientFailures: 0, lostChildFailures: 0 };
+/**
+ * A clean attempt budget: what a retry, a revive and new content each grant. `queuedAt` is when it was granted: the claim-age histogram
+ * times a job's first claim from it (Q-182), so a revived or rewritten job reports its wait since then, never its whole life (`createdAt`
+ * is set on insert only, and keeps the job's place in the claim order).
+ */
+function freshBudget(now: string) {
+  return { attempts: 0, transientFailures: 0, lostChildFailures: 0, queuedAt: now };
 }
 
 /** A job as it is when nothing has happened to it yet — the one place both enqueue paths take its fields from. */
@@ -245,7 +250,7 @@ function freshJob(spaceId: string, recordType: BrainEmbedRecordType, recordId: s
   return {
     spaceId, recordType, recordId,
     ...releasedClaim(now),
-    ...freshBudget(),
+    ...freshBudget(now),
     maxAttempts: MAX_EMBED_ATTEMPTS,
     lastError: null,
   };
@@ -373,7 +378,7 @@ function sweepJobOps(
       // what it died of last time.
       updateOne: {
         filter: { _id, status: 'failed' },
-        update: { $set: { ...releasedClaim(now), ...freshBudget() } },
+        update: { $set: { ...releasedClaim(now), ...freshBudget(now) } },
       },
     },
     {
@@ -417,7 +422,7 @@ function writeJobOps(
 export async function claimNextEmbedJob(spaceIds: string[]): Promise<BrainEmbedJobDoc | null> {
   const now = new Date().toISOString();
   const passes = claimOrder(claimCount++).flatMap(priority => [false, true].map(due => ({ priority, due })));
-  return _signal.claimAcross(spaceIds, passes, async (spaceId, { priority, due }) =>
+  const job = await _signal.claimAcross(spaceIds, passes, async (spaceId, { priority, due }) =>
     await jobs(spaceId).findOneAndUpdate(
       asFilter<BrainEmbedJobDoc>({
         status: 'pending',
@@ -434,6 +439,26 @@ export async function claimNextEmbedJob(spaceIds: string[]): Promise<BrainEmbedJ
       { returnDocument: 'after', sort: { createdAt: 1 } },
     ) as BrainEmbedJobDoc | null,
   { step: CLAIM_STEP });
+  if (job) observeFirstClaim(job, now);
+  return job;
+}
+
+/**
+ * Observe `ythril_embed_job_claim_age_seconds{lane}` for a claim that is the FIRST since the job's budget was granted (Q-182): `attempts`
+ * is 1 and neither an outage nor a lost inference process handed an attempt back (a hand-back gives the attempt back, so the next claim
+ * reads 1 again and would be counted once per retry). Timed from `queuedAt`; a job queued before that field existed is not observed, and
+ * an age that is not a finite number of seconds at or above zero (a clock stepped back) is skipped. The job is already `processing`, so
+ * nothing here may throw into the claim: a throw would strand the job until the stall sweep.
+ */
+function observeFirstClaim(job: BrainEmbedJobDoc, claimedAt: string): void {
+  try {
+    if (job.attempts !== 1 || (job.transientFailures ?? 0) !== 0 || (job.lostChildFailures ?? 0) !== 0 || !job.queuedAt) return;
+    const seconds = (Date.parse(claimedAt) - Date.parse(job.queuedAt)) / 1000;
+    if (!Number.isFinite(seconds) || seconds < 0) return;
+    embedClaimAge.observe(embedLaneOf(job.priority), seconds);
+  } catch (err) {
+    log.debug(`embed queue: the claim age of ${peerText(job._id)} was not observed: ${peerText(err)}`);
+  }
 }
 
 /**
@@ -738,10 +763,11 @@ export async function reviveFailedEmbedJobs(
   // The walk's default bound (`housekeepingOpMs()`), not the claim's: this is an `updateMany` over every failed job of a space,
   // which is as long as the outage that failed them was. One space's failure is isolated, and a hung one quarantined.
   const walked = await eachSpace(REVIVE_STEP, spaceIds, async (spaceId) => {
+    const now = new Date().toISOString();
     const res = await jobs(spaceId).updateMany(
       asFilter<BrainEmbedJobDoc>({ status: 'failed', revivedForVersion: { $ne: version } as unknown as string }),
       asUpdate<BrainEmbedJobDoc>({
-        $set: { ...releasedClaim(new Date().toISOString()), ...freshBudget(), revivedForVersion: version },
+        $set: { ...releasedClaim(now), ...freshBudget(now), revivedForVersion: version },
       }),
     );
     if (res.modifiedCount > 0) {
@@ -792,16 +818,39 @@ export async function resetStalledEmbedJobs(spaceIds: string[], timeoutMs: numbe
 export async function getEmbedJobCounts(
   spaceId: string,
   only: { rebuild?: true } = {},
-): Promise<{ pending: number; processing: number; failed: number }> {
+): Promise<EmbedJobCounts> {
+  const byLane = await countEmbedJobsByLane(spaceId, only);
+  const out = { pending: 0, processing: 0, failed: 0 };
+  for (const lane of EMBED_LANE_NAMES) for (const status of EMBED_JOB_STATUSES) out[status] += byLane[lane][status];
+  return out;
+}
+
+/** A space's embed jobs by status. */
+export type EmbedJobCounts = { pending: number; processing: number; failed: number };
+/** The statuses a job stands in, as a value. */
+export const EMBED_JOB_STATUSES = ['pending', 'processing', 'failed'] as const;
+
+/**
+ * Per-lane, per-status counts for one space: THE one aggregation of the queue's size (Q-182). `getEmbedJobCounts` sums it (space meta,
+ * the jobs page, a reindex's progress), and the `ythril_embed_jobs{lane,status}` gauge reads it per space, so every surface counts one way.
+ *
+ * A job with no priority, or one outside the lanes, counts as `write`, the lane the claim takes it in (`embedLaneOf`). A missing collection
+ * reports all-zero. One aggregation, so the numbers describe one instant. `only.rebuild` counts a reindex's jobs only.
+ */
+export async function countEmbedJobsByLane(
+  spaceId: string,
+  only: { rebuild?: true } = {},
+): Promise<Record<EmbedLaneName, EmbedJobCounts>> {
   const rows = await jobs(spaceId)
     .aggregate([
       ...(only.rebuild ? [{ $match: { rebuild: true } }] : []),
-      { $group: { _id: '$status', n: { $sum: 1 } } },
+      { $group: { _id: { status: '$status', priority: '$priority' }, n: { $sum: 1 } } },
     ])
-    .toArray() as Array<{ _id: string; n: number }>;
-  const out = { pending: 0, processing: 0, failed: 0 };
+    .toArray() as Array<{ _id: { status?: unknown; priority?: unknown }; n: number }>;
+  const out = Object.fromEntries(EMBED_LANE_NAMES.map(lane => [lane, { pending: 0, processing: 0, failed: 0 }])) as Record<EmbedLaneName, EmbedJobCounts>;
   for (const r of rows) {
-    if (r._id === 'pending' || r._id === 'processing' || r._id === 'failed') out[r._id] = r.n;
+    const status = r._id.status;
+    if (status === 'pending' || status === 'processing' || status === 'failed') out[embedLaneOf(r._id.priority)][status] += r.n;
   }
   return out;
 }
@@ -882,7 +931,7 @@ export async function retryEmbedJob(
   await jobs(spaceId).updateOne(
     asFilter<BrainEmbedJobDoc>({ _id }),
     asUpdate<BrainEmbedJobDoc>({
-      $set: { ...releasedClaim(now), ...freshBudget(), lastError: null },
+      $set: { ...releasedClaim(now), ...freshBudget(now), lastError: null },
     }),
   );
   // A retry is only useful if something picks it up; without this the job sits pending until the next poll.

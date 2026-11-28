@@ -26,6 +26,7 @@ import { setBrainWriteSink } from './brain-write-count.js';
 import { setVersionRaiseSink, VERSION_RAISE_REASONS } from './version-raise-count.js';
 import { setConfigFlushFailureSink } from './config-flush-count.js';
 import { declareEmbedJobMetrics } from './embed-job-metrics.js';
+import { countEmbedJobsByLane } from '../brain/embed-queue.js';
 import { setScanHoldSink, SCAN_HOLD_SCANNERS } from './scan-hold-count.js';
 import { declareCacheMetrics } from './cache-metrics.js';
 import { setSchemaSnapshotSink, SCHEMA_SNAPSHOT_OUTCOMES } from './schema-snapshot-count.js';
@@ -101,7 +102,7 @@ const collectDuration = new Histogram({
  */
 export const TIMED_COLLECTORS = [
   'facts_total', 'entities_total', 'edges_total', 'chrono_entries_total', 'storage_used_bytes',
-  'media_jobs_pending', 'media_jobs_processing', 'media_jobs_failed', 'media_job_phase', 'webhooks_failing', 'unresolved_forks',
+  'media_jobs_pending', 'media_jobs_processing', 'media_jobs_failed', 'media_job_phase', 'webhooks_failing', 'unresolved_forks', 'embed_jobs',
 ] as const;
 
 /**
@@ -1937,8 +1938,11 @@ export const embedChunksTotal = new Counter({
 });
 embedChunksTotal.labels({ space: '' }).inc(0);
 
-/** The embed queue's two job counters, `ythril_embed_jobs_failed_total{reason}` and `ythril_embed_jobs_handed_back_total`, declared by `metrics/embed-job-metrics.ts`. */
-export const { embedJobsFailedCounter, embedJobsHandedBackCounter } = declareEmbedJobMetrics(register);
+/**
+ * The embed queue's metrics, declared by `metrics/embed-job-metrics.ts`: `ythril_embed_jobs_failed_total{reason}`, `ythril_embed_jobs_handed_back_total`,
+ * `ythril_embed_jobs{lane,status}` (read per space through this file's budget and walk) and `ythril_embed_job_claim_age_seconds{lane}`.
+ */
+export const { embedJobsFailedCounter, embedJobsHandedBackCounter } = declareEmbedJobMetrics(register, { withCollectBudget, collectEachSpace, countByLane: countEmbedJobsByLane });
 
 /**
  * What became of a schema snapshot (`spaces/schema-snapshot-store.ts`, `sync/schema-snapshot-fetch.ts`, counted through
