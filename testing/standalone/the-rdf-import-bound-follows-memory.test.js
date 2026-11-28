@@ -158,7 +158,8 @@ describe('the door charges as the index will', () => {
     const reifying = { key: reifier.value, subject: reifier, quads: [{ subject: reifier, predicate: REIFIES, object: { kind: 'triple', subject: named.subject, predicate: named.predicate, object: named.object } }] };
     const groups = asGroups([edge, groupOf(1, 2), groupOf(2, 2), reifying]);
     const need = 4 * MINTED_ENTRY_BYTES + 7 * SET_ENTRY_BYTES + 5 * MINTED_ENTRY_BYTES;
-    assert.equal((await assertRecordsWithinBound(groups(), () => names, need)).need, need);
+    // The first phase's figure: a file with a reified edge shares the dry plan's read set, whose edges the second phase charges beside the ends (`import-edge-plan.ts`).
+    assert.equal((await assertRecordsWithinBound(groups(), () => names, Number.MAX_SAFE_INTEGER)).first, need);
     await assert.rejects(assertRecordsWithinBound(groups(), () => names, need - 1), (err) => err?.bound === 'RDF_IMPORT_MAX_MEMORY', 'the figure changed: 4 subjects, 7 set entries and 5 bare edges');
   });
 
@@ -175,7 +176,8 @@ describe('the door charges as the index will', () => {
     });
     const groups = asGroups([edges, ...reifiers]);
     const need = (1 + STATEMENTS) * MINTED_ENTRY_BYTES + 2 * STATEMENTS * SET_ENTRY_BYTES;
-    assert.equal((await assertRecordsWithinBound(groups(), () => names, need)).need, need);
+    // The first phase's figure: a file with a reified edge shares the dry plan's read set, whose edges the second phase charges beside the ends (`import-edge-plan.ts`).
+    assert.equal((await assertRecordsWithinBound(groups(), () => names, Number.MAX_SAFE_INTEGER)).first, need);
     await assert.rejects(assertRecordsWithinBound(groups(), () => names, need - 1), (err) => err?.bound === 'RDF_IMPORT_MAX_MEMORY');
   });
 });

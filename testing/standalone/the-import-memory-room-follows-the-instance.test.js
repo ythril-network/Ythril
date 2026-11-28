@@ -63,6 +63,25 @@ describe('the room one import has follows the instance', () => {
     });
   }
 
+  // A process is held by its own cgroup's limit and by every parent's (a Kubernetes pod, `--cgroupns=host`, a systemd `MemoryMax`): the smallest on the path binds.
+  const SELF = '/proc/self/cgroup';
+  const nested = [
+    ['cgroup v2 nested: a parent\'s smaller limit binds', { [SELF]: '0::/kubepods/pod1/ctr\n', [V2]: 'max', '/sys/fs/cgroup/kubepods/memory.max': `${GiB}`, '/sys/fs/cgroup/kubepods/pod1/memory.max': `${4 * GiB}`, '/sys/fs/cgroup/kubepods/pod1/ctr/memory.max': 'max' }, GiB],
+    ['cgroup v2 nested: the leaf\'s own smaller limit binds', { [SELF]: '0::/a/b\n', '/sys/fs/cgroup/a/memory.max': `${8 * GiB}`, '/sys/fs/cgroup/a/b/memory.max': `${2 * GiB}` }, 2 * GiB],
+    ['cgroup v2 nested: the root\'s limit binds when the path holds none', { [SELF]: '0::/a/b\n', [V2]: `${GiB}` }, GiB],
+    ['cgroup v1 nested: a parent\'s smaller limit binds', { [SELF]: '4:cpu,memory:/docker/abc\n3:cpuset:/\n', '/sys/fs/cgroup/memory/docker/memory.limit_in_bytes': `${GiB}`, '/sys/fs/cgroup/memory/docker/abc/memory.limit_in_bytes': V1_NO_LIMIT }, GiB],
+    ['a path with dot segments is walked only by its names', { [SELF]: '0::/a/../b\n', '/sys/fs/cgroup/a/memory.max': `${GiB}`, '/sys/fs/cgroup/b/memory.max': `${2 * GiB}` }, GiB],
+    ['a cgroup file that names no path or no controllers is no limit', { [SELF]: 'garbage\n\n0::\n' }, null],
+  ];
+  for (const [what, files, container] of nested) {
+    it(`${what}: ${container === null ? 'no container limit' : `${container} bytes`}`, async () => {
+      const { importMemoryRoom } = await memory();
+      const answer = importMemoryRoom({ heapLimitBytes: HEAP, readFile: filesystem(files) });
+      assert.equal(answer.containerLimitBytes, container);
+      assert.equal(answer.bytes, Math.floor((container === null ? HEAP : Math.min(HEAP, container / HALF)) / QUARTER));
+    });
+  }
+
   it('never throws: a reader that throws something that is no error is the heap limit alone', async () => {
     const { importMemoryRoom } = await memory();
     const answer = importMemoryRoom({ heapLimitBytes: HEAP, readFile: () => { throw 'not an Error'; } });

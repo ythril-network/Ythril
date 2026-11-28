@@ -176,7 +176,8 @@ describe('the inference\'s subject maps are charged what they cost on the heap',
     assert.ok(at > 0, 'the door no longer starts the inference here: update this gate');
     const before = door.slice(0, at);
     assert.match(before, /assertInferenceFits\(/, 'the door starts reading statements for an inference before it asked whether the subjects fit');
-    assert.match(before, /inferencePairsRoom\(/, 'the pairs the inference remembers are not capped by the room');
+    assert.match(before, /new ImportMemoryMeter\(/, 'the first pass reads labels and subjects with no meter of the room');
+    assert.ok(door.indexOf('inferencePairsRoom(') > at, 'the pairs the inference remembers are not capped by what the room has left');
   });
 });
 

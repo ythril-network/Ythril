@@ -15,7 +15,8 @@ import path from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
 
 const load = (file) => import(pathToFileURL(path.join(REPO_ROOT, 'server/dist/rdf', file)).href);
-const [memory, index, count, ends, win, data] = await Promise.all(['import-memory.js', 'import-index.js', 'import-count.js', 'import-ends.js', 'import-window.js', 'schema-from-data.js'].map(load));
+const [memory, index, count, ends, win, data, edgePlan] = await Promise.all(['import-memory.js', 'import-index.js', 'import-count.js', 'import-ends.js', 'import-window.js', 'schema-from-data.js', 'import-edge-plan.js'].map(load));
+const { ReadSet } = await import(pathToFileURL(path.join(REPO_ROOT, 'server/dist/brain/write-plan/read-set.js')).href);
 
 const container = Number(process.argv[2]);
 const { bytes: room, heapLimitBytes } = memory.importMemoryRoom({ readFile: () => String(container) });
@@ -47,6 +48,18 @@ function door() {
   const meter = new memory.ImportMemoryMeter(room);
   const seen = new Set();
   const subjects = new Map();
+  // A quarter of the room is label-only subjects with labels of 2 000 characters, charged by their characters as the first pass reads them.
+  const labels = new Map();
+  for (let spent = 0, i = 0; ; i += 1) {
+    const address = flat(`http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/Label${i}`);
+    const key = flat(address);
+    const label = flat(`${'y'.repeat(2000)}${i}`);
+    const cost = memory.textBytes(address) + memory.textBytes(key) + memory.textBytes(label);
+    if (spent + cost > room / 4) break;
+    meter.charge(cost);
+    spent += cost;
+    labels.set(address, { keys: [key], labels: [label] });
+  }
   const r = fillUntilRefused(meter, memory.INFER_SUBJECT_BYTES, (i) => {
     const digest = count.digestOfKey(flat(`http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer${i % 997}/Product${i}`));
     seen.add(digest);
@@ -54,7 +67,7 @@ function door() {
     have.push(i % 5);
     subjects.set(digest, have);
   });
-  return { ...r, hold: [seen, subjects] };
+  return { ...r, hold: [seen, subjects, labels] };
 }
 
 /** The act's first phase: the index (subjects, then bare edges), the two digest sets, and a window of groups at its share. */
@@ -96,15 +109,34 @@ function actFirstPhase() {
 function actSecondPhase() {
   const meter = new memory.ImportMemoryMeter(room);
   const made = new ends.MintedEnds(meter);
-  const fit = Math.floor(room / (memory.MINTED_END_BYTES + memory.ENDS_COPY_BYTES));
+  const fit = Math.floor(room / 2 / (memory.MINTED_END_BYTES + memory.ENDS_COPY_BYTES));
   for (let i = 0; i < fit; i += 1) {
     made.set(flat(crypto.randomUUID()), i % 4 === 0 ? { kind: 'entity', type: flat(`ProductType${i % 400}`) } : { kind: 'fact' });
     if ((i & 0xffff) === 0) sample();
   }
   const copy = made.copy();
+  // The dry plan's shared read set (a functional edge label), charged an edge at a time to a fork of the meter until the room refuses.
+  const view = new ReadSet('probe');
+  const sets = new edgePlan.EdgeReadSets({ edge: { productFeature: { functional: true } } }, meter.fork(), () => view);
+  let edges = 0;
   let refused = false;
-  try { made.set(flat(crypto.randomUUID()), { kind: 'fact' }); meter.charge(memory.MINTED_END_BYTES * 2); } catch (err) { if (err?.bound !== 'RDF_IMPORT_MAX_MEMORY') throw err; refused = true; }
-  return { kept: made.size, refused, hold: [made, copy] };
+  try {
+    for (;;) {
+      sets.forWindow([]);
+      sets.planned(1);
+      const from = flat(crypto.randomUUID());
+      const to = flat(crypto.randomUUID());
+      view.noteWritten('entity', { _id: from, spaceId: 'probe', type: flat('Product') }, true);
+      view.noteWritten('entity', { _id: to, spaceId: 'probe', type: flat('Feature') }, true);
+      view.noteWritten('edge', {
+        _id: flat(crypto.randomUUID()), spaceId: 'probe', from, to, label: flat('productFeature'), tags: [], properties: {}, author: { kind: 'token', id: flat(`author-${edges % 7}`) },
+        createdAt: flat(new Date().toISOString()), updatedAt: flat(new Date().toISOString()), seq: 0, schemaFingerprint: flat('0123456789abcdef'), fromKind: flat('entity'), toKind: flat('entity'),
+      }, true);
+      edges += 1;
+      if ((edges & 0xffff) === 0) sample();
+    }
+  } catch (err) { if (err?.bound !== 'RDF_IMPORT_MAX_MEMORY') throw err; refused = true; }
+  return { kept: made.size, edges, refused, hold: [made, copy, view] };
 }
 
 const doorHolds = door();
@@ -117,7 +149,7 @@ const doorRes = { kept: doorHolds.kept, refused: doorHolds.refused };
 phase = null;
 const second = actSecondPhase();
 sample();
-const secondRes = { kept: second.kept, refused: second.refused };
+const secondRes = { kept: second.kept, edges: second.edges, refused: second.refused };
 global.gc();
 console.log(JSON.stringify({
   containerMiB: Math.round(container / 2 ** 20), heapLimitMiB: Math.round(heapLimitBytes / 2 ** 20), roomMiB: +(room / 2 ** 20).toFixed(1),
