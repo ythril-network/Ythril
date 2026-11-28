@@ -10,6 +10,8 @@
  *     second, is right only for 16 kHz mono 16-bit PCM and under-reads compressed audio, which dropped its tail from the last chunk;
  *  3. else `null`, and the caller falls back to the size.
  *
+ * A Duration of zero is no length (a header that states none): it falls through to the `time=` line, as `Duration: N/A` does.
+ *
  * The stderr cases are copies of what ffmpeg prints (probe P1's Duration line; progress lines in ffmpeg's own format).
  *
  * Seen red on 890cf234b: `durationFromFfmpegLog` does not exist.
@@ -53,6 +55,16 @@ describe('durationFromFfmpegLog reads the length off the one decode pass', () =>
 
   it('no Duration figure (Duration: N/A): the LAST time= the decode printed, 7.5 s, not the first', () => {
     assert.equal(parse(NO_DURATION), 7.5);
+  });
+
+  it('a stated Duration of zero is no length: the LAST time= the decode printed answers, as it does for Duration: N/A (round-1 finding F6)', () => {
+    const zero = [
+      "Input #0, wav, from 'empty-header.wav':",
+      '  Duration: 00:00:00.00, bitrate: 256 kb/s',
+      'size=N/A time=00:00:07.50 bitrate=N/A speed= 300x',
+    ].join('\n');
+    assert.equal(parse(zero), 7.5, 'a Duration of zero returned zero, and the caller then guesses from the size instead of reading time=');
+    assert.equal(parse('  Duration: 00:00:00.00, bitrate: N/A\n'), null, 'a zero Duration with no time= is no length at all');
   });
 
   it('neither a Duration nor a time= line: null, so the caller falls back to the size', () => {
