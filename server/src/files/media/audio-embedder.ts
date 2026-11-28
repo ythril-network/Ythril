@@ -135,21 +135,32 @@ function applyOverlap(
   }));
 }
 
-/** Get duration of an audio/video file in seconds using ffprobe. */
-async function getDurationSeconds(filePath: string, signal?: AbortSignal): Promise<number> {
-  const result = await runFfmpeg([
-    '-i', filePath,
-    '-f', 'null', '-',
-  ], { signal }).catch(err => {
-    // ffmpeg exits 1 for probe (no output) but stderr has duration
-    return { stdout: Buffer.alloc(0), stderr: String(err) };
-  });
-  // Parse: "Duration: HH:MM:SS.ss"
-  const m = /Duration:\s*(\d+):(\d+):([\d.]+)/.exec(result.stderr);
-  if (m) {
-    return parseInt(m[1]!, 10) * 3600 + parseInt(m[2]!, 10) * 60 + parseFloat(m[3]!);
-  }
-  return 0;
+const DURATION_LINE = /Duration:\s*(\d+):(\d+):([\d.]+)/;
+const PROGRESS_TIME = /time=(\d+):(\d+):([\d.]+)/g;
+
+/** `HH`, `MM` and `SS.ss` of a matched ffmpeg clock as seconds. */
+const clockSeconds = (m: RegExpExecArray | RegExpMatchArray): number =>
+  parseInt(m[1]!, 10) * 3600 + parseInt(m[2]!, 10) * 60 + parseFloat(m[3]!);
+
+/**
+ * The input's length in seconds, read off the stderr of the ONE decode pass an audio job makes (Q-984), or `null`.
+ *
+ * ## What it prevents
+ *
+ * The job used to decode its whole input twice: a "duration probe" to the null muxer, then the silencedetect pass, which
+ * prints the same `Duration:` line. Reading the length here, from the pass that maps the silences, halves the decode.
+ *
+ * The order: the input's `Duration: HH:MM:SS.ss` line; else the LAST `time=` progress line, how far the decode got (an
+ * input whose container states no length, `Duration: N/A`, was still decoded to its end); else `null`, and the caller
+ * falls back to the file's size. The size guess is right only for 16 kHz mono 16-bit PCM and under-reads compressed
+ * audio, which dropped its tail from the last chunk, so it comes last.
+ */
+export function durationFromFfmpegLog(stderr: string): number | null {
+  const stated = DURATION_LINE.exec(stderr);
+  if (stated) return clockSeconds(stated);
+  let last: RegExpMatchArray | undefined;
+  for (const m of stderr.matchAll(PROGRESS_TIME)) last = m;
+  return last ? clockSeconds(last) : null;
 }
 
 /**
@@ -212,7 +223,7 @@ export async function embedAudio(
   /**
    * The file's PLAINTEXT, as a path and a size (`files/plaintext-file.ts`) — never its bytes (`Q-425`).
    *
-   * ffmpeg opens it several times over (the duration probe, the silence pass, one extract per segment), so a path is
+   * ffmpeg opens it several times over (the silence pass, one extract per segment), so a path is
    * what it wanted all along: this used to be handed the whole file in memory and write it straight back to disk.
    */
   audio: PlaintextFile,
@@ -238,25 +249,24 @@ export async function embedAudio(
   const inputPath = audio.path;
 
   try {
-    // Step 1: total duration
-    const totalDurationS = await getDurationSeconds(inputPath, opts.signal);
-    if (totalDurationS <= 0) {
-      log.warn(`Audio embedder: could not determine duration for ${fileId}, treating as single chunk`);
-    }
-
-    // Step 2: silence detection
+    // Step 1: the ONE full decode (Q-984). The silencedetect pass prints the input's length as well as its silences, so
+    // nothing else decodes the whole input. A pass that fails is not caught: it decoded nothing, so no chunk can be
+    // placed, and chunking the file as one silence-free piece of a guessed length is what the old catch did.
     const { stderr } = await runFfmpeg([
       '-i', inputPath,
       '-af', 'silencedetect=n=-30dB:d=0.5',
       '-f', 'null', '-',
-    ], { signal: opts.signal }).catch(({ stderr: s }: { stderr: string }) => ({ stderr: s, stdout: Buffer.alloc(0) }));
+    ], { signal: opts.signal });
 
-    // The fallback duration is a guess from the SIZE (16 kHz mono 16-bit is 32 000 bytes a second), and the size now
-    // comes from the handle's stat rather than from the length of a buffer nobody holds any more.
-    const guessedS = audio.size / 32000;
-    const silences = parseSilenceDetect(stderr, totalDurationS || guessedS);
-    const rawChunks = silencesToChunks(silences, totalDurationS || guessedS);
-    const chunks = applyOverlap(rawChunks, overlapMs, totalDurationS || guessedS);
+    // The last fallback is a guess from the SIZE (16 kHz mono 16-bit is 32 000 bytes a second), from the handle's stat.
+    const decodedS = durationFromFfmpegLog(stderr);
+    if (decodedS === null || decodedS <= 0) {
+      log.warn(`Audio embedder: the decode of ${fileId} printed no length; its length is guessed from its size`);
+    }
+    const totalDurationS = decodedS !== null && decodedS > 0 ? decodedS : audio.size / 32000;
+    const silences = parseSilenceDetect(stderr, totalDurationS);
+    const rawChunks = silencesToChunks(silences, totalDurationS);
+    const chunks = applyOverlap(rawChunks, overlapMs, totalDurationS);
 
     // Step 3: for each chunk, extract audio → transcribe → embed → store
     const results: AudioChunkRecord[] = [];

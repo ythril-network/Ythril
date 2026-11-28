@@ -62,11 +62,18 @@ describe('an audio job decodes its input once (real worker, real Mongo, ffmpeg a
     assert.ok(Math.abs(coveredS() - LENGTH_S) < 0.01, `the segments reach ${coveredS()} s of a ${LENGTH_S} s input`);
   });
 
-  it('a silencedetect pass that fails fails the job: nothing was decoded, so no chunk can be placed', async () => {
+  // The run ends at its FIRST failed attempt: a failure that is not permanent goes back to `pending` behind the media queue's backoff
+  // (job-queue.ts RETRY_BACKOFF_MS, 30 s then 2 min) and ends `failed` only when its attempts are spent, minutes past the door's bound.
+  // A failed attempt is what the rule asks: the old code completed the job on the first run.
+  const failedOnce = (j) => j?.status === 'complete' || j?.status === 'failed' || (j?.status === 'pending' && Boolean(j?.lastError));
+
+  it('a silencedetect pass that fails fails the job\'s attempt: nothing was decoded, so no chunk can be placed', async () => {
     ffmpeg = installFfmpeg({ durationS: LENGTH_S, fail: (c) => (c.args.includes('-af') ? 'Invalid data found when processing input' : null) });
-    const { job } = await door.runJob({ rel: 'broken.wav', mime: 'audio/wav', mediaType: 'audio', source: Buffer.from('RIFF-broken') });
+    const { job } = await door.runJob({ rel: 'broken.wav', mime: 'audio/wav', mediaType: 'audio', source: Buffer.from('RIFF-broken'), until: failedOnce });
     assert.ok(ffmpeg.calls.some(c => c.args.includes('-af') && c.exitCode === 1), 'fixture: the silencedetect pass was never made to fail');
-    assert.equal(job?.status, 'failed', `a failed silencedetect pass left the job ${job?.status}: it was chunked as one silence-free piece of a guessed length`);
+    assert.notEqual(job?.status, 'complete', 'a failed silencedetect pass left the job complete: it was chunked as one silence-free piece of a guessed length');
+    assert.match(String(job?.lastError ?? ''), /ffmpeg exited 1/, `the job's attempt failed for another reason: ${JSON.stringify(job)}`);
+    assert.equal(ffmpeg.calls.filter(c => c.args.includes('-ss')).length, 0, 'a segment was cut after the decode pass failed');
   });
 
   it('no Duration figure: the length is the last time= the decode printed, not the size over 32 000 bytes a second', async () => {

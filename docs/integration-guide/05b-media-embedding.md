@@ -305,7 +305,7 @@ The worker-tuning fields — `workerConcurrency`, `workerPollIntervalMs`, `worke
 > | step | budget | vs the 5-minute stall default |
 > |---|---|---|
 > | render of one page window | `pageTimeoutMs × min(maxPages, 20)` = **20 min** | **4×** |
-> | one `ffmpeg` step — duration probe, silence pass, one segment cut, keyframe pass | 10 min, fixed | **2×** |
+> | one `ffmpeg` step — silence pass, one segment cut, keyframe pass | 10 min, fixed | **2×** |
 > | audio transcription (Whisper) | 5 min, fixed | **1×** — equal, so indistinguishable without head-room |
 > | image caption (local / external) | 2 min / 1 min | 0.4× / 0.2× |
 > | external face recognition | 30 s | 0.1× |
