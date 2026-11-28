@@ -10,12 +10,19 @@
  * half only: it refused without counting and admitted without entering the fence. So a peer's `recall` of a space could be reading while a wipe of that
  * space began deleting it, and the metric an operator watches for held peers under-counted every refusal this door made.
  *
- * ## What holds now
+ * ## What holds now (bundle-47, Q-244)
  *
- * - a peer token naming a held space in an MCP call is refused, and that refusal is one more in `ythril_space_held_refusals_total`;
- * - a peer token naming a free space is admitted, and `spaceTransfersRunning` of that space is one while the tool's handler runs and zero after the call
- *   ends, however it ends (an answer, a handler that throws);
- * - an instance-admin token is the operator's own tooling: neither refused nor counted in the fence.
+ * Q-244 confines a peer-bound token to the sync doors: token resolution answers it `403 { code: 'peer_door' }` on every route but `/api/sync/*`,
+ * `GET`/`POST /api/files/:spaceId` and `POST /api/notify`, `/mcp` included (an HTTP `403` with a JSON body, not a tool result). A peer's tool call is
+ * refused before the tool dispatch, so the dispatch's hold, its counter and its fence are never asked of a peer token on this door: the sync doors
+ * keep that rule for the peer's own requests. What this file holds is that the peer never gets that far:
+ *
+ * - a peer token naming a held space in an MCP call is refused `403 peer_door`, and that refusal is not one more in `ythril_space_held_refusals_total`
+ *   (it is no hold refusal);
+ * - a peer token naming a free space is refused the same way: the tool's handler never runs (read from inside it), so the fence counts nothing during or
+ *   after the call, and a handler that would throw is never reached;
+ * - an instance-admin token is the operator's own tooling: neither refused nor counted in the fence, and its handler runs, which is what lets the
+ *   probe see a handler that is reached.
  *
  * ## How it is driven
  *
@@ -24,7 +31,8 @@
  *
  * ## Seen red
  *
- * Before the fold, at 72f2a5d3: the refusal row sees no increment of the counter, and the admitted rows read zero from inside the handler.
+ * Before the fold, at 72f2a5d3: the refusal row sees no increment of the counter, and the admitted rows read zero from inside the handler. At the
+ * bundle-47 server the peer's rows as bundle-106 wrote them (counted refusal, admitted and counted call) fail with the `peer_door` refusal.
  *
  * Run: a Mongo the harness accepts, then node --test testing/standalone/a-peers-tool-call-meets-a-held-space-as-every-door-does-db.test.js
  */
@@ -60,8 +68,10 @@ async function mcp(key, name, args) {
   const raw = await r.text();
   const data = raw.startsWith('event:') || raw.startsWith('data:') ? raw.split('\n').find(l => l.startsWith('data:'))?.slice(5) ?? '{}' : raw;
   const rpc = JSON.parse(data);
-  return { isError: rpc.result?.isError === true, text: (rpc.result?.content ?? []).map(c => c.text ?? '').join('\n') };
+  return { status: r.status, code: rpc.code, isError: rpc.result?.isError === true, text: (rpc.result?.content ?? []).map(c => c.text ?? '').join('\n') || JSON.stringify(rpc).slice(0, 300) };
 }
+/** A peer-bound token's answer on `/mcp`: the HTTP refusal itself, never a tool result. */
+const refusedAsPeer = (r) => r.status === 403 && r.code === 'peer_door' && !r.isError;
 
 /** Every refusal the counter holds, across doors: the one number an operator reads. */
 async function refusalsCounted() {
@@ -105,25 +115,27 @@ describe('a peer\'s tool call meets a held space as every door does', { skip }, 
     loader.mutateConfig((cfg) => { const net = cfg.networks.find(n => n.id === door.NET); net.pendingRounds = [wipeRound()]; net.spaces = [HELD, FREE]; });
   });
 
-  it('a peer token naming the held space is refused and the refusal is counted', async () => {
+  it('a peer token naming the held space is refused 403 peer_door, and the refusal is not counted as a held one', async () => {
     const before = await refusalsCounted();
     const r = await mcp(peerKey, 'recall', { query: 'hello', space: HELD });
-    assert.ok(r.isError && /held/i.test(r.text), `MCP answered a peer's recall of a held space with: ${r.isError ? 'error' : 'result'} ${r.text.slice(0, 160)}`);
-    assert.equal(await refusalsCounted() - before, 1, 'the tool door refused a peer for a held space and the refusals counter did not move');
+    assert.ok(refusedAsPeer(r), `MCP answered a peer's recall of a held space with: ${r.status} ${r.isError ? 'error' : 'result'} ${r.text.slice(0, 160)}`);
+    assert.equal(await refusalsCounted() - before, 0, 'a peer-door refusal moved the held-refusals counter: it is no hold refusal');
   });
 
-  it('a peer token naming a free space is admitted: the fence counts the call while its handler runs, and is empty after it', async () => {
+  it('a peer token naming a free space is refused 403 peer_door: its handler never runs, so the fence counts nothing', async () => {
     let answer;
     const seen = await withFenceProbe(FREE, async () => { answer = await mcp(peerKey, 'recall', { query: 'hello', space: FREE }); });
-    assert.deepEqual(seen, [1], `the handler ran ${seen.length} time(s) and read the fence of '${FREE}' as ${JSON.stringify(seen)}: a peer's admitted tool call was not counted while it ran, so an act registered meanwhile would delete under it`);
-    assert.ok(answer, 'no answer');
-    assert.equal(fence.spaceTransfersRunning(FREE), 0, 'the fence still counts the call after it ended');
+    assert.ok(answer && refusedAsPeer(answer), `a peer's call on a free space was not refused as a peer: ${answer?.status} ${answer?.text.slice(0, 160)}`);
+    assert.deepEqual(seen, [], `the handler ran ${seen.length} time(s) for a peer token, and read the fence of '${FREE}' as ${JSON.stringify(seen)}: the peer reached a tool`);
+    assert.equal(fence.spaceTransfersRunning(FREE), 0, 'the fence counts a call that was refused');
   });
 
-  it('the count is released when the handler throws', async () => {
-    const seen = await withFenceProbe(FREE, async () => { await mcp(peerKey, 'recall', { query: 'hello', space: FREE }); }, { throws: true });
-    assert.deepEqual(seen, [1], 'the handler did not run inside the fence');
-    assert.equal(fence.spaceTransfersRunning(FREE), 0, 'a handler that threw left its count in the fence: every later act on the space would wait for it');
+  it('a handler that would throw is never reached by a peer token, so no count is taken or left', async () => {
+    let answer;
+    const seen = await withFenceProbe(FREE, async () => { answer = await mcp(peerKey, 'recall', { query: 'hello', space: FREE }); }, { throws: true });
+    assert.ok(answer && refusedAsPeer(answer), `a peer's call was not refused as a peer: ${answer?.status} ${answer?.text.slice(0, 160)}`);
+    assert.deepEqual(seen, [], 'the handler ran for a peer token');
+    assert.equal(fence.spaceTransfersRunning(FREE), 0, 'a count was left in the fence by a call that was refused');
   });
 
   it('an instance-admin token is the operator\'s own tooling: not refused, not counted', async () => {

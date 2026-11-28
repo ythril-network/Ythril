@@ -52,8 +52,8 @@ const RDF_IMPORT_SCHEMA_FIELDS = [
  *
  * **Add a field only after checking it cannot carry a credential**, including indirectly — a webhook URL
  * can embed one in userinfo or a query string, which is why webhook routes are absent rather than
- * partially listed. Deliberately omitted for now: token.create and token.regenerate (the secret is the value), webhook.*, and any model/provider
- * config that sits next to an API key.
+ * partially listed. Deliberately omitted for now: token.regenerate (the secret is the value), webhook.*, and any model/provider
+ * config that sits next to an API key. token.create lists only the peer binding, never the secret.
  */
 export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = {
   // Space settings a reader would actually want explained after the fact.
@@ -66,14 +66,15 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
     'rdf.enabled', 'rdf.base', 'rdf.vocab', 'rdf.baseEpoch'],
   'space.rename': ['id'],
   // Token metadata ONLY, and only what this route can actually change: `PATCH /api/tokens/:id` edits the name, rights, second-factor exemption and request quota.
-  // Never `hash` or `prefix`; `token.create` and `token.regenerate` are absent entirely, because the
-  // interesting value there IS the secret.
+  // Never `hash` or `prefix`; `token.regenerate` is absent entirely, because the interesting value there IS the secret.
   // `rights` joined `name` when PATCH gained the ability to edit the matrix. Without it a rights change —
   // the single most security-relevant edit this route can make — would be applied and leave no trace in the
   // audit log, while a rename beside it did.
   // `mfa` and `rateLimitPerMinute` too: the route snapshots both on both sides, and dropped here an exemption or a quota change
   // was an audit row with no change in it.
   'token.update': ['name', 'rights', 'mfa', 'rateLimitPerMinute'],
+  // A mint records ONE field, never the secret: the peer the token was bound to (Q-243), set by the route through `req.auditChangesExplicit`.
+  'token.create': ['peerInstanceId'],
   // Media levels and extraction mode: the settings that decide what gets processed and what leaves the
   // instance. The provider blocks in the same payload carry API keys and are NOT listed.
   'config.media.update': ['levels.images', 'levels.audio', 'levels.video', 'levels.text', 'documentProcessing.mode'],

@@ -11,6 +11,18 @@
  *   records are older (and counted unclassified), and `sameAs:<it>` matches only records stamped with it.
  * - The `fps` form answers `notHeld` for a stamp the caller may not have, whatever its text says.
  *
+ * ## What holds now (bundle-47, Q-244)
+ *
+ * Q-244 confines a peer-bound token to the sync doors: token resolution answers it `403 { code: 'peer_door' }` on every route but `/api/sync/*`,
+ * `GET`/`POST /api/files/:spaceId` and `POST /api/notify`, `/mcp` included (an HTTP `403` with a JSON body, never a tool result). The schema-versions
+ * door, the filter door and their tools are not among them, so a peer token no longer reaches them to be narrowed to what it may have: it is refused
+ * before any version, standing, definition or network id is read. The contract above holds for a token that does reach the doors (the local token,
+ * the control of every row); the peer's half of each row is the refusal:
+ *
+ * - `older` and `sameAs:<fp>` on the filter, the `fps` form, and the three forms on the schema-versions door, are answered `403 peer_door` to the peer
+ *   token on REST and MCP, where the local token is answered as the contract says;
+ * - the history of a type is refused to the peer, so no network id it is not in reaches it; the local token's row names the layer's network.
+ *
  * ## Fixture
  *
  * Space PB: v1 -> v2 (current; A renamed). X is a held row built from a network the peer is not in, defining A as v2 does. Records
@@ -18,7 +30,8 @@
  *
  * ## Seen red at 327b105e
  *
- * `olderIn` takes no scope (the peer's `older` classifies X by its text, as the local token's does); the three forms do not exist.
+ * `olderIn` takes no scope (the peer's `older` classifies X by its text, as the local token's does); the three forms do not exist. At the bundle-47
+ * server the peer's rows as Q-744 wrote them (answered, narrowed) fail with the `peer_door` refusal.
  *
  * Run: a Mongo the harness accepts, then node --test testing/standalone/a-peer-bound-token-sees-no-type-history-it-may-not-have-db.test.js
  */
@@ -30,7 +43,7 @@ import { openViewDoors } from './_view-doors.mjs';
 import { openPullDoor, PEER } from './_pull-door.mjs';
 import { snapshotOf, snapshotRow, snapshotsOf, linksOf } from './_schema-snapshot-peer.mjs';
 import { recordOf, saveVersion } from './_schema-version-fixtures.mjs';
-import { typeDoors } from './_type-history.mjs';
+import { typeDoors, queryOf } from './_type-history.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -47,6 +60,20 @@ const typed = (prop) => ({ ...META, typeSchemas: { entity: { A: { propertySchema
 
 let d, doors, local, peer, v1, v2, X;
 const seeded = new Map();
+
+/**
+ * What a peer-bound token is answered at each door: the HTTP status and the refusal's code. `/mcp` answers a peer token an HTTP 403 with a JSON
+ * body (the door never reaches the tool), so the code is read from that body, not from a tool result.
+ */
+const asPeer = {
+  REST: async (key, method, url, body) => { const r = await d.rest(key, method, url, body); return { status: r.status, code: r.body?.code, text: r.text }; },
+  MCP: async (key, name, args) => { const r = await d.rpc(key, 'tools/call', { name, arguments: args }); return { status: r.status, code: r.messages[0]?.code, text: JSON.stringify(r.messages[0] ?? {}) }; },
+};
+const schemaVersionsAsPeer = {
+  REST: (key, space, params = {}) => asPeer.REST(key, 'GET', `/api/spaces/${encodeURIComponent(space)}/schema-versions${queryOf(params)}`),
+  MCP: (key, space, params = {}) => asPeer.MCP(key, 'space_schema_versions', { space, ...params }),
+};
+const assertPeerDoor = (a, what) => assert.ok(a.status === 403 && a.code === 'peer_door', `${what}: the peer-bound token was not refused as a peer: ${a.status} ${a.text.slice(0, 200)}`);
 
 describe('a peer-bound token sees no type history it may not have (real MongoDB, both doors)', { skip }, () => {
   before(async () => {
@@ -83,66 +110,49 @@ describe('a peer-bound token sees no type history it may not have (real MongoDB,
   const ids = (body) => ((body?.data ?? body)?.results ?? []).map(r => r._id).sort();
   const idsOf = (...tags) => tags.flatMap(t => seeded.get(t)).sort();
 
-  it('older: the peer finds the records of a version it may not have; the local token, which may, does not', async () => {
+  it('older: the peer is refused 403 peer_door on the filter, on both doors, and finds no record; the local token, which may, is answered', async () => {
     const args = { space: PB, collection: 'entities', schemaVersion: 'older', schemaChanged: 'any', limit: 100 };
     const mine = await d.rest(local.key, 'POST', '/api/filter', args);
     assert.equal(mine.status, 200, mine.text.slice(0, 300));
     assert.deepEqual(ids(mine.body), idsOf('v1'), 'precondition: for the local token, X (A as v2 defines it) is older');
-    for (const [door, call] of [['REST', () => d.rest(peer.key, 'POST', '/api/filter', args)], ['MCP', () => d.mcp(peer.key, 'filter', args)]]) {
-      const r = await call();
-      const body = r.structured ?? r.body;
-      assert.ok(!(r.isError || r.status >= 400), `${door}: ${r.text.slice(0, 300)}`);
-      assert.deepEqual(ids(body), idsOf('v1', 'X'), `${door}: the peer's older classified X by a text it may not have`);
-      const m = (body?.data ?? body)?.schemaVersion?.members?.find(x => x.spaceId === PB);
-      assert.equal(m?.unclassified, 2, `${door}: X's records are not counted unclassified for the peer`);
-    }
+    assertPeerDoor(await asPeer.REST(peer.key, 'POST', '/api/filter', args), 'REST');
+    assertPeerDoor(await asPeer.MCP(peer.key, 'filter', args), 'MCP');
   });
 
-  it('sameAs:<X> for the peer matches only the records stamped X; for the local token it matches v2\'s too', async () => {
+  it('sameAs:<X> is refused to the peer on both doors (403 peer_door); for the local token it matches the records stamped X and v2', async () => {
     const args = { space: PB, collection: 'entities', schemaVersion: `sameAs:${X.fp}`, limit: 100 };
-    const peerSide = await d.mcp(peer.key, 'filter', args);
-    assert.ok(!peerSide.isError, peerSide.text.slice(0, 300));
-    assert.deepEqual(ids(peerSide.structured), idsOf('X'), 'the peer\'s sameAs used a text it may not have');
+    assertPeerDoor(await asPeer.MCP(peer.key, 'filter', args), 'MCP');
+    assertPeerDoor(await asPeer.REST(peer.key, 'POST', '/api/filter', args), 'REST');
     const mine = await d.mcp(local.key, 'filter', args);
     assert.ok(!mine.isError, mine.text.slice(0, 300));
     assert.deepEqual(ids(mine.structured), idsOf('X', 'v2'));
   });
 
   for (const door of ['REST', 'MCP']) {
-    it(`${door}: the fps form answers notHeld for X to the peer, and older or current by its text to the local token`, async () => {
+    it(`${door}: the fps form is refused to the peer (403 peer_door) and gives it no standing of X; the local token is told X's standing from its text`, async () => {
       const ask = { fps: [X.fp, v1.fp], kind: 'entity', type: 'A' };
-      const theirs = await doors[door](peer.key, PB, ask);
-      assert.ok(!theirs.refused, theirs.text.slice(0, 300));
-      const t = new Map((theirs.body.standings ?? []).map(s => [s.fp, s.standing]));
-      assert.equal(t.get(X.fp), 'notHeld', 'the peer is told X\'s standing from its text');
-      assert.equal(t.get(v1.fp), 'older');
-      assert.equal((theirs.body.standings ?? []).find(s => s.fp === X.fp)?.definition, undefined, 'the peer is given a definition for X');
+      assertPeerDoor(await schemaVersionsAsPeer[door](peer.key, PB, ask), door);
       const mine = new Map(((await doors[door](local.key, PB, ask)).body.standings ?? []).map(s => [s.fp, s.standing]));
       assert.equal(mine.get(X.fp), 'current', 'for the local token X defines A as current does');
     });
 
-    it(`${door}: the three forms answer 404 unknown_fingerprint when the current version is not the peer's`, async () => {
+    it(`${door}: the three forms are refused to the peer (403 peer_door), where the current version is not the peer's, and not to the local token`, async () => {
       const fp = (await import('../../server/dist/spaces/schema-stamp.js')).variationOf(PU).stamp.fp;
       for (const ask of [{ kind: 'entity' }, { kind: 'entity', type: 'L' }, { fps: [fp], kind: 'entity', type: 'L' }]) {
-        const r = await doors[door](peer.key, PU, ask);
-        assert.ok(r.refused, `${JSON.stringify(ask)} was answered to the peer: ${r.text.slice(0, 200)}`);
-        if (door === 'REST') assert.equal(r.status, 404, JSON.stringify(ask));
-        assert.match(r.text, /unknown_fingerprint/, JSON.stringify(ask));
+        assertPeerDoor(await schemaVersionsAsPeer[door](peer.key, PU, ask), `${door} ${JSON.stringify(ask)}`);
         const mine = await doors[door](local.key, PU, ask);
         assert.ok(!mine.refused, `${JSON.stringify(ask)}: the local token is refused too: ${mine.text.slice(0, 200)}`);
       }
     });
 
-    it(`${door}: network ids are cut to the networks shared with the peer`, async () => {
+    it(`${door}: a type's history is refused to the peer (403 peer_door), so no network id it is not in reaches it; the local token's row names the layer's network`, async () => {
       const mine = await doors[door](local.key, PU, { kind: 'entity' });
       assert.ok(!mine.refused, mine.text.slice(0, 300));
       const row = (mine.body.types ?? []).find(r => r.type === 'L');
       assert.deepEqual(row?.networks, [OUTSIDE_NET], 'precondition: the layer row does not name its network to the local token');
-      const hist = await doors[door](peer.key, PB, { kind: 'entity', type: 'A' });
-      assert.ok(!hist.refused, hist.text.slice(0, 300));
-      const named = (hist.body.definitions ?? []).flatMap(def => def.origin?.networks ?? []);
-      assert.deepEqual(named.filter(n => n === OUTSIDE_NET), [], 'the peer is told a network it is not in');
-      assert.ok(!(hist.body.definitions ?? []).some(def => def.rep === X.fp), 'the peer\'s history lists a definition from a version it may not have');
+      assertPeerDoor(await schemaVersionsAsPeer[door](peer.key, PB, { kind: 'entity', type: 'A' }), door);
+      const hist = await doors[door](local.key, PB, { kind: 'entity', type: 'A' });
+      assert.ok(!hist.refused, `the local token's history of the same type: ${hist.text.slice(0, 300)}`);
     });
   }
 });

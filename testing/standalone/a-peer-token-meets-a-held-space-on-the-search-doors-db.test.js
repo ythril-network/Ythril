@@ -6,12 +6,19 @@
  * The hold covered the routes with a space in the PATH. `POST /api/brain/recall` and `/similar` read `space` from the body and resolve it through the tool dispatch, so a peer
  * token whose rights matrix reached a held space read it there: the one door that returns what a wipe is about to delete. The tool door is the same dispatch, and so is MCP.
  *
- * ## What holds now
+ * ## What holds now (bundle-47, Q-244)
  *
- * - a peer token NAMING a held space on any of the four doors is answered `423` (`space_held`; on MCP, an error result that says the space is held);
- * - a peer token that OMITS the space does not find a held space's records: a seed entry that lives only in the held space is not located (the answer is "not found", never the
- *   search's own failure, which would mean it was found and searched), while the same seed in a space nothing holds IS located - the positive twin;
- * - the same token naming a space nothing holds is not refused for a hold, and an instance-admin token naming the held space is not either (the operator's own tooling).
+ * Q-244 confines a peer-bound token to the sync doors: token resolution answers it `403 { code: 'peer_door' }` on every route but `/api/sync/*`,
+ * `GET`/`POST /api/files/:spaceId` and `POST /api/notify`, `/mcp` included (an HTTP `403` with a JSON body, not a tool error result). Recall and
+ * similar, REST, the generic tool door and MCP, are not among them, so a peer token never reaches the body-scoped hold on them: it is refused before the
+ * space is read from the body, whether the body names a held space, a free one or none.
+ *
+ * - a peer token NAMING a held space on any of the four doors is answered `403 peer_door`, never `423 space_held` (on MCP the refusal is the HTTP answer);
+ * - a peer token that OMITS the space finds no seed on either door, the one that lives only in the held space and the one in a space nothing holds alike:
+ *   the answer is the refusal, never the search's own failure, which would mean a seed was located. The positive twin is the operator: its `similar`
+ *   locates the seed in the free space, so a seed that is not found is a refusal and not a probe that cannot see seeds;
+ * - the same token naming a space nothing holds is refused the same way (the refusal is about the token kind, not the hold), and an instance-admin token
+ *   naming the held space is neither held nor refused as a peer (the operator's own tooling).
  *
  * ## What this stack cannot show, stated
  *
@@ -27,7 +34,8 @@
  * ## Seen red
  *
  * At a638e702 no body-scoped door asks a hold: the named-space rows answer 400 (the search service) or 200, the seed is located. After the fix, by hand: drop the hold from the body-scoped
- * resolution -> the named-space and seed rows red; drop it from the tool guard only -> the MCP and tool-door rows red.
+ * resolution -> the named-space and seed rows red; drop it from the tool guard only -> the MCP and tool-door rows red. At the bundle-47 server the rows as bundle-106 wrote them
+ * (`423` on the held space, a located seed in the free one) fail with the `peer_door` refusal.
  *
  * Run: a Mongo the harness accepts, then node --test testing/standalone/a-peer-token-meets-a-held-space-on-the-search-doors-db.test.js
  */
@@ -38,6 +46,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { build, ADMIN_TOKEN } from './_push-door.mjs';
 import { openPullDoor, PEER } from './_pull-door.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
+import { isPeerDoorRefusal } from './_peer-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -77,9 +86,11 @@ async function mcp(key, name, args) {
   const raw = await r.text();
   const data = raw.startsWith('event:') || raw.startsWith('data:') ? raw.split('\n').find(l => l.startsWith('data:'))?.slice(5) ?? '{}' : raw;
   const rpc = JSON.parse(data);
-  return { status: r.status, isError: rpc.result?.isError === true, text: (rpc.result?.content ?? []).map(c => c.text ?? '').join('\n') };
+  return { status: r.status, code: rpc.code, isError: rpc.result?.isError === true, text: (rpc.result?.content ?? []).map(c => c.text ?? '').join('\n') || JSON.stringify(rpc).slice(0, 300) };
 }
 const held = (r) => r.status === 423 && (r.body?.code === 'space_held' || /space_held/.test(r.text));
+/** The peer-door refusal on either door: REST answers it in the body, `/mcp` as the HTTP answer itself (`code` read from its JSON body). */
+const peerDoor = isPeerDoorRefusal;
 
 describe('a peer token meets a held space on the body-scoped search doors', { skip }, () => {
   before(async () => {
@@ -103,34 +114,37 @@ describe('a peer token meets a held space on the body-scoped search doors', { sk
     }
   });
 
-  it('a peer token naming the held space is answered 423 on recall, similar and the generic tool door', async () => {
+  it('a peer token naming the held space is answered 403 peer_door on recall, similar and the generic tool door, never 423', async () => {
     const answers = {
       'POST /api/brain/recall': await post('/api/brain/recall', peerKey, { query: 'hello', space: HELD }),
       'POST /api/brain/similar': await post('/api/brain/similar', peerKey, { entryId: '11111111-1111-4111-8111-111111111111', entryType: 'fact', space: HELD }),
       'POST /api/recall': await post('/api/recall', peerKey, { query: 'hello', space: HELD }),
     };
-    const notHeld = Object.entries(answers).filter(([, r]) => !held(r)).map(([door_, r]) => `${door_} -> ${r.status} ${r.text.slice(0, 100)}`);
-    assert.deepEqual(notHeld, [], 'a peer token read a space whose wipe only this side has applied through a door that takes the space from the body:\n  ' + notHeld.join('\n  '));
+    const notRefused = Object.entries(answers).filter(([, r]) => !peerDoor(r) || held(r)).map(([door_, r]) => `${door_} -> ${r.status} ${r.text.slice(0, 100)}`);
+    assert.deepEqual(notRefused, [], 'a peer token was not refused as a peer on a door that takes the space from the body:\n  ' + notRefused.join('\n  '));
   });
 
-  it('the same on MCP: a peer token\'s recall of the held space is an error result that says it is held', async () => {
+  it('the same on MCP: a peer token\'s recall of the held space is the HTTP answer 403 peer_door, not a tool result', async () => {
     const r = await mcp(peerKey, 'recall', { query: 'hello', space: HELD });
-    assert.ok(r.isError && /held/i.test(r.text), `MCP answered a peer token's recall of a held space with: ${r.isError ? 'error' : 'result'} ${r.text.slice(0, 160)}`);
+    assert.ok(peerDoor(r) && !r.isError, `MCP answered a peer token's recall of a held space with: ${r.status} ${r.isError ? 'error' : 'result'} ${r.text.slice(0, 160)}`);
   });
 
-  it('a peer token that omits the space does not find a seed that lives only in the held space; the same seed in a free space is found (twin)', async () => {
-    const free = await post('/api/brain/similar', peerKey, { entryId: '22222222-2222-4222-8222-222222222222', entryType: 'fact' });
-    assert.ok(SEARCH_FAILED.test(free.text), `the twin failed: the seed in the free space was not located (${free.status} ${free.text.slice(0, 160)}), so the held seed's "not found" would prove nothing`);
-    const heldSeed = await post('/api/brain/similar', peerKey, { entryId: '11111111-1111-4111-8111-111111111111', entryType: 'fact' });
-    assert.ok(!SEARCH_FAILED.test(heldSeed.text), `the seed entry of a held space was located by a peer token that did not name the space (${heldSeed.status} ${heldSeed.text.slice(0, 160)})`);
-    const viaMcp = await mcp(peerKey, 'similar', { entryId: '11111111-1111-4111-8111-111111111111', entryType: 'fact' });
-    assert.ok(!SEARCH_FAILED.test(viaMcp.text), `MCP located the held space's seed for a peer token: ${viaMcp.text.slice(0, 160)}`);
+  it('a peer token that omits the space is refused peer_door for the seed that lives only in the held space and for the one in a free space; the operator locates the free one (twin)', async () => {
+    const free = await post('/api/brain/similar', adminKey, { entryId: '22222222-2222-4222-8222-222222222222', entryType: 'fact' });
+    assert.ok(SEARCH_FAILED.test(free.text), `the twin failed: the operator did not locate the seed in the free space (${free.status} ${free.text.slice(0, 160)}), so a refused seed would prove nothing`);
+    for (const [seed, id] of [['held', '11111111-1111-4111-8111-111111111111'], ['free', '22222222-2222-4222-8222-222222222222']]) {
+      const viaRest = await post('/api/brain/similar', peerKey, { entryId: id, entryType: 'fact' });
+      assert.ok(peerDoor(viaRest) && !SEARCH_FAILED.test(viaRest.text), `a peer token that did not name the space was not refused for the ${seed} seed (${viaRest.status} ${viaRest.text.slice(0, 160)})`);
+      const viaMcp = await mcp(peerKey, 'similar', { entryId: id, entryType: 'fact' });
+      assert.ok(peerDoor(viaMcp) && !SEARCH_FAILED.test(viaMcp.text), `MCP did not refuse a peer token the ${seed} seed: ${viaMcp.status} ${viaMcp.text.slice(0, 160)}`);
+    }
   });
 
-  it('controls: the same peer token naming a free space, and an admin token naming the held one, are not refused for a hold', async () => {
+  it('controls: the same peer token naming a free space is refused the same way (not a hold), and an admin token naming the held one is neither held nor refused as a peer', async () => {
     const free = await post('/api/brain/recall', peerKey, { query: 'hello', space: FREE });
-    assert.ok(!held(free), 'a space nothing holds was answered 423');
+    assert.ok(peerDoor(free) && !held(free), `a space nothing holds was not refused as a peer: ${free.status} ${free.text.slice(0, 160)}`);
     const admin = await post('/api/brain/recall', adminKey, { query: 'hello', space: HELD });
     assert.ok(!held(admin), 'an instance-admin token was held as if it were the exchange');
+    assert.ok(!peerDoor(admin), 'an instance-admin token was refused as a peer');
   });
 });

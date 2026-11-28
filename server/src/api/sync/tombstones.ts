@@ -18,7 +18,7 @@ import {
 } from '../../files/tombstones.js';
 import { applyPeerFileTombstones } from '../../files/peer-tombstone-apply.js';
 
-import { refusePeerSpace, refusePeerWrite, pushAllowed, deliveryOfRequest, syncPositionStart, BAD_SINCE_INSTANT } from './_shared.js';
+import { refusePeerSpace, refusePeerWrite, pushAllowed, deliveryOfRequest, syncPositionStart, BAD_SINCE_INSTANT, refuseSyncRung } from './_shared.js';
 import { parseLimit } from '../../util/pagination.js';
 import { recordServedPosition } from '../../sync/served-watermark.js';
 import { isoReadStart, BAD_ISO_CURSOR } from '../../util/seq-keyset.js';
@@ -47,6 +47,7 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
   try {
     const { spaceId, networkId, limit } = req.query as Record<string, unknown>;
     if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+    if (refuseSyncRung(res, spaceId, ['knowledge'], req.authToken)) return;
     if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
 
     const start = syncPositionStart(req.query as Record<string, unknown>);
@@ -134,6 +135,7 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
   try {
     const { spaceId, networkId, since, cursor } = req.query as Record<string, unknown>;
     if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+    if (refuseSyncRung(res, spaceId, ['files'], req.authToken)) return;
     if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
 
     if (cursor !== undefined && cursor !== '') {

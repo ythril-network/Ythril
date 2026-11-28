@@ -4,11 +4,13 @@
  *
  * ## The rules
  *
- * 1. **The held-peer refusal applies per member.** `viewReadMembers` asks, for each member, what a direct read of that member asks:
- *    a member held for the PEER a token is bound to (an act owed on it, design v5 section 3.3) is not read through a view either.
- *    Here a peer-bound token owns a view of two members and one is held: the direct read of the held member answers 423
- *    `space_held` (control), and the read through the view returns the other member's marker, not the held member's, with
- *    `viewMembers` naming only the member read - on the REST path, the tool door and MCP. A view must not be a way round the hold.
+ * 1. **A view is no way round the hold for a peer-bound token (bundle-47, Q-244).** `viewReadMembers` asks, for each member, what a direct read of
+ *    that member asks: a member held for the PEER a token is bound to (an act owed on it, design v5 section 3.3) is not read through a view either.
+ *    Q-244 confines a peer-bound token to the sync doors (`/api/sync/*`, `GET`/`POST /api/files/:spaceId`, `POST /api/notify`): token resolution answers
+ *    it `403 { code: 'peer_door' }` everywhere else, `/mcp` included (an HTTP `403`, not a tool result), so a peer token reaches neither the direct read
+ *    nor the view read, and the per-member hold is not asked of it on these doors. Here a peer-bound token owns a view of two members and one is held:
+ *    the direct read of the held member, the read through the view on the REST path, the tool door and MCP, are each answered `403 peer_door` and read no
+ *    record. Control: a token not bound to a peer, which owns a view of the same two members, reads through it (the refusal is about the token kind).
  * 2. **A door with no area fails closed.** Every mounted route whose path names a space (`:spaceId`, or `:id` under `/api/spaces`)
  *    and that has no `ROUTE_RIGHTS` row (derived from the mounted routes, floor; today the `NOT_AREA_SCOPED` space routes: activity,
  *    token access, rename, delete, export, import, wipe) refuses the owner's own view id, and the owner here is an instance admin, so
@@ -17,7 +19,8 @@
  *
  * ## Seen red at 18e8d598
  *
- * 1: the view is unknown, so the read through it answers `Space '@guarded' not found` and the readable member's marker is missing.
+ * 1: the view is unknown, so the read through it answers `Space '@guarded' not found` and the readable member's marker is missing. At the bundle-47
+ *    server the rows as Q-531 wrote them (`423` on the direct read, the readable member's marker through the view) fail with the `peer_door` refusal.
  * 2: `POST /api/views` answers 404, so the case fails at its create.
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), npm run build:server, then
@@ -50,30 +53,34 @@ describe('a view and the doors that must not open for it (Q-531)', { skip }, () 
   });
   after(async () => { await d?.close(); });
 
-  it('a member held for the caller\'s peer is not read through the view, on any door', async () => {
-    const peer = await d.mint('vh-peer', { [QA]: d.row({ knowledge: 'read' }), [HELD]: d.row({ knowledge: 'read' }) }, { peerInstanceId: PEER });
+  it('a peer-bound token that owns a view is refused 403 peer_door on the direct read and on every door that reads the view, and reads no member', async () => {
+    const rungs = d.row({ knowledge: 'read' });
+    const peer = await d.mint('vh-peer', { [QA]: rungs, [HELD]: rungs }, { peerInstanceId: PEER });
+    const local = await d.mint('vh-local', { [QA]: rungs, [HELD]: rungs });
     // A peer-bound token cannot create a view; one can still own one (a copy given to it, a config written by hand).
     d.loader.mutateConfig(cfg => {
-      cfg.views = [...(cfg.views ?? []), { id: '@guarded', name: 'guarded', ownerId: `token:${peer.id}`, members: [QA, HELD], createdAt: new Date().toISOString() }];
+      cfg.views = [...(cfg.views ?? []),
+        { id: '@guarded', name: 'guarded', ownerId: `token:${peer.id}`, members: [QA, HELD], createdAt: new Date().toISOString() },
+        { id: '@unguarded', name: 'unguarded', ownerId: `token:${local.id}`, members: [QA, HELD], createdAt: new Date().toISOString() }];
       cfg.pendingSpaceActs = [{ id: 'vh-act', kind: 'wipe', localId: HELD, rounds: [], postSteps: {}, registeredAt: new Date().toISOString(), state: 'registered', attempts: 0 }];
     });
+    const refusedAsPeer = (a) => a.status === 403 && a.body?.code === 'peer_door';
     try {
       const direct = await d.rest(peer.key, 'GET', `/api/brain/spaces/${HELD}/stats`);
-      assert.equal(direct.status, 423, `control: the direct read of the held member: ${fmt(direct)}`);
-      const doors = {
-        toolDoor: () => d.rest(peer.key, 'POST', '/api/filter', { space: '@guarded', collection: 'entities', filter: {} }),
-        mcp: () => d.mcp(peer.key, 'filter', { space: '@guarded', collection: 'entities', filter: {} }),
-      };
-      for (const [name, call] of Object.entries(doors)) {
-        const a = await call();
-        const ids = rowsOf(a).map(r => r._id);
-        assert.ok(!ids.includes(markers[HELD]), `${name}: the held member's record was read through the view`);
-        assert.ok(ids.includes(markers[QA]), `${name}: the readable member's record was not read through the view: ${fmt(a)}`);
-        assert.deepEqual(viewMembersOf(a), [QA], `${name}: viewMembers names other than the member read`);
-      }
+      assert.ok(refusedAsPeer(direct), `the direct read of the held member by a peer-bound token: ${fmt(direct)}`);
+      const filter = { space: '@guarded', collection: 'entities', filter: {} };
+      const toolDoor = await d.rest(peer.key, 'POST', '/api/filter', filter);
+      assert.ok(refusedAsPeer(toolDoor), `toolDoor: a peer-bound token was not refused as a peer: ${fmt(toolDoor)}`);
+      assert.deepEqual(rowsOf(toolDoor), [], 'toolDoor: a record was read through the view');
+      const mcp = await d.rpc(peer.key, 'tools/call', { name: 'filter', arguments: filter });
+      assert.ok(mcp.status === 403 && mcp.messages[0]?.code === 'peer_door', `mcp: a peer-bound token was not refused as a peer: ${mcp.status} ${JSON.stringify(mcp.messages[0] ?? {}).slice(0, 200)}`);
       const p = await d.rest(peer.key, 'GET', '/api/brain/spaces/%40guarded/stats');
-      assert.equal(p.status, 200, `path: ${fmt(p)}`);
-      assert.deepEqual(viewMembersOf(p), [QA], 'path: viewMembers names other than the member read');
+      assert.ok(refusedAsPeer(p), `path: a peer-bound token was not refused as a peer: ${fmt(p)}`);
+      assert.equal(viewMembersOf(p), undefined, 'path: the view named members for a peer-bound token');
+      // Control: a token not bound to a peer reads through a view of the same two members, so the refusal above is about the token kind.
+      const control = await d.rest(local.key, 'POST', '/api/filter', { ...filter, space: '@unguarded' });
+      assert.equal(control.status, 200, `control: a local token's read through its own view: ${fmt(control)}`);
+      assert.ok(rowsOf(control).map(r => r._id).includes(markers[QA]), `control: the readable member's record was not read through the view: ${fmt(control)}`);
     } finally {
       d.loader.mutateConfig(cfg => { delete cfg.pendingSpaceActs; });
     }

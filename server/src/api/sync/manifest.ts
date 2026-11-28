@@ -9,7 +9,7 @@ import { requireAuth } from '../../auth/middleware.js';
 import { buildFileManifest } from '../../files/manifest.js';
 import { isInstanceLocalFile } from '../../sync/file-conflict.js';
 import { computeMerkleRoot } from '../../brain/merkle.js';
-import { refusePeerSpace } from './_shared.js';
+import { refusePeerSpace, refuseSyncRung } from './_shared.js';
 import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncManifestRouter = Router();
@@ -27,6 +27,7 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
   try {
     const { spaceId, networkId, since } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+    if (refuseSyncRung(res, spaceId, ['files'], req.authToken)) return;
     if (refusePeerSpace(res, spaceId, networkId, req.authToken)) return;
 
     const sinceDate = since ? new Date(since) : undefined;
@@ -70,6 +71,8 @@ syncManifestRouter.get('/merkle', syncRateLimit, requireAuth, async (req, res) =
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+    // The root covers records and files, so it says something about both: a token needs a read of each (Q-247).
+    if (refuseSyncRung(res, spaceId, ['knowledge', 'files'], req.authToken)) return;
     if (refusePeerSpace(res, spaceId, networkId, req.authToken)) return;
 
     const result = await computeMerkleRoot(spaceId);

@@ -8,8 +8,10 @@
  *   rung. A file whose shapes give a type rules needs `schema: admin` (the settings write's field rungs, `schema_rdf_rung`), naming the rules.
  * - A dry run is refused what its build is refused (Q-754 R1): a file whose shapes give a type rules is `schema_rdf_rung` by a `schema: write`
  *   token for a dry run as for a build, so a dry run never promises a build the write then refuses.
- * - A read-only token is turned away on a dry run too (both doors are writes); a peer-bound token is refused on both doors as `import_rdf`
- *   refuses it; a token of another space reaches nothing.
+ * - A read-only token is turned away on a dry run too (both doors are writes); a token of another space reaches nothing.
+ * - A peer-bound token, whatever its rungs (here `schema: admin`), is refused `403 peer_door` on both doors, for a dry run and a build (bundle-47,
+ *   Q-244: a peer token is confined to the sync doors, so it never reaches these routes or their rungs; on `/mcp` the refusal is the HTTP answer, not a
+ *   tool result). An administrator's dry run of the same file is answered, so the refusal is about the token kind.
  * - Nothing a refused call names is stored.
  *
  * Run: node --test testing/standalone/a-schema-rdf-import-is-held-to-its-rungs-on-both-doors-db.test.js (server build and the test MongoDB)
@@ -116,9 +118,20 @@ describe('the schema-from-RDF door is held to its rungs on both doors (real rout
     refusedOnBoth(await d.both(tokens.readOnly.key, TARGET, file, params({ dryRun: true })), TARGET, 'read-only dry run');
   });
 
-  it('a peer-bound token is refused on both doors, for a dry run and a build', async () => {
-    refusedOnBoth(await d.both(tokens.peer.key, TARGET, file, params({ dryRun: true })), TARGET, 'peer-bound dry run', { text: /peer/ });
-    refusedOnBoth(await d.both(tokens.peer.key, TARGET, file, params()), TARGET, 'peer-bound build', { text: /peer/ });
+  /** The peer-bound token's answer at both doors: REST's `403 peer_door` and `/mcp`'s HTTP `403 peer_door` (not a tool result); nothing stored. */
+  async function peerRefusedOnBoth(what, over) {
+    const rest = await d.buildRest(tokens.peer.key, TARGET, file, { params: params(over) });
+    const mcp = await d.rpc(tokens.peer.key, 'tools/call', { name: 'import_schema_rdf', arguments: { space: TARGET, document: file, format: 'turtle', ...params(over) } });
+    assert.ok(rest.status === 403 && rest.code === 'peer_door', `${what}, REST: ${rest.status} ${rest.text.slice(0, 300)}`);
+    assert.ok(mcp.status === 403 && mcp.messages[0]?.code === 'peer_door', `${what}, MCP: ${mcp.status} ${JSON.stringify(mcp.messages[0] ?? {}).slice(0, 300)}`);
+    assert.deepEqual(d.heldTypes(TARGET), {}, `${what}: something was stored`);
+  }
+
+  it('a peer-bound token is refused 403 peer_door on both doors, for a dry run and a build; an administrator\'s dry run of the same file is answered', async () => {
+    await peerRefusedOnBoth('peer-bound dry run', { dryRun: true });
+    await peerRefusedOnBoth('peer-bound build', {});
+    const byAdmin = await d.buildRest(admin.key, TARGET, file, { params: params({ dryRun: true }) });
+    assert.equal(byAdmin.status, 200, `the same dry run by an administrator: ${byAdmin.text.slice(0, 300)}`);
   });
 
   it('a token of another space reaches nothing here', async () => {

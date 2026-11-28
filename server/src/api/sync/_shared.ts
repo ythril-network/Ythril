@@ -11,7 +11,7 @@ import { joinRoundOf } from '../../networks/round-state.js';
 import { deliveryOf, type Delivery, type DeliveryAuth } from '../../sync/deletion-authority.js';
 import { networksHolding } from '../../spaces/wipe-vote.js';
 import { isDirectionalNetwork, networksSharedWith } from '../../networks/network-spaces.js';
-import type { TokenRights } from '../../config/rights-shape.js';
+import type { TokenRights, SpaceArea } from '../../config/rights-shape.js';
 import { decodePositionCursor, parsePositionText, type PositionStart } from '../../util/position-keyset.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { LOCAL_ONLY_FIELDS } from '../../sync/local-only-fields.js';
@@ -288,9 +288,32 @@ export function refusePeerReach(
  * none (the owner's "no matrix = refuse"); `knowledge: write` holds `schema: read` by implication, which `effectiveRung` resolves.
  */
 export function refuseSchemaRung(res: import('express').Response, spaceId: string, authToken: unknown): boolean {
+  return refuseSyncRung(res, spaceId, ['schema'], authToken);
+}
+
+/**
+ * May the caller READ each area of `spaceId` whose rows this sync read serves? Answers `403 { code: '<area>_rung' }` for the first area it
+ * lacks and returns true; false when it holds every one. The ONE rung check of the sync surface (Q-247), so no sync read can serve rows
+ * of an area the token holds no right to:
+ *
+ * | rows | routes | areas |
+ * |---|---|---|
+ * | records and their tombstones | facts, entities, edges, chrono, links (page and by id), tombstones | knowledge |
+ * | files | filemeta (page and by id), manifest, file-tombstones | files |
+ * | both | merkle | knowledge, files |
+ * | schema | meta, schema-snapshot | schema |
+ *
+ * The sync surface sits outside the mounts the area gate governs, so reach alone handed every row of a space to a token holding only
+ * `networks: read`. A peer token holds `write` on every area of a network space, so sync between instances is unchanged. A token with no
+ * rights matrix holds none (the owner's "no matrix = refuse").
+ */
+export function refuseSyncRung(
+  res: import('express').Response, spaceId: string, areas: readonly SpaceArea[], authToken: unknown,
+): boolean {
   const rights = (authToken as { rights?: TokenRights } | undefined)?.rights;
-  if (rights && holdsRung(rights, spaceId, 'schema', 'read')) return false;
-  res.status(403).json({ error: rights ? rungRefusal('read', 'schema', spaceId) : rungRefusal('read', 'schema'), code: 'schema_rung' });
+  const missing = areas.find(area => !(rights && holdsRung(rights, spaceId, area, 'read')));
+  if (missing === undefined) return false;
+  res.status(403).json({ error: rights ? rungRefusal('read', missing, spaceId) : rungRefusal('read', missing), code: `${missing}_rung` });
   return true;
 }
 
@@ -330,6 +353,35 @@ export function refusePeerSpace(
     return spaceHold(getConfig(), spaceId, peerId, networkId) ? answerSpaceHeld(res, door) : false;
   }
   return admitPeerOnResponse(res, spaceId, peerId, networkId, door, false);
+}
+
+/**
+ * The file door's peer guards (`GET` and `POST /api/files/:spaceId`, file sync's target), the same the sync doors ask: a peer asking for a
+ * space it dismissed is `423 space_declined`, a space no network shared with that peer carries is `403` (`spaceAllowed`), and an upload
+ * from a peer this instance only pushes to is `403` (`isDirectionalWriteBlocked`). Answers itself and returns true when it refused.
+ *
+ * ## What it prevents
+ *
+ * The file door read only the token's rights matrix, and a peer token holds write on every area of every space a network ever widened it
+ * to, never narrowed when a space leaves a network (Q-244). So a subscriber uploaded into its publisher, and a peer that left one of two
+ * shared networks still listed, downloaded and wrote the space it left. A token bound to no peer is the operator's own and is not asked;
+ * the hold is asked by the door's rights guard (`refuseHeldPeer`), not here.
+ *
+ * File sync names no network on this door, so reach is asked over every network that lists the peer, as the sync doors do without one.
+ */
+export function refusePeerFileDoor(
+  res: import('express').Response, spaceId: string, authToken: unknown, act: 'read' | 'write',
+): boolean {
+  const token = authToken as Record<string, unknown> | undefined;
+  const peerId = peerBoundTo(token);
+  if (!peerId) return false;
+  if (declinedByThisMember(spaceId, undefined, peerId)) { res.status(423).json(SPACE_DECLINED_ANSWER); return true; }
+  if (refusePeerReach(res, spaceId, undefined, token)) return true;
+  if (act === 'write' && isDirectionalWriteBlocked(spaceId, token)) {
+    res.status(403).json({ error: 'Directional network: write not permitted from this peer' });
+    return true;
+  }
+  return false;
 }
 
 /**

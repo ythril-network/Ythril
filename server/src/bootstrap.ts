@@ -66,6 +66,17 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     log.error(`Sweeping replaced peer tokens failed: ${err}`);
   }
 
+  // Peer tokens whose handshake expired unfinished (Q-354): unusable, and listed for ever beside the live one until revoked here.
+  try {
+    const { getConfig } = await import('./config/loader.js');
+    const { expiredHandshakeTokenIds, revokeToken } = await import('./auth/tokens.js');
+    const ids = expiredHandshakeTokenIds(getConfig());
+    for (const id of ids) await revokeToken(id);
+    if (ids.length > 0) log.info(`Revoked ${ids.length} peer token(s) whose handshake expired unfinished`);
+  } catch (err) {
+    log.error(`Sweeping expired handshake tokens failed: ${err}`);
+  }
+
   // The read-spill TTL index in its OWN try, ahead of phase 1 (Q-92): a failure below would otherwise skip it,
   // and the read-time expiry check would hide the missing index until the instance ceiling refused every spill.
   try {

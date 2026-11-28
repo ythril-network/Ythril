@@ -250,10 +250,12 @@ property only to a caller who also holds `knowledge` `read` on the space (or an 
 row comes without its `value`. `GET /api/spaces/:id/schema-layers` and MCP `space_schema_layers` need `schema` `read`,
 and reordering the networks needs `schema` `admin`.
 
-**Two sync doors read the schema too.** `GET /api/sync/meta` and `GET /api/sync/schema-snapshot` ask `schema` `read` on
-the space, and a peer token without it is answered `403` `schema_rung` (see [Sync API](09-sync-api.md)). They are not in
-the rights catalog, which lists no sync route. A peer token minted by an invite or a join holds `knowledge` `write`, which
-implies it.
+**Every sync read asks the area of its rows.** `GET /api/sync/meta` and `GET /api/sync/schema-snapshot` ask `schema`
+`read` on the space; the record pages and reads by id and `tombstones` ask `knowledge` `read`; `filemeta`, `manifest` and
+`file-tombstones` ask `files` `read`; `merkle` asks both. A token without the area is answered `403` with
+`<area>_rung` (`schema_rung`, `knowledge_rung`, `files_rung`; see [Sync API](09-sync-api.md)). They are not in the
+rights catalog, which lists no sync route. A peer token minted by an invite or a join holds `write` on every area, which
+implies each.
 
 ---
 
@@ -315,7 +317,7 @@ POST /api/tokens
 | `name` | Required. Human-readable label. |
 | `rights` | The per-space permission matrix. **This is how scope, admin and read-only are all expressed** — see *The three fields 4.0 removed* below. |
 | `expiresAt` | ISO 8601 expiry timestamp. Omit for non-expiring. |
-| `peerInstanceId` | Bind this token to a network peer (UUID). Required for tokens a peer will present on the `/api/sync/*` **data-write** endpoints in manually-configured networks — the invite handshake sets it automatically. Peer identity is server-issued and cannot be self-declared by the caller. |
+| `peerInstanceId` | Bind this token to a network peer (UUID). Required for tokens a peer will present on the `/api/sync/*` **data-write** endpoints in manually-configured networks — the invite handshake sets it automatically. **Only an instance administrator may send it**; any other caller is answered `403`, and the `token.create` audit entry records the bound peer id. A token bound to a peer is that peer to every sync door, so the administrator of one space cannot hand one out. |
 | `schemaLibrary` | `true` to issue a **library access token**. See below. |
 
 #### The three fields 4.0 removed
@@ -359,8 +361,14 @@ either (see [MCP](16-mcp.md)); a connector's own token can.
 **A peer-bound token stores no file as this instance's own upload.** A peer delivers files through the sync door
 (`POST /api/files/:spaceId`, as an arrival), and that door refuses `description`, `tags`, `properties` and `ttlDays` with a
 `400`: a peer's file metadata arrives by metadata sync. The `write_file` tool, on MCP and on `POST /api/write_file`, is a
-user door and answers a peer-bound token `403` (it is not offered in that token's `tools/list`). The other user doors a peer token can still
-reach are not closed by this.
+user door and answers a peer-bound token `403` (it is not offered in that token's `tools/list`).
+
+**A peer-bound token reaches only the sync doors.** It is a peer's sync credential, so every route and tool but the ones
+the sync protocol uses answers it `403 { code: "peer_door" }`: `/mcp` and every REST tool door included. The doors it
+reaches are `/api/sync/*`, `GET` and `POST /api/files/:spaceId` (file sync's list, download and upload) and
+`POST /api/notify`. On the file door it also meets the sync doors' own checks: a space no network shared with that
+peer carries is `403`, and an upload from a peer this instance only pushes to is `403`. Use your own token for
+everything else.
 
 > **`readOnly` is not stored on a token, and sending it to `POST /api/tokens` is a `400`**, as the table above
 > says. Write `rights.floor` with read rungs instead.

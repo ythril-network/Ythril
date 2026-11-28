@@ -20,7 +20,7 @@ import express from 'express';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { getConfig } from '../config/loader.js';
-import { resolveSafePath, assertNoSymlinkEscape, fileKeyOf } from '../files/sandbox.js';
+import { resolveSafePath, resolveSafePathChecked, assertNoSymlinkEscape, fileKeyOf } from '../files/sandbox.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { existingEntryUnreadable, PATH_UNREADABLE_CODE } from '../files/unreadable-paths.js';
 import { countFileArrival } from '../files/bytes-arrived.js';
@@ -37,7 +37,11 @@ import { callerPeerAuthor } from './sync/_shared.js';
 import { tagsError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { RequestRefusal } from '../util/errors.js';
-import { refusePeerWrite } from './sync/_shared.js';
+import { refusePeerWrite, refusePeerFileDoor } from './sync/_shared.js';
+import { createHash } from 'node:crypto';
+import { decidePeerCopy, recordFileConflict, recordSyncBase } from '../sync/file-agreement.js';
+import { conflictCopyPath } from '../sync/file-conflict.js';
+import { writeStored } from '../files/stored-bytes.js';
 
 /**
  * The actor an upload is made by: the calling token for a person, and NOTHING for a peer. A peer's byte push is a synced write,
@@ -90,6 +94,32 @@ function expectedHashOf(req: Request): string | null | undefined {
 }
 
 /**
+ * A peer's bytes for a path that holds a live file, decided as the pull decides them (`decidePeerCopy`, Q-410): answers the request and
+ * returns true when the bytes are NOT to be stored over the path — the same bytes or an older version (`200 { skipped }`), or other bytes
+ * over a version that is not the agreed one, which are written beside it as a conflict copy by `writeCopy` (`200 { conflict: { path } }`).
+ * Returns false when the upload goes on as before: no live file, or ours is still the agreed version. `200`, never `409`: a sender reads
+ * any error as a failed transfer and uploads the same bytes every cycle, the reason this door answers `200` for an instance-local path.
+ */
+async function answeredPeerCopy(
+  res: Response, spaceId: string, filePath: string, sha256: string, from: { instanceId: string; instanceLabel: string },
+  writeCopy: (abs: string) => Promise<void>,
+): Promise<boolean> {
+  const { key } = fileKeyOf(spaceId, filePath);
+  const { action, sameBytes } = await decidePeerCopy(spaceId, key, sha256, from.instanceId);
+  // The same bytes go on as an arrival always did: re-sending them is how a file whose processing failed or never ran is processed again.
+  if (action === 'write' || action === 'replace' || sameBytes) return false;
+  if (action === 'skip') {
+    res.status(200).json({ path: filePath, sha256, skipped: 'older' });
+    return true;
+  }
+  const copy = conflictCopyPath(key, from.instanceLabel, new Date());
+  await writeCopy(await resolveSafePathChecked(spaceId, copy));
+  await recordFileConflict(spaceId, key, copy, { instanceId: from.instanceId, label: from.instanceLabel });
+  res.status(200).json({ path: filePath, sha256, conflict: { path: copy } });
+  return true;
+}
+
+/**
  * Attach the upload route to the file-store router.
  *
  * Registered by `api/files.ts` rather than exporting a router of its own, so the path prefix and the router's
@@ -114,6 +144,8 @@ export function registerUploadRoute(router: Router): void {
       const request = requireWritePath(req, res);
       if (request === null) return;
       const { spaceId: targetSpace, path: filePath } = request;
+      // A peer token writes only a space a network shared with it carries, and only where the network lets it push here (Q-244).
+      if (refusePeerFileDoor(res, targetSpace, req.authToken, 'write')) return;
       const cfg = getConfig();
       // A peer pushing a file it holds (sync/file-sync.ts) delivers an ARRIVAL, recorded as the peer's — see
       // `arrivedFrom` in files/store-file.ts. Both branches below pass it.
@@ -237,6 +269,15 @@ export function registerUploadRoute(router: Router): void {
               res.status(200).json({ tombstoned: true });
               return;
             }
+            // Over a live file the peer's bytes are decided as the pull decides them (Q-410): a conflict copy is assembled beside the file, a
+            // skip stores nothing, and the staged ranges do not stay either way.
+            if (arrivedFrom) {
+              const incoming = expectedSha256 ?? await hashStagedChunks(targetSpace, filePath, range.total);
+              const answered = await answeredPeerCopy(res, targetSpace, filePath, incoming, arrivedFrom, async (abs) => {
+                await assembleChunks(targetSpace, filePath, range.total, abs, expectedSha256);
+              });
+              if (answered) { await discardStagedChunks(targetSpace, filePath, range.total).catch(() => undefined); return; }
+            }
             // With a promised hash the assembly is verified BEFORE its rename (`assembleChunks`): bytes that are not the file that was
             // promised store nothing here, and the staged chunks that made them are dropped (below), so the next try starts clean.
             const sha256 = await assembleChunks(targetSpace, filePath, range.total, absTarget, expectedSha256);
@@ -251,6 +292,8 @@ export function registerUploadRoute(router: Router): void {
                 ...uploadActor(req, arrivedFrom),
                 ...(arrivedFrom ? { arrivedFrom } : {}),
               });
+            // Both sides now hold these bytes: the agreed version, so the peer's next change replaces it instead of conflicting.
+            if (arrivedFrom) await recordSyncBase(targetSpace, fileKeyOf(targetSpace, filePath).key, arrivedFrom.instanceId, sha256);
             const isDocFormat = resolvedFmt !== 'text' && !isMediaFormat(resolvedFmt);
             const chunkedStatusCode = (chunkedEmbeddingStatus === 'pending' && isDocFormat) ? 202 : 201;
             const chunkedResponse: Record<string, unknown> = { path: filePath, sha256 };
@@ -336,7 +379,10 @@ export function registerUploadRoute(router: Router): void {
           res.status(200).json({ tombstoned: true });
           return;
         }
-        const inputFormat = typeof req.body?.inputFormat === 'string' ? req.body.inputFormat as InputFormat : 'auto';
+        // Over a live file the peer's bytes are decided as the pull decides them (Q-410).
+        if (arrivedFrom && await answeredPeerCopy(res, targetSpace, filePath, createHash('sha256').update(decoded!).digest('hex'), arrivedFrom,
+          (abs) => writeStored(abs, decoded!))) return;
+        const inputFormat =typeof req.body?.inputFormat === 'string' ? req.body.inputFormat as InputFormat : 'auto';
 
         // A destination a regular file blocks is refused before quota or bytes (`409`, the answer every door gives).
         await assertDestinationReachable(targetSpace, filePath);
@@ -355,6 +401,8 @@ export function registerUploadRoute(router: Router): void {
           throw err;
         }
         sha256 = stored.sha256;
+        // Both sides now hold these bytes: the agreed version, so the peer's next change replaces it instead of conflicting.
+        if (arrivedFrom) await recordSyncBase(targetSpace, fileKeyOf(targetSpace, filePath).key, arrivedFrom.instanceId, sha256);
         const quotaResult = stored.quota;
         const embeddingStatusForResponse = stored.embeddingStatus;
         const resolvedFormat = stored.resolvedFormat;
