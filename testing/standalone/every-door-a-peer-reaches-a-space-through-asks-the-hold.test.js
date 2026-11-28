@@ -71,8 +71,10 @@ const REACH_ONLY = [
   { file: 'schema-snapshot.ts', route: 'GET /schema-snapshot', why: 'a schema snapshot is not data: a wipe changes no schema and a receiver fetches the version a record is stamped with through it' },
 ];
 /** Guards that resolve a space for a caller but are space MANAGEMENT behind an admin flag or a second factor, not one of the three rights doors the design names. */
+// `requireSpaceAuthMfaScoped` was listed here as "space management behind the MFA second factor" and is not any more (Q-181, bundle-41): it
+// admits a space's own rung (reembed, reindex), so a peer-bound token on a held space reached reembed through it. It asks the hold as
+// `requireSpaceAuthScoped` does.
 const NOT_THE_EXCHANGE = [
-  { fn: 'requireSpaceAuthMfaScoped', why: 'space management behind the MFA second factor; the design names three rights doors (path, body, tool) and this is none of them' },
   { fn: 'requireAdminMfaScoped', why: 'instance-admin management of one space (wipe, export, import): an admin token is the operator\'s own tooling, not the exchange' },
   { fn: 'requireAdminOrSpaceAdminMfaScoped', why: 'admin or space-admin management of one space (rename): not the exchange' },
 ];

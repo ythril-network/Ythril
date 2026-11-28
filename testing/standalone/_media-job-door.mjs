@@ -61,9 +61,11 @@ const flag = (args, name) => { const i = args.indexOf(name); return i >= 0 ? arg
  * @param {string} [o.silenceStderr]  what the silence-detection pass prints (default: no silence at all)
  * @param {(call: object) => boolean} [o.wedge]  true = this call never ends by itself (it ends only when it is killed)
  * @param {(call: object) => void} [o.onCall]  told of each call as it starts, before it answers
+ * @param {boolean} [o.durationLines]  every whole-input decode prints the Duration line, as the real ffmpeg does (default true); false prints none
+ * @param {(call: object) => string|null} [o.fail]  a string makes that call exit 1 with it on stderr
  * @returns {{ calls: object[], restore: () => void }}
  */
-export function installFfmpeg({ durationS: durationOf = 10, silenceStderr = '', wedge = () => false, onCall = () => {} } = {}) {
+export function installFfmpeg({ durationS: durationOf = 10, silenceStderr = '', wedge = () => false, onCall = () => {}, durationLines = true, fail = () => null } = {}) {
   const calls = [];
   cp.spawn = (cmd, ...rest) => {
     if (cmd !== 'ffmpeg') return realSpawn(cmd, ...rest);
@@ -87,8 +89,13 @@ export function installFfmpeg({ durationS: durationOf = 10, silenceStderr = '', 
     let stderr = '';
     const t = flag(args, '-t');
     const durationS = typeof durationOf === 'function' ? durationOf(call) : durationOf;
-    if (args.includes('-af')) stderr = silenceStderr;
-    else if (last === '-') stderr = `Duration: ${hhmmss(durationS)}, start: 0.000000`;
+    const failure = fail(call);
+    // Every whole-input decode prints the input's Duration line, the silencedetect pass included, as the real ffmpeg does (probe P1,
+    // Q-984): a fake that printed it only for the bare probe would let a path that reads it off the silence pass find none.
+    const durationLine = durationLines ? `  Duration: ${hhmmss(durationS)}, start: 0.000000, bitrate: 256 kb/s\n` : '';
+    if (failure !== null && failure !== undefined) { stderr = String(failure); call.exitCode = 1; }
+    else if (args.includes('-af')) stderr = `${durationLine}${silenceStderr}${silenceStderr && !silenceStderr.endsWith('\n') ? '\n' : ''}size=N/A time=${hhmmss(durationS)} bitrate=N/A speed= 500x\n`;
+    else if (last === '-') stderr = `${durationLine}size=N/A time=${hhmmss(durationS)} bitrate=N/A speed= 500x\n`;
     else if (last.includes('%06d')) {
       // The keyframe pass: one frame per `fps=1/<interval>` second, as many as the (optionally capped) input has.
       const interval = Number(/fps=1\/(\d+(?:\.\d+)?)/.exec(String(flag(args, '-vf') ?? ''))?.[1] ?? 30);
@@ -105,7 +112,7 @@ export function installFfmpeg({ durationS: durationOf = 10, silenceStderr = '', 
     }
     setImmediate(() => {
       if (stderr) proc.stderr.emit('data', Buffer.from(stderr));
-      close(0);
+      close(call.exitCode ?? 0);
     });
     return proc;
   };

@@ -222,8 +222,32 @@ describe('the MCP door widens with the REST one', () => {
     });
   }
 
+  it('space_reindex is reached by the space\'s knowledge admin, as space_reembed is: no instance-admin flag, the one TOOL_RIGHTS rung', () => {
+    /*
+     * Q-181 (bundle-41): `space_reindex` carried `admin: true`, so over MCP it took an INSTANCE admin while its REST twin
+     * (`POST /api/brain/spaces/:id/reindex`) and its own TOOL_RIGHTS row both said knowledge admin on the space, and its sibling
+     * `space_reembed`, which rebuilds the same vectors, had no flag at all. The ticket's decided rung is the space's knowledge admin.
+     *
+     * Stated over the pair, each against the same expectations, so weakening either one (a flag put back on reindex, reembed's row
+     * dropped) fails the case: neither carries `admin: true` or `spaceAdmin: true`, each has exactly one TOOL_RIGHTS row, and the two
+     * rows ask the same area and the same rung, `knowledge: admin`.
+     */
+    const rows = {};
+    for (const name of ['space_reindex', 'space_reembed']) {
+      assert.doesNotMatch(mcpTool(name), /\n {2}admin: true/, `${name} demands an instance admin: a space's knowledge admin cannot reach it over MCP`);
+      assert.doesNotMatch(mcpTool(name), /\n {2}spaceAdmin: true/, `${name} carries spaceAdmin: two flags for one decision its TOOL_RIGHTS row already makes`);
+      const own = TOOL_RIGHTS.filter(r => r.tool === name);
+      assert.equal(own.length, 1, `${name} has ${own.length} TOOL_RIGHTS row(s): it must be governed by exactly one`);
+      rows[name] = { area: own[0].area, needs: own[0].needs };
+    }
+    assert.deepEqual(rows.space_reindex, { area: 'knowledge', needs: 'admin' }, 'space_reindex is not knowledge admin on the space');
+    assert.deepEqual(rows.space_reindex, rows.space_reembed, 'space_reindex and space_reembed rebuild the same vectors and ask different rungs');
+    assert.doesNotMatch(mcpTool('space_reindex'), /Requires an admin token/, 'the space_reindex description still says it needs an admin token');
+  });
+
   it('the tools that are genuinely instance-shaped did NOT get swept along', () => {
-    // `space_reindex` stays instance-admin. `save_space` was in this list and is not any more — owner, 2026-09-28:
+    // `space_reindex` WAS in this list and is not any more (Q-181, bundle-41): it is the space's knowledge admin's, as `space_reembed`
+    // is (the case above). `save_space` was in this list and is not any more — owner, 2026-09-28:
     // *"Create space has a extra toggle to avoid needing instance admin to create space"* (Q-134). It is gated by the
     // createSpaces right through `createsSpaces: true`, and still NOT by administering a space: creating one is not
     // an act within any space, so the space-admin flag would be the wrong question.
@@ -232,10 +256,6 @@ describe('the MCP door widens with the REST one', () => {
     // Space admin to wipe space"*. Its five REST routes ask `<area>: admin` for ONE space, so the
     // administrator of a space could empty it over REST and not over MCP — two doors agreeing on the word
     // `admin` and not on its scope, which is the asymmetry that reads as agreement in a diff.
-    for (const name of ['space_reindex']) {
-      assert.match(mcpTool(name), /\n {2}admin: true/, `${name} must stay instance-admin only`);
-      assert.doesNotMatch(mcpTool(name), /spaceAdmin: true/, `${name} must stay instance-admin only`);
-    }
     assert.match(mcpTool('save_space'), /\n {2}createsSpaces: true/, 'save_space is gated by the createSpaces right');
     assert.doesNotMatch(mcpTool('save_space'), /\n {2}(admin|spaceAdmin): true/,
       'save_space asks the createSpaces question, not an administrator one');
