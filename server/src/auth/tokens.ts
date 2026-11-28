@@ -460,6 +460,13 @@ export function expiredHandshakeTokenIds(config: Pick<Config, 'tokens'>, now: nu
     .map(t => t.id);
 }
 
+/** The boot sweep of {@link expiredHandshakeTokenIds}: revokes each and answers how many were revoked. */
+export async function revokeExpiredHandshakeTokens(now: number = Date.now()): Promise<number> {
+  let revoked = 0;
+  for (const id of expiredHandshakeTokenIds(getConfig(), now)) if (await revokeToken(id)) revoked++;
+  return revoked;
+}
+
 /**
  * The peer tokens a newer handshake with the same peer replaced, left from before `adoptPeerToken` existed.
  *

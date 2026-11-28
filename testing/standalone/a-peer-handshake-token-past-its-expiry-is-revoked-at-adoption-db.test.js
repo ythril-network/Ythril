@@ -41,4 +41,19 @@ describe('a handshake token past its expiry is revoked when the peer\'s handshak
     assert.ok(left.has(inFlight), 'a handshake still in flight lost its token');
     assert.ok(left.has(otherPeer), 'another peer\'s token was revoked by this peer\'s adoption');
   });
+
+  it('the boot sweep revokes every peer\'s expired handshake token and keeps live and in-flight ones', async () => {
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const future = new Date(Date.now() + 3_600_000).toISOString();
+    const expired = (await tokens.createToken({ name: 'peer:r-old', peerInstanceId: 'r', expiresAt: past })).record.id;
+    const inFlight = (await tokens.createToken({ name: 'peer:r-next', peerInstanceId: 'r', expiresAt: future })).record.id;
+    const live = (await tokens.createToken({ name: 'peer:r-live', peerInstanceId: 'r' })).record.id;
+    const operator = (await tokens.createToken({ name: 'mine-expired', expiresAt: past })).record.id;
+    const revoked = await tokens.revokeExpiredHandshakeTokens();
+    const left = ids();
+    assert.ok(revoked >= 1, `the sweep revoked ${revoked}`);
+    assert.ok(!left.has(expired), 'the boot sweep left an expired handshake token listed');
+    assert.ok(left.has(inFlight) && left.has(live), 'the boot sweep revoked a live or in-flight peer token');
+    assert.ok(left.has(operator), 'the boot sweep revoked a token bound to no peer');
+  });
 });
