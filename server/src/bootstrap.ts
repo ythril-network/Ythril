@@ -68,11 +68,9 @@ export async function startConfiguredInstanceServices(): Promise<void> {
 
   // Peer tokens whose handshake expired unfinished (Q-354): unusable, and listed for ever beside the live one until revoked here.
   try {
-    const { getConfig } = await import('./config/loader.js');
-    const { expiredHandshakeTokenIds, revokeToken } = await import('./auth/tokens.js');
-    const ids = expiredHandshakeTokenIds(getConfig());
-    for (const id of ids) await revokeToken(id);
-    if (ids.length > 0) log.info(`Revoked ${ids.length} peer token(s) whose handshake expired unfinished`);
+    const { revokeExpiredHandshakeTokens } = await import('./auth/tokens.js');
+    const revoked = await revokeExpiredHandshakeTokens();
+    if (revoked > 0) log.info(`Revoked ${revoked} peer token(s) whose handshake expired unfinished`);
   } catch (err) {
     log.error(`Sweeping expired handshake tokens failed: ${err}`);
   }

@@ -49,7 +49,8 @@ describe('a peer handshake token past its expiry is revoked', () => {
 
   it('the boot sweep and adoptPeerToken both revoke what it names', () => {
     const boot = stripComments(readFileSync('server/src/bootstrap.ts', 'utf8'));
-    assert.match(boot, /\bexpiredHandshakeTokenIds\(getConfig\(\)/, 'the boot sweep does not ask expiredHandshakeTokenIds');
+    // What the sweep revokes is driven in the -db twin (revokeExpiredHandshakeTokens); here only that the boot runs it.
+    assert.match(boot, /\brevokeExpiredHandshakeTokens\(\)/, 'the boot does not run the expired handshake sweep');
     const adopt = bodyOf(stripComments(readFileSync('server/src/auth/tokens.ts', 'utf8')), 'adoptPeerToken');
     assert.match(adopt, /\bexpiredHandshakeTokenIds\(/, 'adoptPeerToken does not revoke the peer\'s expired handshake tokens');
   });
