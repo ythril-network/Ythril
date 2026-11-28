@@ -42,6 +42,7 @@ import { createHash } from 'node:crypto';
 import { decidePeerCopy, recordFileConflict, recordSyncBase } from '../sync/file-agreement.js';
 import { conflictCopyPath } from '../sync/file-conflict.js';
 import { writeStored } from '../files/stored-bytes.js';
+import { admitSpaceWrite } from '../spaces/space-write-gate.js';
 
 /**
  * The actor an upload is made by: the calling token for a person, and NOTHING for a peer. A peer's byte push is a synced write,
@@ -386,7 +387,12 @@ export function registerUploadRoute(router: Router): void {
         await assertDestinationReachable(targetSpace, filePath);
         // Over a live file the peer's bytes are decided as the pull decides them (Q-410); a conflict copy's own path is asked too.
         if (arrivedFrom && await answeredPeerCopy(res, targetSpace, filePath, createHash('sha256').update(decoded!).digest('hex'), arrivedFrom,
-          async (copy, abs) => { await assertDestinationReachable(targetSpace, copy); await writeStored(abs, decoded!); })) return;
+          async (copy, abs) => {
+            // The copy is new bytes in the space: it meets the quota and is one counted write of the space, as `storeFile` is (review F3).
+            await assertDestinationReachable(targetSpace, copy);
+            await checkQuota('files', decoded!.length);
+            await admitSpaceWrite(targetSpace, 'files', () => writeStored(abs, decoded!));
+          })) return;
         // Quota, bytes, metadata, the processing queue and the webhook — one sequence for every door
         // (files/store-file.ts). A metadata write that fails is no longer swallowed into a 2xx.
         let stored;
@@ -423,6 +429,8 @@ export function registerUploadRoute(router: Router): void {
           res.status(400).json({ error: err.message });
           return;
         }
+        // A conflict copy over the quota, answered as a stored upload over it is (`storeFile`'s own catch above).
+        if (err instanceof QuotaError) { res.status(507).json({ error: err.message, storageExceeded: true }); return; }
         if (refusePeerWrite(res, err, req.authToken)) return;
         sendCaughtFailure(res, `writeFile error for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to write file' });
       }

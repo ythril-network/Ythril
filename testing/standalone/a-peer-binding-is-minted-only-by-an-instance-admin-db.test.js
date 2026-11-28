@@ -75,6 +75,21 @@ describe('only an instance administrator binds a token to a peer', { skip }, () 
     assert.equal(a.status, 201, `the space administrator's plain mint was refused: ${JSON.stringify(a.body)}`);
   });
 
+  it('a space administrator can neither rotate nor edit a peer-bound token inside its scope (review F2)', async () => {
+    const peer = randomUUID();
+    const made = await mint(adminKey, { name: 'peer-in-scope', peerInstanceId: peer, rights: readRights() });
+    assert.equal(made.status, 201, `fixture: ${JSON.stringify(made.body)}`);
+    const id = made.body.token.id;
+    const rotate = await fetch(`${server.url}/api/tokens/${id}/regenerate`, { method: 'POST', headers: { Authorization: `Bearer ${spaceAdminKey}` } });
+    const rotated = await rotate.json().catch(() => ({}));
+    assert.equal(rotate.status, 403, `a space administrator rotated a peer token and received its secret: ${JSON.stringify(rotated).slice(0, 160)}`);
+    assert.equal(rotated.plaintext, undefined, 'a refused rotation handed out a secret');
+    const edit = await fetch(`${server.url}/api/tokens/${id}`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${spaceAdminKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'renamed' }),
+    });
+    assert.equal(edit.status, 403, 'a space administrator edited a peer token');
+  });
+
   it('an instance administrator binds a token to a peer, and the token.create audit row names the peer', async () => {
     const peer = randomUUID();
     const a = await mint(adminKey, { name: 'manual-peer', peerInstanceId: peer, rights: readRights() });

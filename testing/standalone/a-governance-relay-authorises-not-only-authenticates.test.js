@@ -108,7 +108,9 @@ describe('the peer a token is bound to has one reader', () => {
   it('no source but the reader takes `peerInstanceId` off a request\'s token itself', () => {
     const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 300 }).filter(f => f !== READER);
     // The shapes a hand read takes: a bracket read, a property read off the authenticated token, a read off a record cast to carry the field.
-    const byHand = [/\['peerInstanceId'\]/, /authToken\b[^;\n]*?\??\.peerInstanceId\b/, /\bas \{ (?:readonly )?peerInstanceId\?: [a-z]+ \}[^;\n]*?\??\.peerInstanceId\b/];
+    // The bracket read follows what it reads (`x['peerInstanceId']`, `x?.['peerInstanceId']`); an array that LISTS the name (the audit allowlist of
+    // `token.create`, bundle-47) reads nothing and matched the old pattern.
+    const byHand = [/[\w)\]]\??\.?\['peerInstanceId'\]/, /authToken\b[^;\n]*?\??\.peerInstanceId\b/, /\bas \{ (?:readonly )?peerInstanceId\?: [a-z]+ \}[^;\n]*?\??\.peerInstanceId\b/];
     const offenders = sources.filter(f => { const text = stripComments(readFileSync(`${REPO_ROOT}/${f}`, 'utf8')); return byHand.some(re => re.test(text)); });
     assert.deepEqual(offenders, [], `these read the peer a token is bound to by hand instead of through peerBoundTo: ${offenders.join(', ')}`);
   });

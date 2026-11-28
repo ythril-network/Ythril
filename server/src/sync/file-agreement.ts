@@ -21,6 +21,7 @@ import { log, peerText } from '../util/log.js';
 import { toDocId } from '../util/paths.js';
 import { assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
 import { decideFilePull, type FilePullAction } from './file-conflict.js';
+import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 
 /** A file row with the agreed hash per peer (`syncBase.<peer instance id>`). */
 export type SyncedFileMeta = FileMetaDoc & { syncBase?: Record<string, string> };
@@ -50,10 +51,10 @@ export async function decidePeerCopy(
   spaceId: string, key: string, incomingSha256: string, peerId: string,
 ): Promise<{ action: FilePullAction; sameBytes: boolean }> {
   const row = await col<SyncedFileMeta>(spaceCollection(spaceId, 'files')).findOne(
-    asFilter<SyncedFileMeta>({ _id: toDocId(key) }),
-    { projection: { sha256: 1, deletedAt: 1, [syncBasePath(peerId)]: 1 } },
+    asFilter<SyncedFileMeta>({ ...LIVE_FILE_ROW, _id: toDocId(key) }),
+    { projection: { sha256: 1, [syncBasePath(peerId)]: 1 } },
   );
-  const live = row && !row.deletedAt && typeof row.sha256 === 'string' ? { path: key, sha256: row.sha256 } : undefined;
+  const live = row && typeof row.sha256 === 'string' ? { path: key, sha256: row.sha256 } : undefined;
   const base = row?.syncBase?.[peerId];
   const action = decideFilePull(live, { path: key, sha256: incomingSha256 }, typeof base === 'string' ? base : undefined);
   return { action, sameBytes: live?.sha256 === incomingSha256 };
