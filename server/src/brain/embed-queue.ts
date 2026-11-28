@@ -47,7 +47,7 @@ import { isSpillPath } from './spill-path.js';
 import { classifyEmbedFailure, embedFailureMessage, type EmbedVerdict } from './embed-errors.js';
 import { embedJobsFailedTotal, type EmbedJobFailedReason } from '../metrics/embed-job-failed-count.js';
 import { embedJobsHandedBackTotal } from '../metrics/embed-job-handed-back-count.js';
-import { embedClaimAge, embedLaneOf, EMBED_LANE_NAMES, type EmbedLaneName } from '../metrics/embed-claim-age.js';
+import { embedClaimAge, embedLaneOf, EMBED_LANE_NAMES, EMBED_JOB_STATUSES, type EmbedLaneName } from '../metrics/embed-claim-age.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
@@ -827,8 +827,6 @@ export async function getEmbedJobCounts(
 
 /** A space's embed jobs by status. */
 export type EmbedJobCounts = { pending: number; processing: number; failed: number };
-/** The statuses a job stands in, as a value. */
-export const EMBED_JOB_STATUSES = ['pending', 'processing', 'failed'] as const;
 
 /**
  * Per-lane, per-status counts for one space: THE one aggregation of the queue's size (Q-182). `getEmbedJobCounts` sums it (space meta,
@@ -850,7 +848,7 @@ export async function countEmbedJobsByLane(
   const out = Object.fromEntries(EMBED_LANE_NAMES.map(lane => [lane, { pending: 0, processing: 0, failed: 0 }])) as Record<EmbedLaneName, EmbedJobCounts>;
   for (const r of rows) {
     const status = r._id.status;
-    if (status === 'pending' || status === 'processing' || status === 'failed') out[embedLaneOf(r._id.priority)][status] += r.n;
+    if ((EMBED_JOB_STATUSES as readonly unknown[]).includes(status)) out[embedLaneOf(r._id.priority)][status as keyof EmbedJobCounts] += r.n;
   }
   return out;
 }

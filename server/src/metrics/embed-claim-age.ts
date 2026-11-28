@@ -18,6 +18,13 @@ export const EMBED_LANE_NAMES = ['write', 'background', 'rebuild'] as const;
 export type EmbedLaneName = typeof EMBED_LANE_NAMES[number];
 
 /**
+ * The statuses an embed job stands in, the one list the queue's count, the jobs page's filter and the `ythril_embed_jobs` gauge read, so a
+ * status cannot be listed three ways (the page, the queue and the metric each held a copy before).
+ */
+export const EMBED_JOB_STATUSES = ['pending', 'processing', 'failed'] as const;
+export type EmbedJobStatus = typeof EMBED_JOB_STATUSES[number];
+
+/**
  * The lane a job's stored priority is claimed in. A job with no priority, or one outside the lanes, is claimed as `write` (the claim's
  * `laneMatch` takes a missing priority in the write lane), so no series is ever labelled `undefined`.
  */

@@ -911,7 +911,8 @@ export const leakedRowsKeptTotal = new Counter({
   labelNames: ['reason'] as const,
   registers: [register],
 });
-for (const reason of ['depth', 'recent', 'live'] as const) leakedRowsKeptTotal.labels({ reason }).inc(0);
+export const LEAKED_ROW_KEPT_REASONS = ['depth', 'recent', 'live'] as const;
+for (const reason of LEAKED_ROW_KEPT_REASONS) leakedRowsKeptTotal.labels({ reason }).inc(0);
 
 /** Spaces whose leaked-rows scan is owed: never completed, or completed more than a day ago and not yet run again. Written by every pass of the repair. */
 export const leakedRowsRepairPendingSpaces = new Gauge({

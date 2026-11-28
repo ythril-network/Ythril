@@ -30,11 +30,11 @@
 import { Counter, Gauge, Histogram, type Registry } from 'prom-client';
 import { setEmbedJobFailedSink, EMBED_JOB_FAILED_REASONS } from './embed-job-failed-count.js';
 import { setEmbedJobHandedBackSink } from './embed-job-handed-back-count.js';
-import { setEmbedClaimAgeSink, EMBED_LANE_NAMES, type EmbedLaneName } from './embed-claim-age.js';
+import { setEmbedClaimAgeSink, EMBED_LANE_NAMES, EMBED_JOB_STATUSES, type EmbedLaneName } from './embed-claim-age.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 
-/** The statuses `ythril_embed_jobs` reports, each lane alike. */
-const STATUSES = ['pending', 'processing', 'failed'] as const;
+/** The statuses `ythril_embed_jobs` reports, each lane alike: the queue's one list. */
+const STATUSES = EMBED_JOB_STATUSES;
 type LaneCounts = Record<EmbedLaneName, Record<typeof STATUSES[number], number>>;
 
 /** Seconds from 50 ms to an hour: a write claimed at once, a backfill that waits minutes, a reindex that waits behind writes for an hour. */

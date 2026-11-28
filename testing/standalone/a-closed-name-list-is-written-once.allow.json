@@ -1,0 +1,5 @@
+{
+  "entries": [
+    { "list": "facts,entities,edges,chrono", "files": ["server/src/brain/bulk.ts", "server/src/sync/upsert-plan.ts"], "reason": "Two questions that share a spelling: the keys a save_bulk body takes, and the record families that can fork. A family added to one is not thereby added to the other.", "reviewBy": "2027-05-28" }
+  ]
+}
