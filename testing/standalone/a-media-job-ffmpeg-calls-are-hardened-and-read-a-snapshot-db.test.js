@@ -10,7 +10,7 @@
  * make it read another one or open a socket. The merged wrapper the plan builds carries these; today's two wrappers carry
  * neither. (That the wrapper also has a timeout and a kill is held by `every-ffmpeg-spawn-is-bounded-and-killed.test.js`.)
  *
- * **2. A snapshot, not the live path.** ffmpeg re-opens its input BY PATH for the duration probe, the silence pass, every segment
+ * **2. A snapshot, not the live path.** ffmpeg re-opens its input BY PATH for the silence pass (which also reads the length), every segment
  * extract and the keyframe pass. For an unencrypted file the plan returns the stored path itself instead of copying the bytes to
  * a private file (a saving of one whole copy), and a concurrent `encryptInPlace`, a re-upload or a move renames ANOTHER file over
  * that path while the job runs: the later segments then read different bytes under the silence map of the first. A hard link on
@@ -83,7 +83,7 @@ describe('a media job\'s ffmpeg calls (real worker, real Mongo, ffmpeg answered 
     ffmpeg = installFfmpeg({
       durationS: 700,   // the silence pass and at least one segment extract come AFTER the first call
       onCall: () => {
-        // The first call (the duration probe) has read its input; everything after this one reads whatever is at the path now.
+        // The first call (the one silencedetect decode, which also reads the length) has read its input; everything after this one reads whatever is at the path now.
         if (swapped || !stored) return;
         swapped = true;
         const intruder = `${stored}.intruder`;
