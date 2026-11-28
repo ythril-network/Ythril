@@ -105,23 +105,54 @@ function bookingScript() {
   return existsSync(path) ? path : null;
 }
 
-const LABEL = process.env.DOCKER_BOOKING_LABEL ?? 'b271-bench';
+/** The booking label of a run: the harness's own, or `DOCKER_BOOKING_LABEL` to show one run under another name. */
+const LABEL = process.env.DOCKER_BOOKING_LABEL ?? 'rdf-bench';
+/** The CPUs a start books and is limited to when its caller names none (what the docker booking gives a run or a hold). */
+const DEFAULT_CPUS = 2;
 
 /**
- * Runs `docker <args>` booked for `mem` GB and returns { status, stdout, stderr }. `hold` names the containers
+ * The CPUs a start is booked for: the ones its own `--cpus` names, else `cpus`.
+ */
+function cpusOf(args, cpus) {
+  const i = args[0] === 'run' ? args.indexOf('--cpus') : -1;
+  return i >= 0 ? String(args[i + 1]) : String(cpus);
+}
+
+/**
+ * `docker run` args with the limits of their booking: `-m <mem>g` and `--cpus <cpus>` put before the image unless the args
+ * already name them (`-m`, `--memory`, `--cpus`). Any other docker command comes back as it is.
+ *
+ * What it prevents: a container started with a memory limit and no CPU limit takes every CPU of the shared machine while its
+ * booking says 2. The limit is added here, in the one place every start passes through, so no call site can leave it out.
+ */
+function limitedRun(args, mem, cpus) {
+  if (args[0] !== 'run') return args;
+  const named = (...flags) => args.some((a) => flags.some((f) => a === f || a.startsWith(`${f}=`)));
+  return [
+    'run',
+    ...(named('-m', '--memory') ? [] : ['-m', `${mem}g`]),
+    ...(named('--cpus') ? [] : ['--cpus', cpus]),
+    ...args.slice(1),
+  ];
+}
+
+/**
+ * Builds `docker <args>` booked for `mem` GB and `cpus` CPUs, a run limited to the same. `hold` names the containers
  * of a detached start, which keeps the booking while they run.
  */
-function command(args, mem, hold) {
+function command(args, mem, hold, cpus = DEFAULT_CPUS) {
+  const booked = cpusOf(args, cpus);
+  const argv = limitedRun(args, mem, booked);
   const booking = bookingScript();
-  if (!booking) return { cmd: 'docker', argv: args };
-  const mode = hold ? ['hold', '--mem', String(mem), '--label', LABEL, '--containers', hold.join(',')]
-    : ['run', '--mem', String(mem), '--label', LABEL];
-  return { cmd: process.execPath, argv: [booking, ...mode, '--', 'docker', ...args] };
+  if (!booking) return { cmd: 'docker', argv };
+  const share = ['--mem', String(mem), '--cpus', booked, '--label', LABEL];
+  const mode = hold ? ['hold', ...share, '--containers', hold.join(',')] : ['run', ...share];
+  return { cmd: process.execPath, argv: [booking, ...mode, '--', 'docker', ...argv] };
 }
 
 /** The same start as `docker()`, as a promise, for a caller whose own event loop must keep serving. */
-export function dockerAsync(args, { mem = 1 } = {}) {
-  const { cmd, argv } = command(args, mem, null);
+export function dockerAsync(args, { mem = 1, cpus } = {}) {
+  const { cmd, argv } = command(args, mem, null, cpus);
   return new Promise((resolvePromise, reject) => {
     const child = spawn(cmd, argv, { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
@@ -133,8 +164,8 @@ export function dockerAsync(args, { mem = 1 } = {}) {
   });
 }
 
-export function docker(args, { mem = 1, hold = null, input, inherit = false } = {}) {
-  const { cmd, argv } = command(args, mem, hold);
+export function docker(args, { mem = 1, cpus, hold = null, input, inherit = false } = {}) {
+  const { cmd, argv } = command(args, mem, hold, cpus);
   const r = spawnSync(cmd, argv, {
     encoding: 'utf8', input, maxBuffer: 1 << 28, stdio: inherit ? 'inherit' : ['pipe', 'pipe', 'pipe'],
   });

@@ -176,12 +176,14 @@ export async function loadChunks(state, spaceId, files, params = {}) {
 export function describeRefusal({ json, text }) {
   const body = json ?? {};
   const report = body.report ?? body;
+  // An act that ended as an input failure keeps its code under the report's `failure`, not at the report's top.
+  const failureCode = report.failure?.code ?? body.failure?.code;
   const byCode = report.reasonsByCode ?? null;
   const counts = byCode ? Object.entries(byCode).map(([c, n]) => `${c} ${n}`).join(', ') : '';
   if (report.status === 'refused' || body.code === 'rdf_import_refused') {
     return { code: 'rdf_import_refused', message: `reasons: ${counts || 'none listed'}` };
   }
-  return { code: body.code ?? report.code ?? 'unknown', message: String(body.error ?? body.message ?? text).slice(0, 500) };
+  return { code: body.code ?? report.code ?? failureCode ?? 'unknown', message: String(body.error ?? body.message ?? report.failure?.detail ?? text).slice(0, 500) };
 }
 
 function summarizeReport(r) {
