@@ -34,7 +34,7 @@ const DURATION_LINE = '  Duration: 00:00:10.00, start: 0.000000, bitrate: 256 kb
 /** The progress line a decode prints as it goes. */
 const PROGRESS_LINE = 'size=N/A time=00:00:10.00 bitrate=N/A speed= 500x\n';
 
-/** A whole-input decode to the null muxer: the duration probe and the silencedetect pass. */
+/** A whole-input decode to the null muxer: the silencedetect pass, which also gives the input's length (one decode since Q-984). */
 const isDecodePass = (args) => args.some((a, i) => a === '-f' && args[i + 1] === 'null');
 
 function fakeFfmpeg(args, opts, calls) {
