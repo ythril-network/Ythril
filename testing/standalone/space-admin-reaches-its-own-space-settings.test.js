@@ -243,6 +243,14 @@ describe('the MCP door widens with the REST one', () => {
     assert.deepEqual(rows.space_reindex, { area: 'knowledge', needs: 'admin' }, 'space_reindex is not knowledge admin on the space');
     assert.deepEqual(rows.space_reindex, rows.space_reembed, 'space_reindex and space_reembed rebuild the same vectors and ask different rungs');
     assert.doesNotMatch(mcpTool('space_reindex'), /Requires an admin token/, 'the space_reindex description still says it needs an admin token');
+    // Round-1 finding F3: the words around the rung say what is true. Both tools ask knowledge admin on the space, so neither description (or the
+    // comments beside them, read raw: the tool text above is comment-free) calls the other instance-admin, "a separate and more privileged
+    // operation", or a tool a standard token cannot see, and the handler's comment does not say the dispatcher asks `admin: true`.
+    const STALE = /instance[- ]admin|more privileged|cannot see that tool|`admin: true` in the dispatcher/i;
+    for (const name of ['space_reindex', 'space_reembed']) {
+      assert.doesNotMatch(mcpTool(name), STALE, `the ${name} description still describes the rung it had before Q-181`);
+    }
+    assert.doesNotMatch(readFileSync('server/src/mcp/tools/embed.ts', 'utf8'), STALE, 'a comment in server/src/mcp/tools/embed.ts still describes the rung space_reindex had before Q-181');
   });
 
   it('the tools that are genuinely instance-shaped did NOT get swept along', () => {
