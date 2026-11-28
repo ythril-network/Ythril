@@ -18,7 +18,7 @@ import { reembedSpace, REEMBED_KINDS, REEMBED_DEFAULT_LIMIT, REEMBED_MAX_LIMIT }
 import type { BrainEmbedRecordType } from '../../config/types.js';
 import { readSpacesOfCall } from '../../spaces/read-scope.js';
 import {
-  retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType, EMBED_REPAIR_ROUTE,
+  retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType,
 } from '../../brain/embed-queue.js';
 import type { ToolContext, ToolHandler, ToolResult, ToolSchemas } from './types.js';
 import { embedJobsPage, MAX_JOB_PAGE, DEFAULT_JOB_PAGE } from '../../brain/embed-jobs-page.js';
@@ -28,6 +28,9 @@ import { ToolRefusal } from '../../util/errors.js';
 import { mfaStepUpRefusalFor } from '../../auth/mfa-asked.js';
 
 const RECORD_TYPES = [...EMBED_RECORD_TYPES];
+
+/** The status a caller asked for a second factor this door cannot take is refused with. */
+const FORBIDDEN = 403;
 
 /**
  * Answers *"which of my records have no vector"* — the question that had no answer from outside, on either surface.
@@ -246,7 +249,7 @@ export const retry_embed_mediaTool: ToolHandler = {
 export const space_reindexTool: ToolHandler = {
   name: 'space_reindex',
   description: 'Re-embed every record in a space with the currently configured embedding model — the recovery path '
-    + 'after changing embedder, model, dimensions or prefix scheme. Needs `knowledge: admin` on the space, as `space_reembed` does; on an instance with MFA on a personal token is refused (403): this door cannot present the code, so use POST /api/brain/spaces/:spaceId/reindex or the web app. Every record is rebuilt, '
+    + 'after changing embedder, model, dimensions or prefix scheme. Needs `knowledge: admin` on the space, as `space_reembed` does; on an instance with MFA on a personal token is refused (403): this door cannot present the code, so use the web app. Every record is rebuilt, '
     + 'including the passages of converted documents and the captions and transcripts of media, even when its text is '
     + 'unchanged. Returns as soon as the run STARTS: the records are queued and rebuilt in the background, behind any '
     + 'write somebody is waiting on, so poll `space_meta` — its `reindexRun` field ({running, remaining, failed}) — '
@@ -271,7 +274,7 @@ export const space_reindexTool: ToolHandler = {
     // The second factor, answered honestly and first (Q-181): REST's `POST /api/brain/spaces/:spaceId/reindex` asks a personal token for its code
     // (`requireSpaceAuthMfaScoped`), and this door has no channel for one, so a caller REST would ask is told where to go before any work.
     const stepUp = mfaStepUpRefusalFor(ctx.callerRecord, 'Rebuilding a space\'s vectors', { route: 'POST /api/brain/spaces/:spaceId/reindex' });
-    if (stepUp) throw new ToolRefusal(403, stepUp);
+    if (stepUp) throw new ToolRefusal(FORBIDDEN, stepUp);
 
     const { planReindex, startReindex } = await import('../../brain/reindex.js');
     const space = getConfig().spaces.find(s => s.id === callSpace);
@@ -336,7 +339,7 @@ export const space_reembedTool: ToolHandler = {
     + 'and for a file its parent — stays suppressed; while it is, a run writes searchable text only. Releasing it is a '
     + 'separate act, and this is what you run AFTER releasing it because nothing backfills on its own.\n\n'
     + 'NEEDS `knowledge: admin` ON THE SPACE. On an instance with MFA on, a personal token is refused (403): this door cannot present '
-    + `the code, so use ${EMBED_REPAIR_ROUTE} or the web app.\n\n`
+    + 'the code, so use the web app.\n\n'
     + 'BOUNDED, AND `truncated: true` MEANS CALL AGAIN. `limit` defaults to '
     + `${REEMBED_DEFAULT_LIMIT} and cannot exceed ${REEMBED_MAX_LIMIT}, so one call can never enqueue `
     + 'unbounded work. `remaining` is what is left after this page.\n\n'
@@ -375,7 +378,7 @@ export const space_reembedTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     // The second factor, as `space_reindex` asks it (Q-181): REST's `POST /api/spaces/:id/reembed` asks a personal token for its code.
     const stepUp = mfaStepUpRefusalFor(ctx.callerRecord, 'Repairing a space\'s embeddings', { page: 'Space settings > Danger' });
-    if (stepUp) throw new ToolRefusal(403, stepUp);
+    if (stepUp) throw new ToolRefusal(FORBIDDEN, stepUp);
     const out = await reembedSpace(callSpace, {
       ...(Array.isArray(a['kinds']) ? { kinds: a['kinds'] as BrainEmbedRecordType[] } : {}),
       ...(typeof a['limit'] === 'number' ? { limit: a['limit'] } : {}),
