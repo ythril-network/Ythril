@@ -102,7 +102,7 @@ function expectedHashOf(req: Request): string | null | undefined {
  */
 async function answeredPeerCopy(
   res: Response, spaceId: string, filePath: string, sha256: string, from: { instanceId: string; instanceLabel: string },
-  writeCopy: (abs: string) => Promise<void>,
+  writeCopy: (copy: string, abs: string) => Promise<void>,
 ): Promise<boolean> {
   const { key } = fileKeyOf(spaceId, filePath);
   const { action, sameBytes } = await decidePeerCopy(spaceId, key, sha256, from.instanceId);
@@ -113,7 +113,7 @@ async function answeredPeerCopy(
     return true;
   }
   const copy = conflictCopyPath(key, from.instanceLabel, new Date());
-  await writeCopy(await resolveSafePathChecked(spaceId, copy));
+  await writeCopy(copy, await resolveSafePathChecked(spaceId, copy));
   await recordFileConflict(spaceId, key, copy, { instanceId: from.instanceId, label: from.instanceLabel });
   res.status(200).json({ path: filePath, sha256, conflict: { path: copy } });
   return true;
@@ -273,7 +273,8 @@ export function registerUploadRoute(router: Router): void {
             // skip stores nothing, and the staged ranges do not stay either way.
             if (arrivedFrom) {
               const incoming = expectedSha256 ?? await hashStagedChunks(targetSpace, filePath, range.total);
-              const answered = await answeredPeerCopy(res, targetSpace, filePath, incoming, arrivedFrom, async (abs) => {
+              const answered = await answeredPeerCopy(res, targetSpace, filePath, incoming, arrivedFrom, async (copy, abs) => {
+                await assertDestinationReachable(targetSpace, copy);
                 await assembleChunks(targetSpace, filePath, range.total, abs, expectedSha256);
               });
               if (answered) { await discardStagedChunks(targetSpace, filePath, range.total).catch(() => undefined); return; }
@@ -379,13 +380,13 @@ export function registerUploadRoute(router: Router): void {
           res.status(200).json({ tombstoned: true });
           return;
         }
-        // Over a live file the peer's bytes are decided as the pull decides them (Q-410).
-        if (arrivedFrom && await answeredPeerCopy(res, targetSpace, filePath, createHash('sha256').update(decoded!).digest('hex'), arrivedFrom,
-          (abs) => writeStored(abs, decoded!))) return;
         const inputFormat =typeof req.body?.inputFormat === 'string' ? req.body.inputFormat as InputFormat : 'auto';
 
         // A destination a regular file blocks is refused before quota or bytes (`409`, the answer every door gives).
         await assertDestinationReachable(targetSpace, filePath);
+        // Over a live file the peer's bytes are decided as the pull decides them (Q-410); a conflict copy's own path is asked too.
+        if (arrivedFrom && await answeredPeerCopy(res, targetSpace, filePath, createHash('sha256').update(decoded!).digest('hex'), arrivedFrom,
+          async (copy, abs) => { await assertDestinationReachable(targetSpace, copy); await writeStored(abs, decoded!); })) return;
         // Quota, bytes, metadata, the processing queue and the webhook — one sequence for every door
         // (files/store-file.ts). A metadata write that fails is no longer swallowed into a 2xx.
         let stored;

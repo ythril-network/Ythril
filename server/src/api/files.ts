@@ -40,11 +40,10 @@ import { sendStoredDownload } from './files-download.js';
 import { registerUploadRoute } from './files-upload.js';
 import { registerMkdirRoute } from './files-mkdir.js';
 import { registerFileChangesRoute } from './files-changes.js';
-import { webhookToken, requireWritePath, requireWriteTarget } from './files-request.js';
+import { webhookToken, requireWritePath, requireWriteTarget, peerFileDoor } from './files-request.js';
 import { answeredUnknownSpace } from './write-target-answer.js';
 import { answerSpillPath } from './brain/spills.js';
 import { sendCaughtFailure } from './send-failure.js';
-import { refusePeerFileDoor } from './sync/_shared.js';
 
 export const fileStoreRouter = Router();
 
@@ -53,11 +52,9 @@ export const fileStoreRouter = Router();
 
 // ── GET /api/files/:spaceId ───────────────────────────────────────────────────
 // Stat the path: directory → JSON list, file → stream bytes.
-fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res) => {
+fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, peerFileDoor('read'), async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   if (answeredUnknownSpace(req, res, spaceId)) return;
-  // A peer token reaches only a space a network shared with it carries (Q-244): the sync doors' own guard.
-  if (refusePeerFileDoor(res, spaceId, req.authToken, 'read')) return;
 
   const filePath = req.query['path'];
   const normalised = typeof filePath === 'string' && filePath.trim() ? filePath : '.';
