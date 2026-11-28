@@ -66,8 +66,10 @@ path takes back bytes no record names once the database answers.
 hash both last held. A peer token's upload of other bytes over a file still at that agreed version replaces it; over a
 file that is not (it changed here too, or nothing was agreed yet), the live file stays as it is and the peer's bytes are
 saved beside it as a conflict copy, listed under Conflicts, answered `200 { "path", "sha256", "conflict": { "path" } }`.
-The agreed version sent again after this side moved on, or the same bytes, store nothing: `200 { ..., "skipped": "older" }`
-or `"same"`. Both shapes are `200` because a sync sender reads any error as a failed transfer and retries every cycle.
+The agreed version sent again after this side moved on stores nothing: `200 { ..., "skipped": "older" }`. The same bytes
+are taken as an upload of them always was. Both new shapes are `200`, because a sync sender reads any error as a failed
+transfer and retries every cycle; a sender reads either one as "the peer kept its own copy", records no agreement and does
+not offer those bytes again while they are unchanged.
 A peer token also reaches this route only for a space a network shared with that peer carries, and uploads only where
 the network lets that peer push here (`403` otherwise). An operator's own upload is never decided this way.
 

@@ -42,6 +42,7 @@ import { SPACE_AREAS } from '../config/rights-shape.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { effectiveRung, administers } from './mint-cap.js';
 import { isInstanceAdmin } from './instance-admin.js';
+import { peerBoundTo } from './peer-bound.js';
 
 /**
  * The spaces an administrator is CONFINED to, read from the rights matrix rather than the legacy allowlist.
@@ -269,7 +270,12 @@ export function refusalsOutsideEditorScope(input: {
     // a token that holds createSpaces handed a space administrator the secret of a token that creates spaces (Q-594).
     const instanceWide = [target.rights?.instanceAdmin ? '`instanceAdmin`' : null, target.rights?.createSpaces ? '`createSpaces`' : null]
       .filter((g): g is string => g !== null);
-    if (instanceWide.length > 0) {
+    // A peer-bound token IS that peer to every sync door: rotating it handed a space administrator a credential that rewrites the peer's
+    // address and casts its votes, the mint the token route refuses (Q-243). Its scope says nothing about that, so it is outside every
+    // restricted scope, as an instance-wide grant is.
+    if (peerBoundTo(target) !== undefined) {
+      out.push('that token is bound to a network peer (a sync credential), so only an instance administrator can manage it');
+    } else if (instanceWide.length > 0) {
       out.push(`that token holds ${instanceWide.join(' and ')}, which is instance-wide, so a space-restricted administrator cannot manage it`);
     } else if (!targetSpaces) {
       out.push('that token is unrestricted (it reaches every space), so a space-restricted administrator cannot edit it');

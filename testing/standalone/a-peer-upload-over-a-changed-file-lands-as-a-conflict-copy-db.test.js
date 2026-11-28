@@ -110,6 +110,15 @@ describe('a peer upload over a changed file lands as a conflict copy', { skip },
       assert.deepEqual(await conflicts(), [], 'an older version raised a conflict');
     });
 
+    it(`${shape}: the peer's next edit of a file it pushed replaces it: the accepted push recorded the agreed hash`, async () => {
+      const p = `next-${shape}.txt`;
+      assert.ok((await put(peerKey, p, 'peer version one', shape)).status < 300, 'the first peer upload failed: the fixture is wrong');
+      const a = await put(peerKey, p, 'peer version two', shape);
+      assert.ok(a.status < 300 && a.body.conflict === undefined, `the peer's ordinary second edit was not taken: ${JSON.stringify(a.body)}`);
+      assert.equal(await read(p), 'peer version two', 'the peer\'s second edit did not replace its first');
+      assert.deepEqual(await conflicts(), [], 'an ordinary edit by the only writer raised a conflict');
+    });
+
     it(`${shape}: the S-A.7 order (peer upload, delete, local re-create, peer re-sends) keeps the re-created file`, async () => {
       const p = `sa7-${shape}.txt`;
       assert.ok((await put(peerKey, p, 'erased bytes', shape)).status < 300, 'the first peer upload failed: the fixture is wrong');

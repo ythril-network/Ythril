@@ -51,6 +51,12 @@ export type PushOutcome =
   /** The peer holds a tombstone that erased exactly these bytes and stored nothing (`200 { tombstoned: true }`). */
   | { kind: 'tombstoned' }
   /**
+   * The peer kept its own copy (Q-410): its file changed there too, so ours landed beside it as a conflict copy (`200 { conflict }`), or we
+   * sent the version both last held while its copy moved on (`200 { skipped: 'older' }`). Not a delivery: no agreed hash is recorded, or
+   * the next pull would take the peer's version for a change of its own and overwrite ours here.
+   */
+  | { kind: 'kept' }
+  /**
    * The peer refused THESE BYTES (`about: 'bytes'`: a hash that is not the one promised, a malformed range; the same bytes will be refused again), or
    * the PATH (`about: 'path'`: it cannot look at it, `409 path_unreadable`; refused again until the peer's disk is mended).
    */
@@ -133,7 +139,10 @@ const refusalOf = (answer: UploadAnswer): 'bytes' | 'path' | null =>
 
 /** The outcome of an answer to the request that completed an upload (or the only request of one). */
 function settled(answer: UploadAnswer): PushOutcome {
-  if (answer.status >= 200 && answer.status < 300) return answer.json['tombstoned'] === true ? { kind: 'tombstoned' } : { kind: 'delivered' };
+  if (answer.status >= 200 && answer.status < 300) {
+    if (answer.json['tombstoned'] === true) return { kind: 'tombstoned' };
+    return answer.json['conflict'] !== undefined || answer.json['skipped'] !== undefined ? { kind: 'kept' } : { kind: 'delivered' };
+  }
   const about = refusalOf(answer);
   return about !== null
     ? { kind: 'refused', about, status: answer.status, error: errorOf(answer) }

@@ -531,6 +531,11 @@ export async function syncFiles(
           // (an older sender would read one as such and upload again), and not a delivery either — remembered, so the
           // next cycle does not send the same bytes to be refused the same way (`sync/told-tombstoned.ts`).
           noteToldTombstoned(member.instanceId, spaceId, localPath, localEntry.sha256);
+        } else if (outcome.kind === 'kept') {
+          // The peer kept its own copy (ours is a conflict copy there, or it moved past the version we sent): no agreed hash, and the same
+          // bytes are not offered again while they are unchanged, or every cycle would add one more conflict copy on the peer.
+          noteRefusedUpload(member.instanceId, spaceId, localPath, localEntry.sha256);
+          log.info(`Push file '${peerText(localPath)}' to ${peerText(member.label)}: the peer kept its own copy`);
         } else if (outcome.kind === 'delivered') {
           pushedFiles++;
           await recordSyncBase(spaceId, localPath, member.instanceId, localEntry.sha256);
