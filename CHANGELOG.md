@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | No 200-type limit per kind: a schema that grows at the storage hard limit is refused `507`, one over 10 MiB `413`; a single-type write over the rule limits `400` | Keep a schema within storage and the rule limits |
 | The audit row of a call a guard refused names the token it refused; it was empty | None; read `tokenId` on `403` and `429` rows |
 | An edit other writes outran three times answers `409 write_race_lost`, not `404`; so does an upload (it was `500`), its bytes stored | Retry it |
-| A REST reindex with a personal token and MFA on asks `X-TOTP-Code` (`403 MFA_REQUIRED`) | Send the code from scripts |
+| `POST /api/brain/spaces/:spaceId/reindex` with a PAT and MFA on asks `X-TOTP-Code` (`403 MFA_REQUIRED`) | Send the code from scripts |
 
 ### Added
 
