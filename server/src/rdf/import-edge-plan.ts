@@ -23,7 +23,6 @@
  * - **The charge comes with the answer**: {@link EdgeReadSets.planned} takes {@link EDGE_PLAN_BYTES} an edge exactly when the read set is shared.
  */
 import type { SpaceMeta } from '@ythril-network/schema';
-import type { ReadSet } from '../brain/write-plan/read-set.js';
 
 import type { ImportMemoryMeter } from './import-memory.js';
 import type { RecordOp } from './quads-to-ops.js';
@@ -50,7 +49,7 @@ const isReifiedEdge = (op: RecordOp): boolean => op.kind === 'edge' && !op.corre
 export const edgePlansCharged = (edges: number, sharing: boolean): number => (sharing ? edges * EDGE_PLAN_BYTES : 0);
 
 /** The read set for each window of edge operations of one dry plan run, and the charge of what it keeps. */
-export class EdgeReadSets {
+export class EdgeReadSets<ReadSet> {
   #shared: ReadSet | null = null;
   #sharing: boolean;
 

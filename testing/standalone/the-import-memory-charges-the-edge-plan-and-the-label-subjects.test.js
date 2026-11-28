@@ -203,7 +203,7 @@ describe('a label-only subject of the inference is charged its characters', () =
     const door = stripComments(fs.readFileSync(`${REPO_ROOT}/server/src/spaces/rdf-import-schema-step.ts`, 'utf8'));
     const at = door.indexOf('gatherClasses(source');
     assert.ok(at > 0, 'the door no longer starts the inference here: update this gate');
-    assert.match(door.slice(at, at + 200), /memory: held/, 'the first pass of the inference reads the labels with no meter');
+    assert.match(door.slice(at).split('\n', 1)[0], /memory: held/, 'the first pass of the inference reads the labels with no meter');
     assert.ok(door.indexOf('inferencePairsRoom(') > at, 'the pairs are fixed before the labels are known, so the labels spend the room twice');
   });
 });
