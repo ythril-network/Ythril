@@ -45,6 +45,11 @@
  *
  * Assertions are on ids and values (the edge found at `(from, to, label)`, its marker), never on a count alone.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 21 s (measured 2026-11-28). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads about four times that: the time of the crowd, not of this file. Cutting it would add fixtures and shorten no run.
+ *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-functional-guard-follows-its-edge-and-stays-local-db.test.js
  * (requires a prior `npm run build` in server/)

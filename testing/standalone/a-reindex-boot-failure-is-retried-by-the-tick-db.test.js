@@ -35,6 +35,11 @@
  *  5. a hung space ends at the housekeeping bound, at boot and in the tick, and the next space is processed;
  *  6. the run collection is local: no list of the replicated collections names it.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 45 s (measured 2026-11-28). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads about twice that: the time of the crowd, not of this file. Cutting it would add fixtures and shorten no run.
+ *
  * Run: `npm run test:up` first, then (after `npm run build:server`)
  *      node --test testing/standalone/a-reindex-boot-failure-is-retried-by-the-tick-db.test.js
  */
