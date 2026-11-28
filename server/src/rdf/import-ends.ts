@@ -22,7 +22,7 @@ import { MINTED_END_BYTES, ENDS_COPY_BYTES, type ImportMemoryMeter } from './imp
 import type { MintedEnd } from './import-plan.js';
 
 export class MintedEnds extends Map<string, MintedEnd> {
-  constructor(private readonly meter: ImportMemoryMeter) { super(); }
+  constructor(readonly meter: ImportMemoryMeter) { super(); }
 
   /** Keep `end` for `id`, charging {@link MINTED_END_BYTES} first when `id` is new; a refused charge keeps nothing. */
   override set(id: string, end: MintedEnd): this {

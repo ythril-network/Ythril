@@ -96,6 +96,7 @@ import {
 import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
 import { ImportMemoryMeter, importMemoryRoom } from '../rdf/import-memory.js';
 import { MintedEnds } from '../rdf/import-ends.js';
+import { EdgeReadSets } from '../rdf/import-edge-plan.js';
 import { windowBudgetOf, windowsOf } from '../rdf/import-window.js';
 import { TripletSets, assertRecordsWithinBound, type DigestSet } from '../rdf/import-count.js';
 import { counted } from '../rdf/import-upload.js';
@@ -191,7 +192,7 @@ interface RdfImportKnobs {
      * The memory figures of an import, in bytes: `need` after the door counted what the file needs (before the act is registered), `used` after
      * the translation's index and sets took their last entry. The door's need is held to be never below the act's use.
      */
-    memory?: (figure: { need: number } | { used: number }) => void;
+    memory?: (figure: { need: number; first: number; second: number } | { used: number }) => void;
     /** After the door sorted the file and before the act is registered. */
     beforeRegister?: () => unknown;
     /** After the act is registered and before it runs (a seam for a change a network makes to the space in between). */
@@ -416,14 +417,15 @@ async function mintedEndsOf(folder: ImportFolder, meter: ImportMemoryMeter): Pro
  * are kept. Answers the ids of the records it refused (the planner took back their seed within a window; the others are named here, since
  * the records of other kinds and windows were planned in read sets of their own).
  */
-async function dryPlanOnce(run: Run, builder: ReportBuilder, seeds: ReadonlyMap<string, MintedEnd>): Promise<Set<string>> {
-  const edges = importReadSet(run.spaceId);
+async function dryPlanOnce(run: Run, builder: ReportBuilder, seeds: ReadonlyMap<string, MintedEnd>, meter: ImportMemoryMeter): Promise<Set<string>> {
+  const edges = new EdgeReadSets(run.planSchema, meter, () => importReadSet(run.spaceId));
   const kinds = emptyKinds();
   const unchanged = emptyUnchanged();
   const refused = new Set<string>();
   for await (const w of opWindows(run.folder)) {
     const kind = w[0]!.kind;
-    const result = await dryPlanWindow(run.spaceId, w, kind === 'edge' ? edges : importReadSet(run.spaceId), seeds, run.planMeta!);
+    const result = await dryPlanWindow(run.spaceId, w, kind === 'edge' ? edges.forWindow(w) : importReadSet(run.spaceId), seeds, run.planMeta!);
+    if (kind === 'edge') edges.planned(result.plans.filter(plan => plan !== null).length);
     result.unchanged.forEach((same, i) => { if (same && result.plans[i]) unchanged[kind] += 1; });
     for (const refusal of result.refusals) {
       const op = w[refusal.index]!;
@@ -454,7 +456,7 @@ async function dryPlanPass(run: Run, minted: MintedEnds): Promise<ReportBuilder>
   const base = run.builder.report;
   for (;;) {
     const attempt = new ReportBuilder(structuredClone(base));
-    const refused = await dryPlanOnce(run, attempt, seeds);
+    const refused = await dryPlanOnce(run, attempt, seeds, minted.meter.fork());
     // A seed taken out is a record the next run plans without: `delete` says whether this run's refusals still had it.
     if (![...refused].map(id => seeds.delete(id)).some(Boolean)) return attempt;
   }
@@ -503,8 +505,11 @@ async function planAndCommit(run: Run): Promise<'refused' | 'planned' | 'complet
   const state = run.state;
   run.planMeta = planMetaFor(run.spaceId, run.planSchema);
   // The second phase's room: the index and the sets of the translation are gone (nothing keeps them), so the ends and their copy have a room of their own.
-  const minted = await mintedEndsOf(run.folder, new ImportMemoryMeter(knobs.bounds?.memoryBytes ?? importMemoryRoom().bytes));
-  if (!state || state.phase === 'translated') {
+  // Metered only where a dry plan runs (a dry run, or an act that has translated): from `planned` on records were or are being written, and a refusal then would
+  // end the import with part of it landed and its folder gone. What the second phase held fitted when it ran; a resume on a smaller instance finishes.
+  const planning = !state || state.phase === 'translated';
+  const minted = await mintedEndsOf(run.folder, new ImportMemoryMeter(planning ? knobs.bounds?.memoryBytes ?? importMemoryRoom().bytes : Number.POSITIVE_INFINITY));
+  if (planning) {
     run.builder = await dryPlanPass(run, minted);
     if (run.builder.refused) return 'refused';
     const ended = run.schemaStep ? await run.schemaStep() : null;
@@ -818,7 +823,7 @@ async function readAndRun(
       : { planSchema: meta.typeSchemas ?? {}, meta };
     // The memory the file's records need (subjects, statement sets and bare edges), counted from the spool alone: a file that cannot fit is answered
     // 413 here. With a schema the edges are counted under the names the proposal gives (Q-755 F8): a label the file declares or infers is a label here too.
-    knobs.hooks?.memory?.(await assertRecordsWithinBound(sorted.groups(), namesByGraph(by.meta, options), sorted.memoryBytes));
+    knobs.hooks?.memory?.(await assertRecordsWithinBound(sorted.groups(), namesByGraph(by.meta, options), sorted.memoryBytes, by.planSchema));
     const report: RdfImportReport = {
       importId, space: input.spaceId, status: dryRun ? 'dry-run' : 'running', dryRun, format: options.format, mode: options.mode,
       quads: sorted.quads, subjects: sorted.subjects, kinds: emptyKinds(), unchanged: emptyUnchanged(), reasons: [], reasonCount: 0, reasonsByCode: {}, notTaken: {},
