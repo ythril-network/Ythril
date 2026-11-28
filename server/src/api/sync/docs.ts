@@ -78,8 +78,8 @@ function pageByPosition<T extends { _id: string; seq: number }>(key: PayloadKey)
     try {
       const { spaceId, networkId, limit, full: fullParam } = req.query as Record<string, unknown>;
       if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-      if (refuseSyncRung(res, spaceId, [areaOfFamily(key)], req.authToken)) return;
       if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
+      if (refuseSyncRung(res, spaceId, [areaOfFamily(key)], req.authToken)) return;
 
       const start = syncPositionStart(req.query as Record<string, unknown>);
       if ('refusal' in start) { res.status(400).json({ error: start.refusal }); return; }
@@ -118,8 +118,8 @@ function oneById<T extends { _id: string }>(key: PayloadKey) {
     try {
       const { spaceId, networkId } = req.query as Record<string, string>;
       if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-      if (refuseSyncRung(res, spaceId, [areaOfFamily(key)], req.authToken)) return;
       if (refusePeerSpace(res, spaceId, networkId, req.authToken)) return;
+      if (refuseSyncRung(res, spaceId, [areaOfFamily(key)], req.authToken)) return;
 
       /*
        * The page's own filter and projection, so a read by id serves exactly what a page would (`Q-388`): it
