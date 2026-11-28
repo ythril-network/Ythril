@@ -32,8 +32,12 @@ import { REPO_ROOT } from './_sources.mjs';
 import { loadAllWorkflows, parseWorkflow, jobEntries, stepsOf, usesOf, expressionOf, isTrue } from '../_shared/ci-workflow.mjs';
 
 const DOWNLOAD = 'actions/download-artifact';
-/** The longest one attempt may last: well above the slowest healthy download seen (138 s), and two of them leave a job most of its limit. */
-const MOST_MINUTES_PER_ATTEMPT = 10;
+/**
+ * The longest one attempt may last: above the slowest healthy download seen (138 s), and two of them cost a job 8 minutes at most. It was 10,
+ * and Full run 46123430403 (bundle-385) spent 20 minutes on one runner whose first and second attempts both stalled, while the other shards
+ * of that run downloaded the image in 8 to 33 s.
+ */
+const MOST_MINUTES_PER_ATTEMPT = 4;
 /** Download steps the tracked workflows hold today or more: an empty scan passes every loop written over it. */
 const FLOOR_OF_DOWNLOAD_STEPS = 2;
 
