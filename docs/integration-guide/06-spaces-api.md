@@ -251,7 +251,7 @@ POST /api/spaces/:id/reembed
 Authorization: Bearer <token with knowledge:admin on the space>
 ```
 
-**Also `POST /api/space_reembed` and the `space_reembed` MCP tool** — same arguments, same rung, same
+**Also `POST /api/space_reembed` and the `space_reembed` MCP tool** — same arguments, same rung (and a personal token the instance asks the second factor of is refused `403` by the tool: it cannot present the code), same
 procedure. The tool arrived at 5.0: the capability had existed on REST since 4.4 and was invisible to the
 parity check because the capability map paired this route with `space_reindex`, which does the opposite
 thing. If you are choosing between them, read the next paragraph but one.

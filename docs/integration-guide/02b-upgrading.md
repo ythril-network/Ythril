@@ -55,7 +55,7 @@ waiting for their bytes, and the audit log names what each pass removed (`file.a
 **After upgrading, a reindex over REST asks the second factor, as a reembed does.** On an instance with MFA on,
 `POST /api/brain/spaces/:spaceId/reindex` with a personal token and no `X-TOTP-Code` header is answered `403 MFA_REQUIRED`; a script or an
 integration that reindexes with a personal token sends the code. The web app asks for it. A peer-bound token is refused a reindex or a reembed of a
-space that is held. The MCP tool `space_reindex` is open to a token with `knowledge: admin` on the space, not only to an instance admin
+space that is held, on every route that asks the second factor. The MCP tools `space_reindex` and `space_reembed` refuse such a token with `403`, as MCP cannot present the code (use the REST route or the web app); `space_reindex` is open to a token with `knowledge: admin` on the space, not only to an instance admin
 ([Brain Ops API](04d-brain-ops-api.md#reindex-space)).
 
 **After upgrading to the release that repairs stale embeddings, run `POST /api/spaces/:id/reembed` once per space.** It now also queues

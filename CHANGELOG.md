@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | No 200-type limit per kind: a schema that grows at the storage hard limit is refused `507`, one over 10 MiB `413`; a single-type write over the rule limits `400` | Keep a schema within storage and the rule limits |
 | The audit row of a call a guard refused names the token it refused; it was empty | None; read `tokenId` on `403` and `429` rows |
 | An edit other writes outran three times answers `409 write_race_lost`, not `404`; so does an upload (it was `500`), its bytes stored | Retry it |
-| `POST /api/brain/spaces/:spaceId/reindex` with a PAT and MFA on asks `X-TOTP-Code` (`403 MFA_REQUIRED`) | Send the code from scripts |
+| `POST /api/brain/spaces/:spaceId/reindex` with a PAT and MFA on asks `X-TOTP-Code` (`403 MFA_REQUIRED`); MCP `space_reindex` and `space_reembed` refuse that PAT `403` | Send the code from scripts; MCP cannot send it |
 
 ### Added
 
@@ -195,21 +195,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Recall:** a recall that fails or finds nothing to rank no longer leaves its text search running, and the text search ends at the recall's own `maxTimeMS`.
-- **Audit:** a request to a brain route of a space called `files`, `facts`, `entities`, `edges` or `chrono` was recorded under another route's operation (the records export of such a space left no entry with read logging off); the audit rules read the one path form the server serves.
+- **Audit:** a request to a brain route of a space called `files`, `facts`, `entities`, `edges` or `chrono` was recorded under another route's operation; the audit rules read the one path form the server serves.
 - **Brain:** a `$ref:` key in a bulk item's link field is refused saying a key is resolved only at an edge's `from` or `to`: save the record first and pass its id, or connect the records by an edge. `save_bulk` and the guides no longer say a link field takes a key.
 - **RDF:** `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` and `PUT /api/spaces/:id/schema` refuse a type that would give two terms of the space one RDF address (`422 rdf_term_clash`), as `PATCH /api/spaces/:id` and `schema_update` do; they stored it.
 - **RDF:** the RDF import lands typed entities and chrono entries with no `rdfs:label`, named by their address's local name; a refused record is coded by its cause (`missing-required-field`, `end-refused`, `stored-link-dangling`, `address-gives-no-name`) with the planner's sentence.
 - **RDF:** a peer can no longer push a space's base epoch to the maximum: an epoch above half of it is refused as an offer, as a shared space's first enable (no base adopted) and as a `space_rebase` round's epoch.
 - **Schema library:** a group named like a built-in object member (for example `constructor` or `__proto__`) behaves as any other, and a group's namespace goes with its last entry instead of staying hidden and holding its prefix.
 - **Web:** the Brain Overview's pencil on a type opens the space's settings on that type for a token with the schema right; it was never drawn, and neither was the Usage panel's "Reset usage", which shows to the same tokens now.
-- **Web:** a property is "Eigenschaft" in German and "właściwość" in Polish in the schema tab, not "Eigentum" and "nieruchomość" (real estate); Polish words written without accents ("wedlug", "wyslij") are corrected.
+- **Web:** a property is "Eigenschaft" in German and "właściwość" in Polish in the schema tab, not "Eigentum" and "nieruchomość"; Polish words written without accents are corrected.
 - **Web:** a document-processing setting an environment variable pins is shown locked on the Media processing page, and a save no longer sends it; one pinned setting used to fail every save silently.
 - **Web:** a screen reader reads the token hint on the login page, and the password hint and mismatch message on the setup page, with their fields.
 - **Records:** `entityName`, `fromName` and `toName` on `POST /api/filter` and MCP `filter` narrow the caller's `filter` instead of replacing its `_id`, `$or`, `from` or `to`; the web client's fact list by ids and an entity name now answers their intersection.
 - **Records:** an edge update that changes its label no longer deletes a write that landed after the edge was read: it answers `412`, as a moved version does elsewhere. Before, the newer write was lost with a `200`.
 - **Spaces:** a search-index readiness check stops within a second when its database connection closes, instead of asking the closed connection for up to a minute.
 - **Spaces:** MCP `space_stats` answers `embedQueue` (`pending`, `processing`, `failed`: records not searchable yet) as REST stats does; the doors that count a space's records read one function and answer one number.
-- **Spaces:** `update_space` refused for a face width the space's stored descriptors rule out answers 409 and `Error: <sentence>` on MCP and `POST /api/update_space`, as `PATCH /api/spaces/:id` does; it read `Error: Error (409): …` with status 400.
+- **Spaces:** `update_space` refused for a face width the space's stored descriptors rule out answers 409 and `Error: <sentence>` on MCP and `POST /api/update_space`, as `PATCH /api/spaces/:id` does.
 - **Spaces:** a refused rename leaves the space whole; of a create and a rename to one id, the second gets `409`.
 - **Housekeeping:** a space set aside after a slow answer is checked again after its pause, even while it builds its positions; before, nothing checked it until a restart.
 - **Media:** a file whose run met an unavailable embedder waits without spending an attempt, and no file starts until a probe finds it back; counted by `ythril_media_jobs_handed_back_total` and `ythril_media_embedder_probes_total`.
@@ -226,16 +226,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** a folder delete or move over an unreadable subtree answers `500 file_system_fault` and changes nothing.
 - **Files:** a resumed import whose spool cannot be read is retried, not failed and deleted; the at-rest file pass names an unreadable folder and goes on.
 - **Files:** a delete, move or space wipe that waits for a media job's write waits half a second longer than that write may take; before, it could fail with a store timeout while the write was finishing.
-- **Database:** a transaction the write bound ends after it retried a write conflict always keeps that conflict as the timeout's cause; before, it was lost when the bound ended an attempt instead of the pause between two.
+- **Database:** a transaction the write bound ends after it retried a write conflict always keeps that conflict as the timeout's cause.
 - **Database:** a transaction the database ends at the write bound's deadline, or a moment before Ythril's clock reads it (a write or a single-document read), answers the bound's timeout, not the database's raw time-limit error.
 - **Workstation:** `npm run local-connector:dev` builds the schema package it imports first and starts the local connector from a fresh clone, as the guide says.
 - **Sync:** a member that joins a club, closed or democratic network holds each joined space with the network's types and validation mode as that network's layer; one without them, or with only a passed vote's changed fields, takes them from its admitter on its next cycle.
 - **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`, and the sender offers it again an hour later.
-- **Sync:** a sync run queued behind a running one for a network that is deleted before it starts ends with one info line; it used to end as an unhandled rejection.
+- **Sync:** a sync run queued behind a running one for a network that is deleted before it starts ends with one info line.
 
 ### Security
 
-- **Embedding:** reindex asks what reembed asks: MFA on REST, `knowledge: admin` on MCP (was instance admin); a held space refuses peer tokens.
+- **Embedding:** reindex asks what reembed asks: MFA on REST, `knowledge: admin` on MCP (was instance admin), where a PAT asked for MFA is refused. A held space refuses peer tokens on every route that asks the second factor.
 - **Networks:** on a pub/sub network only the publisher's cast decides a round: a subscriber's yes or veto counts nothing, and the publisher adopts and passes only rounds it opened. Every 6.5.x let one subscriber change the network's schema for every member.
 - **Networks:** a pub/sub subscriber's schema edit lands in its own definitions, opens no round and never reaches the publisher; the publisher's schema outranks it.
 - **Networks:** a join or removal round on a club or pub/sub network, and a space addition on a pub/sub one, is never adopted and never passes. A club round passes on its proposer's yes: any member's yes passes that member's own round.
