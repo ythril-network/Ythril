@@ -61,7 +61,7 @@ const asGroups = (list) => async function* () { yield* list; };
 describe('a file past the old fixed count is bounded by memory alone', { timeout: 300_000 }, () => {
   it(`${SUBJECTS} subjects: through the door's spool and count, passes at what it needs and is refused under a small budget`, async () => {
     const started = Date.now();
-    const { MINTED_ENTRY_BYTES, SET_ENTRY_BYTES } = await memory();
+    const { MINTED_ENTRY_BYTES, SET_ENTRY_BYTES, MINTED_END_BYTES, ENDS_COPY_BYTES } = await memory();
     const { assertRecordsWithinBound } = await countModule();
     const { sortedSpool, openImportFolder } = await spoolModule();
     const { addressNames } = await reverseModule();
@@ -83,7 +83,11 @@ describe('a file past the old fixed count is bounded by memory alone', { timeout
     console.log(`${SUBJECTS} subjects sorted on disk: ${((sortedAt - started) / 1000).toFixed(1)} s`);
     assert.equal(spool.subjects, SUBJECTS, 'the door counted a different number of subjects');
     assert.ok(spool.subjects > OLD_FIXED_COUNT, 'the file is not past the old fixed count');
-    const need = SUBJECTS * MINTED_ENTRY_BYTES + WITH_EDGES * SET_ENTRY_BYTES + WITH_EDGES * MINTED_ENTRY_BYTES;
+    // The act's two phases, the larger: the index with its sets and bare edges, and the minted ends with their copy, which here is dearer per subject.
+    const firstPhase = SUBJECTS * MINTED_ENTRY_BYTES + WITH_EDGES * SET_ENTRY_BYTES + WITH_EDGES * MINTED_ENTRY_BYTES;
+    const secondPhase = SUBJECTS * (MINTED_END_BYTES + ENDS_COPY_BYTES);
+    const need = Math.max(firstPhase, secondPhase);
+    assert.equal(need, secondPhase, 'the fixture\'s larger phase is not the one this spec states');
     const answer = await assertRecordsWithinBound(spool.groups(), () => names, need);
     assert.equal(answer.need, need, 'the door charged something other than every subject, every set entry and every bare edge');
     console.log(`${SUBJECTS} subjects through the spool and the count: ${((Date.now() - started) / 1000).toFixed(1)} s`);
@@ -115,15 +119,17 @@ describe('a file past the old fixed count is bounded by memory alone', { timeout
 
 describe('the door charges as the index will', () => {
   it('a subject is charged a minted entry, however short its own address is', async () => {
-    const { MINTED_ENTRY_BYTES, indexEntryBytes } = await memory();
+    const { MINTED_ENTRY_BYTES, SET_ENTRY_BYTES, indexEntryBytes } = await memory();
     const { assertRecordsWithinBound } = await countModule();
     const { addressNames } = await reverseModule();
     const names = addressNames(meta);
     const subject = iri(`${BASE}entity/e1`);
-    const groups = asGroups([{ key: subject.value, subject, quads: [{ subject, predicate: iri('http://x.example/p'), object: iri('http://x.example/o') }] }]);
+    // One edge to a foreign object: the first phase holds the subject, the statement and a bare edge, which is dearer than the second phase's one end.
+    const groups = asGroups([{ key: subject.value, subject, quads: [{ subject, predicate: KNOWS, object: iri('http://x.example/o') }] }]);
+    const need = MINTED_ENTRY_BYTES + SET_ENTRY_BYTES + MINTED_ENTRY_BYTES;
     assert.ok(indexEntryBytes('e1') < MINTED_ENTRY_BYTES, 'the fixture\'s id is not cheaper than a minted one');
-    await assertRecordsWithinBound(groups(), () => names, MINTED_ENTRY_BYTES);
-    await assert.rejects(assertRecordsWithinBound(groups(), () => names, MINTED_ENTRY_BYTES - 1), (err) => err?.bound === 'RDF_IMPORT_MAX_MEMORY');
+    await assertRecordsWithinBound(groups(), () => names, need);
+    await assert.rejects(assertRecordsWithinBound(groups(), () => names, need - 1), (err) => err?.bound === 'RDF_IMPORT_MAX_MEMORY');
   });
 
   it('an addressed subject is charged its text id when that is dearer than a minted one: never below the index\'s own entry', async () => {

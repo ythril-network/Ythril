@@ -122,7 +122,7 @@ describe('the meter refuses the charge that passes the room', () => {
     const meter = new ImportMemoryMeter(8 * MiB);
     const err = (() => { try { meter.charge(20 * MiB); } catch (e) { return e; } return null; })();
     assert.ok(err, 'the charge was taken');
-    assert.match(err.message, /needs at least 20(\.\d+)? MiB for the import's index and record sets/);
+    assert.match(err.message, /needs at least 20(\.\d+)? MiB for what the import holds in memory/);
     assert.match(err.message, /gives one import 8(\.\d+)? MiB \(a quarter of the smaller of its heap limit and half its container's limit\)/);
     assert.match(err.message, /nothing was imported/i);
     assert.doesNotMatch(err.message, /heap limit (of|is|\()\s*\d/i, 'the instance\'s own heap figure was named');
