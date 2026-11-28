@@ -94,6 +94,11 @@ function expectedHashOf(req: Request): string | null | undefined {
   return typeof value === 'string' && /^[0-9a-fA-F]{64}$/.test(value.trim()) ? value.trim().toLowerCase() : null;
 }
 
+/** The status a decided peer push is answered with (a conflict copy, a skipped older version): not an error, so a sender stops resending. */
+const PEER_COPY_DECIDED_STATUS = 200;
+/** The status of a write over the storage quota, the one `storeFile`'s own refusal is answered with. */
+const OVER_QUOTA_STATUS = 507;
+
 /**
  * A peer's bytes for a path that holds a live file, decided as the pull decides them (`decidePeerCopy`, Q-410): answers the request and
  * returns true when the bytes are NOT to be stored over the path — the same bytes or an older version (`200 { skipped }`), or other bytes
@@ -110,13 +115,13 @@ async function answeredPeerCopy(
   // The same bytes go on as an arrival always did: re-sending them is how a file whose processing failed or never ran is processed again.
   if (action === 'write' || action === 'replace' || sameBytes) return false;
   if (action === 'skip') {
-    res.status(200).json({ path: filePath, sha256, skipped: 'older' });
+    res.status(PEER_COPY_DECIDED_STATUS).json({ path: filePath, sha256, skipped: 'older' });
     return true;
   }
   const copy = conflictCopyPath(key, from.instanceLabel, new Date());
   await writeCopy(copy, await resolveSafePathChecked(spaceId, copy));
   await recordFileConflict(spaceId, key, copy, { instanceId: from.instanceId, label: from.instanceLabel });
-  res.status(200).json({ path: filePath, sha256, conflict: { path: copy } });
+  res.status(PEER_COPY_DECIDED_STATUS).json({ path: filePath, sha256, conflict: { path: copy } });
   return true;
 }
 
@@ -430,7 +435,7 @@ export function registerUploadRoute(router: Router): void {
           return;
         }
         // A conflict copy over the quota, answered as a stored upload over it is (`storeFile`'s own catch above).
-        if (err instanceof QuotaError) { res.status(507).json({ error: err.message, storageExceeded: true }); return; }
+        if (err instanceof QuotaError) { res.status(OVER_QUOTA_STATUS).json({ error: err.message, storageExceeded: true }); return; }
         if (refusePeerWrite(res, err, req.authToken)) return;
         sendCaughtFailure(res, `writeFile error for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to write file' });
       }

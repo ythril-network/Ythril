@@ -87,7 +87,7 @@ const EXEMPT_FUNCTIONS = new Map([
   ['server/src/files/tombstones.ts:dropPendingById', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/files/tombstones.ts:settleStalePendingFileTombstones', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/files/tombstones.ts:pruneFileTombstonesUpTo', { why: ONLY_REMOVES_OR_REFUSES }],
-  ['server/src/sync/file-sync.ts:recordSyncBase', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/sync/file-agreement.ts:recordSyncBase', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/sync/arrivals.ts:convergeFileStamps', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/sync/push-reads.ts:deleteSupersededTombstones', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/brain/chrono.ts:createChrono', { why: REFUSAL_AHEAD_OF_ADMITTED_WRITES, via: ['planAndCommitOne'] }],

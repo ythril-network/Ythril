@@ -63,9 +63,12 @@ describe('audit changes — nothing is recorded unless it was named', () => {
   it('does not allowlist the operations whose payload IS a secret', () => {
     // token.create / token.regenerate produce the token; webhook.* carry URLs that can embed credentials
     // in userinfo or a query string. Absent by design, not by oversight.
-    for (const op of ['token.create', 'token.regenerate', 'webhook.create', 'webhook.update']) {
+    for (const op of ['token.regenerate', 'webhook.create', 'webhook.update']) {
       assert.equal(AUDIT_CHANGE_FIELDS[op], undefined, `${op} must not have a change allowlist`);
     }
+    // token.create names ONE field and never the secret: the peer a token was bound to (bundle-47, Q-243), which the mint route sets
+    // through `req.auditChangesExplicit` by name. Nothing is diffed; any other field on this list is the leak the rule above prevents.
+    assert.deepEqual(AUDIT_CHANGE_FIELDS['token.create'], ['peerInstanceId'], 'token.create may list the peer binding and nothing else');
   });
 });
 

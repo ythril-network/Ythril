@@ -313,7 +313,7 @@ export function refuseSyncRung(
   const rights = (authToken as { rights?: TokenRights } | undefined)?.rights;
   const missing = areas.find(area => !(rights && holdsRung(rights, spaceId, area, 'read')));
   if (missing === undefined) return false;
-  res.status(403).json({ error: rights ? rungRefusal('read', missing, spaceId) : rungRefusal('read', missing), code: `${missing}_rung` });
+  res.status(NOT_PERMITTED_STATUS).json({ error: rights ? rungRefusal('read', missing, spaceId) : rungRefusal('read', missing), code: `${missing}_rung` });
   return true;
 }
 
@@ -355,6 +355,10 @@ export function refusePeerSpace(
   return admitPeerOnResponse(res, spaceId, peerId, networkId, door, false);
 }
 
+/** The statuses the file door's peer guard and the sync rung answer: authenticated and not permitted (403); a space this member declined (423). */
+const NOT_PERMITTED_STATUS = 403;
+const DECLINED_STATUS = 423;
+
 /**
  * The file door's peer guards (`GET` and `POST /api/files/:spaceId`, file sync's target), the same the sync doors ask: a peer asking for a
  * space it dismissed is `423 space_declined`, a space no network shared with that peer carries is `403` (`spaceAllowed`), and an upload
@@ -375,10 +379,10 @@ export function refusePeerFileDoor(
   const token = authToken as Record<string, unknown> | undefined;
   const peerId = peerBoundTo(token);
   if (!peerId) return false;
-  if (declinedByThisMember(spaceId, undefined, peerId)) { res.status(423).json(SPACE_DECLINED_ANSWER); return true; }
+  if (declinedByThisMember(spaceId, undefined, peerId)) { res.status(DECLINED_STATUS).json(SPACE_DECLINED_ANSWER); return true; }
   if (refusePeerReach(res, spaceId, undefined, token)) return true;
   if (act === 'write' && isDirectionalWriteBlocked(spaceId, token)) {
-    res.status(403).json({ error: 'Directional network: write not permitted from this peer' });
+    res.status(NOT_PERMITTED_STATUS).json({ error: 'Directional network: write not permitted from this peer' });
     return true;
   }
   return false;

@@ -54,6 +54,7 @@ const NOT_A_RECORD = [
   ['server/src/brain/scan-cursor.ts', 'const moved = { ...doc, _id:', 'the duplicate-scanner cursor, keyed by space and type (moved with a renamed space: `moveScanCursors`)'],
   ['server/src/sync/positions-owed.ts', 'const moved: SpaceCounterDoc = { ...old, _id: newId, seq };', 'a space\'s counter document, moved whole with its marker fields on a rename (`moveCounterDoc`): not a record'],
   ['server/src/sync/upsert-plan.ts', 'plan.forks.push', 'a wire doc: the landing stamps it (decision 29)'],
+  ['server/src/sync/file-agreement.ts', '{ ...LIVE_FILE_ROW, _id: toDocId(key) }', 'a query filter (the live-row predicate and the id looked up, bundle-47): no row is copied'],
 ];
 
 const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 200 });

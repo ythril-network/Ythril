@@ -143,7 +143,7 @@ const EXEMPT = {
   'server/src/files/derived-rows.ts:deleteRowsDerivedFrom':
     'file sync: the row half of `removeSidecarRows` (above), shared with a peer\'s tombstone that removes only a record whose entry another '
     + 'live record names (`removeOnlyTheRecordNamed`): the rows DERIVED from the removed record at every level, which no peer sends',
-  'server/src/sync/file-sync.ts:recordSyncBase':
+  'server/src/sync/file-agreement.ts:recordSyncBase':
     'file sync: the last-agreed hash a conflict is judged against, local bookkeeping on the file row',
   'server/src/spaces/_shared.ts:repairStaleSpaceIdsReporting':
     'space creation reached from membership gossip repairs a stale spaceId on records already stored; it stores '

@@ -14,7 +14,7 @@
  *
  * ## The rule
  *
- * `syncBasePath(peerId)` (in `sync/file-sync.ts`, where the base is read and recorded) returns the path; nothing else in the server
+ * `syncBasePath(peerId)` (in `sync/file-agreement.ts`, where the base is read and recorded for both byte doors since bundle-47) returns the path; nothing else in the server
  * writes `syncBase.` followed by an expression. This file derives that function from the source (the one module that exports it) and
  * sweeps the server for any other file that builds the key, in the spellings a path is built in: a template literal, a
  * concatenation, and an array joined with a dot. A string that merely CONTAINS the word (a log line, a doc) is not a spelling.
@@ -64,7 +64,7 @@ describe('the syncBase path is spelled once', () => {
   it('exactly one module exports syncBasePath', () => {
     const where = declaring(server()).map(s => s.file);
     assert.equal(where.length, 1, `syncBasePath is exported by ${where.length} module(s): ${where.join(', ') || 'none'} — the one spelling of \`syncBase.<peer>\` does not exist`);
-    assert.equal(where[0], 'server/src/sync/file-sync.ts', 'the path is built where the base is read and recorded');
+    assert.equal(where[0], 'server/src/sync/file-agreement.ts', 'the path is built where the base is read and recorded');
   });
 
   it('no site in the server builds the key by hand', () => {
@@ -75,7 +75,7 @@ describe('the syncBase path is spelled once', () => {
   });
 
   it('the function answers what the sites it replaced wrote', async () => {
-    const { syncBasePath } = await import('../../server/dist/sync/file-sync.js');
+    const { syncBasePath } = await import('../../server/dist/sync/file-agreement.js');
     assert.equal(syncBasePath('peer-a'), 'syncBase.peer-a');
     assert.equal(syncBasePath('0b1c2d3e-4f50-6789-abcd-ef0123456789'), 'syncBase.0b1c2d3e-4f50-6789-abcd-ef0123456789');
   });
