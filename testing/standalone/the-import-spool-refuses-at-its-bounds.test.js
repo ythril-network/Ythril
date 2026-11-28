@@ -5,8 +5,8 @@
  * ## The rule
  *
  * An import into a strict space is planned whole before anything is stored, so "too large" must be the door's answer (413), found in the pass
- * that reads the file, before an act is registered and its space held. Each bound (the quads of the file, its distinct subjects, the quads
- * and the characters of one subject) passes a file exactly at it and refuses one over it, naming the bound; a subject's quads are counted
+ * that reads the file, before an act is registered and its space held. Each bound (the quads of the file, the memory its distinct subjects take in
+ * the index, the quads and the characters of one subject) passes a file exactly at it and refuses one over it, naming the bound; a subject's quads are counted
  * after the sort, so quads of one subject scattered over many runs, and a chrono's time nodes, count toward that one subject. After a refusal,
  * and after the reader throws, the folder is empty. A crash between the sort and the read leaves files that `removeImportFolder` removes
  * without the handle that wrote them; it removes nothing in a folder that holds a file the module did not write.
@@ -21,6 +21,7 @@ import {
   spoolModule, indexModule, tempFolder, cleanupFolders, namesIn, namesAt, quadChars,
   iri, lit, q, streamOf, groupsOf, refusalOf, assertBound,
 } from './_rdf-import-spool-doors.mjs';
+import { importOrFail } from '../_shared/import-or-fail.mjs';
 
 after(cleanupFolders);
 
@@ -60,13 +61,15 @@ describe('the import spool refuses at its bounds', { timeout: 60_000 }, () => {
     await holdsAt('quads', quads, 'maxQuads', 'RDF_IMPORT_MAX_QUADS', quads.length);
   });
 
-  it('the distinct subjects: passes at the bound, refused one over it; a chrono and its time nodes are one subject', async () => {
+  it('the distinct subjects: the memory they take passes at the budget, refused one byte under it; a chrono and its time nodes are one subject', async () => {
+    const { MINTED_ENTRY_BYTES } = await importOrFail('server/dist/rdf/import-memory.js', 'the import\'s memory room and what an entry costs (Q-983)');
     const quads = spread(60, 3);
     const chrono = `${BASE}chrono/c1`;
     quads.splice(17, 0, q(iri(`${chrono}#start`), P('t'), lit('2026-01-01')));
     quads.splice(91, 0, q(iri(chrono), P('label'), lit('c1')));
     quads.push(q(iri(`${chrono}#end`), P('t'), lit('2026-02-01')));
-    await holdsAt('subjects', quads, 'maxSubjects', 'RDF_IMPORT_MAX_SUBJECTS', 61);
+    // 61 subjects, each taking a minted entry of the index: the budget that holds them is the one the sort refuses one byte under.
+    await holdsAt('subjects', quads, 'memoryBytes', 'RDF_IMPORT_MAX_MEMORY', 61 * MINTED_ENTRY_BYTES);
   });
 
   it('the quads of one subject, scattered over many runs: passes at the bound, refused one over it', async () => {

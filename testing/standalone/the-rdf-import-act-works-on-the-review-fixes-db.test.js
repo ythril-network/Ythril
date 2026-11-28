@@ -6,8 +6,8 @@
  *
  * - H2: in a warn space a record the dry plan refuses is not present for the records planned before it (a fact that links it) or after it (an
  *   edge to it): every one of them is refused and named in the report, and nothing lands.
- * - H3: a file whose subjects pass the record bound but whose bare edges (each an index record) do not is answered 413 by the door, naming the
- *   bound, before any act is registered: no report is kept, no importId is answered.
+ * - H3: a file whose subjects fit the import's memory room but whose bare edges (each an index record) and statement sets do not is answered 413
+ *   by the door, naming `RDF_IMPORT_MAX_MEMORY`, before any act is registered: no report is kept, no importId is answered.
  * - H5: a stored record whose link rows are over the bound cannot be converged onto: the import ends refused with its reason in the report,
  *   no act is left owed, and the space takes writes again. Both doors answer alike.
  * - H1: a stored record the file names only inside the triple term of an edge's reifier is a known end, however the file's groups fall into
@@ -101,19 +101,19 @@ describe('the RDF import act works on top of the review fixes (real routes, real
     assert.deepEqual(refusedKinds(mcp.structured?.report).sort(), kinds.sort(), 'the tool answers the same refusals');
   });
 
-  it('H3: records past the index bound through bare edges are a 413 at the door, before an act is registered', async () => {
-    // Two subjects pass the door's subject bound; the bare edge is the third record of an index bound of two.
-    act.setRdfImportKnobsForTest({ maxRecords: 2 });
+  it('H3: records past the memory room through bare edges are a 413 at the door, before an act is registered', async () => {
+    // Two subjects fit the 300 bytes (110 each) the door's subject bound takes; the bare edge and its statement set (110 and 53) do not.
+    act.setRdfImportKnobsForTest({ memoryBytes: 300 });
     const before = reportCount();
     try {
       const r = await d.importRest(writer.key, H3, goodTurtle(H3));
       assert.equal(r.status, 413, r.text.slice(0, 300));
-      assert.equal(r.body?.bound, 'RDF_IMPORT_MAX_RECORDS');
+      assert.equal(r.body?.bound, 'RDF_IMPORT_MAX_MEMORY');
       assert.equal(r.body?.importId, undefined, `no import was registered, so none is named: ${r.text.slice(0, 300)}`);
       assert.equal(reportCount(), before, 'no report was kept: the answer came from the door, with no act behind it');
       const m = await d.importMcp(writer.key, { space: H3, document: goodTurtle(H3), format: 'turtle' });
       assert.equal(m.isError, true, m.text.slice(0, 200));
-      assert.match(m.text, /RDF_IMPORT_MAX_RECORDS/);
+      assert.equal(m.structured?.bound, 'RDF_IMPORT_MAX_MEMORY', m.text.slice(0, 300));
       assert.equal(reportCount(), before);
     } finally { act.setRdfImportKnobsForTest(null); }
     assert.deepEqual(d.actsOf(H3), []);

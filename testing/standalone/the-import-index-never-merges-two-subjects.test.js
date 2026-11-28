@@ -9,18 +9,20 @@
  * another key (and answers no `get` for a key that is not the one held). The collision is forced through the index's test seam
  * (`lookupDigest`, never set outside a test), which makes two keys share a lookup digest.
  *
- * ## U4: the record bound after the door's subject bound
+ * ## U4: the memory bound after the door's subject bound
  *
- * The door lets a file in by its subject bound (`RDF_IMPORT_MAX_SUBJECTS`), and the index refuses past its record bound
- * (`RDF_IMPORT_MAX_RECORDS`); an asserted triple no reifier names is an edge the index also holds (under its triplet key), so a file within the
- * subject bound can still reach the record bound, and then the refusal is the index's, by name, as the door's 413 (the same error class). The
- * subject bound may never be above the record bound, or a file of subjects alone would be let in and refused.
+ * The door lets a file in by the subjects its memory room holds (`floor(room / MINTED_ENTRY_BYTES)`), and the index refuses past the same room
+ * (`RDF_IMPORT_MAX_MEMORY`); an asserted triple no reifier names is an edge the index also holds (under its triplet key), so a file within the
+ * subject bound can still reach the room, and then the refusal is the index's, by name, as the door's 413 (the same error class). The subject
+ * bound may never take more than the room, or a file of subjects alone would be let in and refused.
  *
  * Run: node --test testing/standalone/the-import-index-never-merges-two-subjects.test.js (requires a prior `npm run build:server`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { indexModule, spoolModule, refusalOf, assertBound } from './_rdf-import-spool-doors.mjs';
+import { importOrFail } from '../_shared/import-or-fail.mjs';
 
 const ENTITY = (id) => ({ kind: 'entity', id, stored: false });
 const A = '11111111-1111-4111-8111-111111111111';
@@ -72,19 +74,32 @@ describe('two subjects of one digest are never one entry', () => {
   });
 });
 
-describe('the door\'s subject bound and the index\'s record bound', () => {
-  it('a file of subjects alone, at the door\'s bound, is never refused by the index: the subject bound is not above the record bound', async () => {
-    const { DEFAULT_IMPORT_SPOOL_BOUNDS } = await spoolModule();
-    const { RDF_IMPORT_MAX_RECORDS } = await indexModule();
-    assert.ok(DEFAULT_IMPORT_SPOOL_BOUNDS.maxSubjects <= RDF_IMPORT_MAX_RECORDS,
-      `the door lets ${DEFAULT_IMPORT_SPOOL_BOUNDS.maxSubjects} subjects in and the index refuses past ${RDF_IMPORT_MAX_RECORDS} records`);
+describe('the door\'s subject bound and the index\'s memory room', () => {
+  it('a file of subjects alone, at the door\'s bound, is never refused by the index: the subjects the door lets in fit the room the index has', async () => {
+    const { MINTED_ENTRY_BYTES, ImportMemoryMeter } = await importOrFail('server/dist/rdf/import-memory.js', 'the import\'s memory room (Q-983)');
+    const { sortedSpool, openImportFolder } = await spoolModule();
+    const { ImportIndex } = await indexModule();
+    const { tempFolder, namesAt, streamOf, groupsOf, iri, lit, q } = await import('./_rdf-import-spool-doors.mjs');
+    const room = 7 * MINTED_ENTRY_BYTES + MINTED_ENTRY_BYTES / 2;
+    const BASE = 'https://data.example.org/ld/u4/';
+    const quads = (n) => Array.from({ length: n }, (_, i) => q(iri(`${BASE}entity/e${i}`), iri('https://vocab.example.org/p'), lit(`v${i}`)));
+    const folder = await openImportFolder(tempFolder('u4'));
+    const spool = await sortedSpool(streamOf(quads(7)), folder, { names: await namesAt(BASE), bounds: { memoryBytes: room } });
+    const index = new ImportIndex({ meter: new ImportMemoryMeter(room) });
+    for (const g of await groupsOf(spool)) index.set(g.key, ENTITY(crypto.randomUUID()));
+    assert.equal(index.size, 7, 'the subjects the door let in were not all taken by the index');
+    const over = await openImportFolder(tempFolder('u4-over'));
+    assertBound(await refusalOf(sortedSpool(streamOf(quads(8)), over, { names: await namesAt(BASE), bounds: { memoryBytes: room } }), 'one subject more than the room holds'),
+      'RDF_IMPORT_MAX_MEMORY', room);
   });
 
-  it('a minted edge (its triplet key) counts as a record: subjects at the bound plus one edge reach the record bound, refused by name', async () => {
+  it('a minted edge (its triplet key) is charged as a record: subjects filling the room plus one edge reach it, refused by name', async () => {
     const { ImportIndex } = await indexModule();
-    const index = new ImportIndex({ maxRecords: 5 });
+    const { ImportMemoryMeter, MINTED_ENTRY_BYTES } = await importOrFail('server/dist/rdf/import-memory.js', 'the import\'s memory room (Q-983)');
+    const room = 5 * MINTED_ENTRY_BYTES;
+    const index = new ImportIndex({ meter: new ImportMemoryMeter(room) });
     for (let k = 0; k < 5; k += 1) index.set(`subject:${k}`, ENTITY(`00000000-0000-4000-8000-00000000000${k}`));
-    assertBound(await refusalOf(Promise.resolve().then(() => index.set('triplet:a knows b', { kind: 'edge', id: B, stored: false })), 'an edge past the record bound'),
-      'RDF_IMPORT_MAX_RECORDS', 5);
+    assertBound(await refusalOf(Promise.resolve().then(() => index.set('triplet:a knows b', { kind: 'edge', id: B, stored: false })), 'an edge past the room'),
+      'RDF_IMPORT_MAX_MEMORY', room);
   });
 });

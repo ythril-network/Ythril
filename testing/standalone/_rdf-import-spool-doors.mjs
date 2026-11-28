@@ -8,7 +8,7 @@
  *   `removeImportFolder(dir)` is the same removal without a handle (a crash left the files and the process that wrote them is gone).
  *   It removes only the files the module writes, and refuses a folder that holds anything else, so a wrong path never loses a caller's files.
  * - `sortedSpool(quads, folder, { names, bounds? })` reads the quads once, counts them, their distinct subjects and the quads and characters of
- *   the largest subject against `bounds` (`maxQuads`, `maxSubjects`, `maxSubjectQuads`, `maxSubjectChars`, `runBytes`), and sorts them on disk
+ *   the largest subject against `bounds` (`maxQuads`, `memoryBytes`, `maxSubjectQuads`, `maxSubjectChars`, `runBytes`), and sorts them on disk
  *   by graph and subject; over a bound it throws `RdfImportBoundExceeded` (`code: 'rdf_bound_exceeded'`, `bound`: the constant's name, `limit`)
  *   before it returns, having removed what it wrote. It answers `{ quads, subjects, largestSubjectQuads, groups() }`; `groups()` yields
  *   `{ key, graph?, subject, quads }`, one per subject and graph, a record's parts delivered with it: `names` is the reverse addressing's
@@ -17,8 +17,10 @@
  * - `quadGroupKey(subject, graph?)` is the key a group carries and the index is keyed by.
  * - `openOperationSpool(folder)` answers `{ append(kind, op), close(), read(order) }`: one file per kind, read back kind by kind in `order`.
  *
- * `server/src/rdf/import-index.ts`: `new ImportIndex({ maxRecords? })` with `set(key, { kind, id, stored })`, `get(key)`, `has(key)`, `size`,
- * `write(folder)` and `ImportIndex.read(folder, options?)`; over `maxRecords` it throws `RdfImportBoundExceeded` naming `RDF_IMPORT_MAX_RECORDS`.
+ * `server/src/rdf/import-index.ts`: `new ImportIndex({ meter? })` with `set(key, { kind, id, stored })`, `get(key)`, `has(key)`, `size`,
+ * `write(folder)` and `ImportIndex.read(folder, options?)`; past the room of its `ImportMemoryMeter` (`import-memory.ts`) it throws
+ * `RdfImportBoundExceeded` naming `RDF_IMPORT_MAX_MEMORY`, with the room as `limit` and what the import then needs as `need`. The subjects bound of
+ * the sort is `memoryBytes` (a budget in bytes: `floor(memoryBytes / MINTED_ENTRY_BYTES)` subjects), the same refusal.
  *
  * What the helpers decide once: every folder is made under the runner's temporary folder (`os.tmpdir()`), never the checkout, and removed after.
  */
@@ -108,5 +110,9 @@ export function assertBound(err, bound, limit) {
   assert.equal(err.code, 'rdf_bound_exceeded');
   assert.equal(err.bound, bound, `the refusal names ${err.bound}, not ${bound}`);
   assert.equal(err.limit, limit);
-  assert.match(err.message, new RegExp(bound), 'the message names the bound');
+  // The memory bound's message is a sentence of figures (what the file needs, what one import is given), not the constant's name.
+  if (bound === 'RDF_IMPORT_MAX_MEMORY') {
+    assert.match(err.message, /needs at least .* MiB/, 'the message says what the file needs');
+    assert.equal(typeof err.need, 'number', 'the refusal carries the need');
+  } else assert.match(err.message, new RegExp(bound), 'the message names the bound');
 }

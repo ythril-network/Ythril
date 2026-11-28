@@ -118,15 +118,18 @@ describe('the pages say what the import and its shared checks do to existing cal
     assert.ok(mcp.includes('(REST answers `507`)') && mcp.includes(`over ${size} as JSON`), 'the tool page says the bulk limit and the size bound on the save_bulk row');
   });
 
-  it('L7, L5 and Q-953: the import section says the idle bound, the rate, and the multiple of the record bound the code holds', () => {
+  it('L7, Q-953 and Q-983: the import section says the idle bound, the rate, and the share of memory one import is given, as the code holds them', () => {
     const reader = read('server/src/util/upload-reader.ts');
     assert.equal(/UPLOAD_IDLE_MS = 60_000;/.test(reader), true, 'the idle bound is a minute (the section says "a minute")');
     assert.equal(/UPLOAD_RATE_WINDOW_MS = 60_000;/.test(reader), true, 'the rate window is a minute (the section says "over a minute")');
     assert.equal(/MIN_TRANSFER_BYTES_PER_SECOND = 16_384;/.test(read('server/src/util/pace-window.ts')), true, 'the rate is 16 KiB/s (the section says so)');
-    assert.equal(/RDF_IMPORT_EDGE_STATEMENT_MULTIPLE = 2;/.test(read('server/src/rdf/import-count.ts')), true, 'the multiple is two (the section says "twice")');
+    const room = read('server/src/rdf/import-memory.ts');
+    assert.equal(/ROOM_DIVISOR = 4;/.test(room) && /CONTAINER_DIVISOR = 2;/.test(room), true, 'the room is a quarter of the smaller of the heap limit and half the container (the section says so)');
     const section = importSection();
     assert.ok(section.includes('an upload that sends nothing for a minute is answered `408 rdf_import_upload_stalled`'), 'the section says the stalled upload is refused 408');
     assert.ok(section.includes('one that sends less than 16 KiB/s over a minute of waiting is answered `408 rdf_import_upload_too_slow`'), 'the section says the slow upload is refused 408');
-    assert.ok(section.includes('edge statements pass twice the record bound'), 'the section says the multiple');
+    assert.ok(section.includes('a quarter of the smaller of its heap limit and half its container\'s memory limit'), 'the section says the share the import gets');
+    assert.ok(section.includes('`--max-old-space-size`') && section.includes('`NODE_OPTIONS`'), 'the section says how to raise the heap limit past the container');
+    assert.ok(!/twice the record bound|RDF_IMPORT_MAX_(SUBJECTS|RECORDS)/.test(section), 'the section still names the retired record bound');
   });
 });
