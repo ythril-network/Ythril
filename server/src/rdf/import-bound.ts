@@ -18,17 +18,18 @@ export type ImportBoundName =
   | 'RDF_IMPORT_MAX_SPOOL_BYTES';
 
 /**
- * A file, or the import's index and record sets, over a named bound: the door's 413. `limit` is the bound's figure (for the memory bound the room
- * one import is given, in bytes) and `need`, for the memory bound only, what the import needs: at least that, as the refusal comes at the first charge
- * past the room, before the whole need is known.
+ * A file, or what an import holds for it, over a named bound: the door's 413. `limit` is the bound's figure (for the memory bound the room one import is
+ * given, in bytes) and `need`, for the memory bound only, what the import needs. `whole` says the need is the whole of it (a figure the file's counts
+ * give, such as a phase's cost from its subjects, or the last charge of a count); without it the refusal came at the first charge past the room, before
+ * the rest was known, and the need is at least that. The words say which, so a caller is never told "at least" when the figure to aim for is known.
  */
 export class RdfImportBoundExceeded extends Error {
   readonly code = 'rdf_bound_exceeded' as const;
-  constructor(readonly bound: ImportBoundName, readonly limit: number, readonly need?: number) {
+  constructor(readonly bound: ImportBoundName, readonly limit: number, readonly need?: number, readonly whole = false) {
     super(need === undefined
       ? `The file is over the import's bound ${bound} (${limit}); nothing was imported.`
-      : `The file needs at least ${mib(need)} MiB for the import's index and record sets; this instance gives one import ${mib(limit)} MiB `
-        + '(a quarter of the smaller of its heap limit and half its container\'s limit); nothing was imported.');
+      : `The file needs ${whole ? '' : 'at least '}${mib(need)} MiB for what the import holds in memory (its index, record sets, minted ids and inferred schema); `
+        + `this instance gives one import ${mib(limit)} MiB (a quarter of the smaller of its heap limit and half its container's limit); nothing was imported.`);
     this.name = 'RdfImportBoundExceeded';
   }
 
