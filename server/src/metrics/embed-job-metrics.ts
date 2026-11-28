@@ -34,7 +34,6 @@ import { setEmbedClaimAgeSink } from './embed-claim-age.js';
 import { EMBED_LANE_NAMES, EMBED_JOB_STATUSES, type EmbedLaneCounts } from '../brain/embed-job-names.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 
-
 /** Seconds from 50 ms to an hour: a write claimed at once, a backfill that waits minutes, a reindex that waits behind writes for an hour. */
 const CLAIM_AGE_BUCKETS = [0.05, 0.25, 1, 5, 15, 60, 300, 900, 3600];
 
