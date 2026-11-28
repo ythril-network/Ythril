@@ -18,7 +18,7 @@ import { reembedSpace, REEMBED_KINDS, REEMBED_DEFAULT_LIMIT, REEMBED_MAX_LIMIT }
 import type { BrainEmbedRecordType } from '../../config/types.js';
 import { readSpacesOfCall } from '../../spaces/read-scope.js';
 import {
-  retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType,
+  retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType, EMBED_REPAIR_ROUTE,
 } from '../../brain/embed-queue.js';
 import type { ToolContext, ToolHandler, ToolResult, ToolSchemas } from './types.js';
 import { embedJobsPage, MAX_JOB_PAGE, DEFAULT_JOB_PAGE } from '../../brain/embed-jobs-page.js';
@@ -336,7 +336,7 @@ export const space_reembedTool: ToolHandler = {
     + 'and for a file its parent — stays suppressed; while it is, a run writes searchable text only. Releasing it is a '
     + 'separate act, and this is what you run AFTER releasing it because nothing backfills on its own.\n\n'
     + 'NEEDS `knowledge: admin` ON THE SPACE. On an instance with MFA on, a personal token is refused (403): this door cannot present '
-    + 'the code, so use POST /api/spaces/:id/reembed or the web app.\n\n'
+    + `the code, so use ${EMBED_REPAIR_ROUTE} or the web app.\n\n`
     + 'BOUNDED, AND `truncated: true` MEANS CALL AGAIN. `limit` defaults to '
     + `${REEMBED_DEFAULT_LIMIT} and cannot exceed ${REEMBED_MAX_LIMIT}, so one call can never enqueue `
     + 'unbounded work. `remaining` is what is left after this page.\n\n'
@@ -374,7 +374,7 @@ export const space_reembedTool: ToolHandler = {
     // the bounding all live there, because they are rules the write path has to agree with too.
     const { args: a, callSpace } = ctx;
     // The second factor, as `space_reindex` asks it (Q-181): REST's `POST /api/spaces/:id/reembed` asks a personal token for its code.
-    const stepUp = mfaStepUpRefusalFor(ctx.callerRecord, 'Repairing a space\'s embeddings', { route: 'POST /api/spaces/:id/reembed' });
+    const stepUp = mfaStepUpRefusalFor(ctx.callerRecord, 'Repairing a space\'s embeddings', { page: 'Space settings > Danger' });
     if (stepUp) throw new ToolRefusal(403, stepUp);
     const out = await reembedSpace(callSpace, {
       ...(Array.isArray(a['kinds']) ? { kinds: a['kinds'] as BrainEmbedRecordType[] } : {}),
