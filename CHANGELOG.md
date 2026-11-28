@@ -191,6 +191,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Repository:** the contributor licence agreement, its signing workflow and the pull-request template are removed, and a standalone test fails if a guide, agreement or template for outside code returns.
 - **RDF:** no user-facing effect yet: the server reads an address the export writes back to its record or term, for the import that follows; it accepts exactly the spellings the export writes and nothing else.
 - **Media:** a media job's `ffmpeg` uses at most as many decoder and filter threads as the container has CPUs, and never more than 16; in a CPU-limited container it no longer starts one thread per host core and starves the instance's other work.
+- **Media:** an audio file, and a video's soundtrack, is decoded once before it is cut into segments, not twice. A file whose container states no length is cut over the length its decode reached, not one guessed from its size, so compressed audio keeps its tail. A file `ffmpeg` cannot decode fails its job's attempt instead of completing as one guessed segment.
 
 ### Fixed
 

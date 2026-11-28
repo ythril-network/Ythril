@@ -15,8 +15,8 @@
  * ## The two cases, and the snapshot is the half that is easy to miss
  *
  * **Not encrypted:** no copy of the bytes. A HARD LINK to the stored file is made inside the job's scratch directory,
- * and that is what the job opens. The link IS the snapshot: ffmpeg re-opens its input by path for the duration probe,
- * the silence pass, every segment extract and the keyframe pass, so a concurrent `encryptInPlace`, re-upload or move
+ * and that is what the job opens. The link IS the snapshot: ffmpeg re-opens its input by path for the silence pass,
+ * every segment extract and the keyframe pass, so a concurrent `encryptInPlace`, re-upload or move
  * would otherwise change the bytes under a job halfway through — later segments read as ciphertext under a silence map
  * made from the plaintext. A link costs an inode entry and no bytes. Where one cannot be made (a filesystem that
  * refuses links, or scratch on another device) the live path is used, said in a debug line rather than failing the

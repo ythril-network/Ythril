@@ -373,7 +373,8 @@ describe('the media embedders store exactly what they store today (real MongoDB,
         records: [{ chunkId: 'calls/q3.wav#media-chunk0', startMs: 0, endMs: 10_000, transcript: 'welcome to the quarterly call' }],
         failed: 0, total: 1,
       });
-      assert.deepEqual(kinds(), ['probe', 'silence', 'segment']);
+      // One decode pass (Q-984): the silencedetect pass answers the length too, so no separate probe runs.
+      assert.deepEqual(kinds(), ['silence', 'segment']);
 
       const chunk = await files().findOne({ _id: 'calls/q3.wav#media-chunk0' });
       expectKeys(chunk, AUDIO_KEYS);
@@ -392,23 +393,22 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       assert.deepEqual(seen, ['welcome to the quarterly call'], 'the transcript is what is embedded');
     });
 
-    it('what ffmpeg is asked: the handle it was given is the input, probed, silence-detected, then cut at 16 kHz mono 16-bit PCM', async () => {
+    it('what ffmpeg is asked: the handle it was given is the input, silence-detected (which reads its length too), then cut at 16 kHz mono 16-bit PCM', async () => {
       await seedParent('calls/q3.wav');
       const handle = handleOf(Buffer.from('the-exact-audio-bytes'), 'audio/wav', 'audio');
       await runAudio(OPEN, 'calls/q3.wav', handle, 'audio/wav');
 
-      const [probe, silence, segment] = ff.calls;
+      const [silence, segment] = ff.calls;
       // Bundle-89: ffmpeg opens the CALLER's path. The embedder used to write the bytes it was handed back to disk
       // first, which is the copy this ticket removed, so a path of its own here would be that copy returning.
-      assert.equal(probe.inputPath, handle.path, 'ffmpeg opens the handle, not a copy the embedder made');
+      assert.equal(silence.inputPath, handle.path, 'ffmpeg opens the handle, not a copy the embedder made');
       // `-y` is no longer FIRST: the one wrapper puts its hardening flags in front of it (bundle-89), so this asks what
       // it always meant — that every call carries it — rather than where it sits.
       for (const c of ff.calls) assert.ok(c.args.includes('-y'), 'every call overwrites its output');
-      assert.ok(probe.inputPath.endsWith('input.wav'), `the input is named for its MIME: ${probe.inputPath}`);
-      assert.equal(probe.input.toString(), 'the-exact-audio-bytes', 'ffmpeg reads exactly the bytes the embedder was handed');
-      assert.equal(silence.inputPath, probe.inputPath);
+      assert.ok(silence.inputPath.endsWith('input.wav'), `the input is named for its MIME: ${silence.inputPath}`);
+      assert.equal(silence.input.toString(), 'the-exact-audio-bytes', 'ffmpeg reads exactly the bytes the embedder was handed');
       assert.equal(flagOf(silence.args, '-af'), 'silencedetect=n=-30dB:d=0.5');
-      assert.equal(segment.inputPath, probe.inputPath);
+      assert.equal(segment.inputPath, silence.inputPath);
       assert.equal(flagOf(segment.args, '-ss'), '0');
       assert.equal(flagOf(segment.args, '-t'), '10');
       assert.equal(flagOf(segment.args, '-acodec'), 'pcm_s16le');
@@ -501,7 +501,7 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       assert.equal(await files().countDocuments({ parentFileId: 'calls/q3.wav' }), 0);
     });
 
-    it('an unreadable duration falls back to the byte length at 32 000 bytes a second', async () => {
+    it('a decode that prints neither a Duration nor a time= line falls back to the byte length at 32 000 bytes a second', async () => {
       await seedParent('calls/q3.wav');
       ff.noDuration = true;
       const result = await runAudio(OPEN, 'calls/q3.wav', Buffer.alloc(64_000), 'audio/wav');
@@ -602,8 +602,8 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       SEVENTY();
       await runVideo(OPEN, 'calls/q3.mp4', Buffer.from('the-exact-video-bytes'), 'video/mp4');
 
-      assert.deepEqual(kinds(), ['audioTrack', 'probe', 'silence', 'segment', 'segment', 'keyframes']);
-      const [track, probe, , , , keyframes] = ff.calls;
+      assert.deepEqual(kinds(), ['audioTrack', 'silence', 'segment', 'segment', 'keyframes']);
+      const [track, silence, , , keyframes] = ff.calls;
       assert.ok(track.inputPath.endsWith('input.mp4'), track.inputPath);
       assert.equal(track.input.toString(), 'the-exact-video-bytes', 'ffmpeg reads exactly the bytes the embedder was handed');
       assert.equal(flagOf(track.args, '-acodec'), 'pcm_s16le');
@@ -613,8 +613,8 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       // Bundle-89: the extracted track is handed ON as a path, so the audio pipeline opens `audio.wav` itself. It used
       // to be read back into memory and written out again as `input.wav` — a whole second copy of the soundtrack,
       // because the audio embedder took bytes.
-      assert.equal(path.basename(probe.inputPath), 'audio.wav', 'the audio pipeline runs on the extracted track where ffmpeg left it');
-      assert.equal(probe.input.toString(), 'wav:audio.wav');
+      assert.equal(path.basename(silence.inputPath), 'audio.wav', 'the audio pipeline runs on the extracted track where ffmpeg left it');
+      assert.equal(silence.input.toString(), 'wav:audio.wav');
       assert.equal(path.basename(keyframes.inputPath), 'input.mp4', 'the keyframes are cut from the video, not from the audio');
       assert.equal(flagOf(keyframes.args, '-vf'), 'fps=1/30');
       assert.equal(path.basename(keyframes.last), 'frame_%06d.jpg');
