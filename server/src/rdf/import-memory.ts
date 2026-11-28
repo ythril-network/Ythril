@@ -235,7 +235,7 @@ export class ImportMemoryMeter {
   get used(): number { return this.#used; }
 
   /** A meter of the same room that starts where this one stands: what a holder that is freed and made again spends, without taking it from this one. */
-  fork(): ImportMemoryMeter {
+  resumed(): ImportMemoryMeter {
     const forked = new ImportMemoryMeter(this.room);
     forked.#used = this.#used;
     return forked;

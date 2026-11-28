@@ -116,7 +116,7 @@ describe('the dry plan plans an edge window in a fresh read set unless the plan 
     const act = stripComments(fs.readFileSync(`${REPO_ROOT}/server/src/spaces/rdf-import-act.ts`, 'utf8'));
     assert.match(act, /new EdgeReadSets\(/, 'the act plans its edge windows in a read set it made itself');
     assert.doesNotMatch(act, /const edges = importReadSet\(/, 'the dry plan makes one edge read set for the whole file again');
-    assert.match(act, /minted\.meter\.fork\(\)/, 'a dry plan run charges the second phase\'s meter for good: a run that is made again is charged twice');
+    assert.match(act, /minted\.meter\.resumed\(\)/,'a dry plan run charges the second phase\'s meter for good: a run that is made again is charged twice');
   });
 });
 

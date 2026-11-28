@@ -20,6 +20,22 @@
  */
 import { MINTED_END_BYTES, ENDS_COPY_BYTES, type ImportMemoryMeter } from './import-memory.js';
 import type { MintedEnd } from './import-plan.js';
+import type { RecordOp } from './quads-to-ops.js';
+
+/**
+ * The records the import inserts, by id, from its operations in windows: what the dry plan and the commit seed as present (with an entity's type). The
+ * act's second phase: the index and the sets of the first are gone, and each end is charged to `meter`, a room of its own.
+ */
+export async function mintedEndsOf(windows: AsyncIterable<readonly RecordOp[]>, meter: ImportMemoryMeter): Promise<MintedEnds> {
+  const ends = new MintedEnds(meter);
+  for await (const w of windows) {
+    for (const op of w) {
+      if (op.op !== 'insert' || op.kind === 'edge') continue;
+      ends.set(op.id, op.kind === 'entity' ? { kind: 'entity', type: op.fields.type ?? null } : { kind: op.kind });
+    }
+  }
+  return ends;
+}
 
 export class MintedEnds extends Map<string, MintedEnd> {
   constructor(readonly meter: ImportMemoryMeter) { super(); }

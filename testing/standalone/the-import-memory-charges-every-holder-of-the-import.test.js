@@ -231,7 +231,8 @@ describe('the door counts the larger of the act\'s two phases and says the whole
 
   it('the act charges the ends and their copy to a meter of its own room, and a refusal there ends the act as an input failure (source gate)', () => {
     const act = stripComments(fs.readFileSync(`${REPO_ROOT}/server/src/spaces/rdf-import-act.ts`, 'utf8'));
-    assert.match(act, /new MintedEnds\(/, 'the minted ends are held in a plain Map, outside the meter');
+    assert.match(act, /mintedEndsOf\(/, 'the minted ends are held in a plain Map, outside the meter');
+    assert.match(stripComments(fs.readFileSync(`${REPO_ROOT}/server/src/rdf/import-ends.ts`, 'utf8')), /new MintedEnds\(meter\)/, 'the minted ends are made with no meter');
     assert.doesNotMatch(act, /new Map\(minted\)/, 'the dry plan copies the ends without charging the copy');
     const body = act.slice(act.indexOf('async function rdfImportBody'));
     const planned = body.indexOf('outcome = await planAndCommit(run)');
