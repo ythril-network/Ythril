@@ -28,7 +28,7 @@ import { raiseFileFeedFloorOver } from './file-feed-floor.js';
 import { writeAtReadVersion } from '../brain/write-at-read-version.js';
 import { writeFilterFor } from '../brain/write-precondition.js';
 import { expiryForCreate } from '../brain/ttl.js';
-import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
+import { requeueEmbedWorkOfChangedRow } from './file-embed-work.js';
 import { embedArrivedFiles } from '../sync/embed-arrived-files.js';
 import { mergePropertiesOrKeep, mergePropertiesStage } from '../brain/merge-fields.js';
 import { stampOfArrival, BYTES_ABSENT_SINCE, RETIRED_BY } from '../sync/local-only-fields.js';
@@ -207,8 +207,9 @@ export async function upsertFileMeta(
   }
 
   // Both branches, unconditionally. A create enqueues for the reason every brain create does — the write
-  // should not pay the model's latency — and an update for the correctness reason above.
-  await enqueueEmbedJob(spaceId, 'file', normalised, { priority: EMBED_PRIORITY.write });
+  // should not pay the model's latency — and an update for the correctness reason above. Through the one re-queue of a changed file row
+  // (`file-embed-work.ts`), which keeps the write lane and never throws into a write that has landed.
+  await requeueEmbedWorkOfChangedRow(spaceId, normalised);
 }
 
 /**
@@ -526,7 +527,7 @@ export async function updateFileMeta(
 
   // ONE enqueue, unconditionally, after the write. Not gated on which fields moved: any such condition
   // could only be computed from the read above, which is the stale value this change exists to stop using.
-  await enqueueEmbedJob(spaceId, 'file', normalised, { priority: EMBED_PRIORITY.write });
+  await requeueEmbedWorkOfChangedRow(spaceId, normalised);
 
   /*
    * A file's THREE classes — the only record kind with all of them, and the only one whose `_id` is a path.
