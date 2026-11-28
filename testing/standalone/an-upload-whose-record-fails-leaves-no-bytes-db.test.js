@@ -59,11 +59,18 @@ const readLocal = (rel) => fs.readFileSync(path.join(door.localFilesRoot(S), rel
 /** The manifest a peer would be offered, hashed afresh (no cache). */
 const manifestPaths = async () => (await buildFileManifest(S, undefined, { force: true })).entries.map(e => e.path).sort();
 
-/** A file that was there before the upload: its bytes and the row that names them. */
+/** The peer the byte door's peer uploads speak as (`_byte-door-uploads.mjs`). */
+const UPLOAD_DOOR_PEER = 'upload-door-peer';
+
+/**
+ * A file that was there before the upload: its bytes and the row that names them, still at the version this instance and the uploading peer
+ * agreed on (`syncBase`). Since bundle-47 (Q-410) a peer's other bytes over a live file that is NOT the agreed version land beside it as a
+ * conflict copy, so the overwrite this file tests is the one a peer makes over the agreed version.
+ */
 async function seedHeld(rel, content) {
   door.writeLocalFile(S, rel, content);
   await door.coll(S, 'files').insertOne(build.filemeta(S, rel, 1, {
-    author: PEER_AUTHOR, sizeBytes: Buffer.byteLength(content), sha256: sha(content),
+    author: PEER_AUTHOR, sizeBytes: Buffer.byteLength(content), sha256: sha(content), syncBase: { [UPLOAD_DOOR_PEER]: sha(content) },
   }));
 }
 

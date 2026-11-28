@@ -76,6 +76,10 @@ describe('the handshake token', () => {
     assert.equal(fin.status, 200, JSON.stringify(fin.body));
     const t = await peerToken(id);
     assert.equal(t?.expiresAt ?? null, null, 'a member\'s token must not expire an hour after it joined');
-    assert.equal((await get(INSTANCES.a, tokenForB, '/api/tokens/me')).status, 200, 'and it still authenticates');
+    // A peer token reaches only the sync doors (bundle-47, Q-244), so its life is shown on one: authenticated (no 401), and not turned away
+    // as a token that does not belong there.
+    const alive = await get(INSTANCES.a, tokenForB, `/api/sync/networks/${networkId}/members`);
+    assert.notEqual(alive.status, 401, 'and it still authenticates');
+    assert.notEqual(alive.body?.code, 'peer_door', 'a sync door refused the peer token as off its doors');
   });
 });

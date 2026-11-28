@@ -175,16 +175,22 @@ describe('Peer credential revocation (H7)', () => {
       tokensWithPeerId('ythril-a', instanceIdB).length >= 1,
       'PAT must survive while B is still a member of another network',
     );
-    const stillValid = await get(INSTANCES.a, pat.plaintext, '/api/spaces');
-    assert.equal(stillValid.status, 200, 'PAT should still authenticate');
+    try {
+      // A peer token reaches only the sync doors (bundle-47, Q-244): its life is shown on one, authenticated and not refused as off its doors.
+      const stillValid = await get(INSTANCES.a, pat.plaintext, `/api/sync/networks/${nid2}/members`);
+      assert.notEqual(stillValid.status, 401, 'PAT should still authenticate');
+      assert.notEqual(stillValid.body?.code, 'peer_door', 'a sync door refused the PAT as off its doors');
 
-    // Remove B from network 2 — now orphaned, credentials must go
-    const rm2 = await del(INSTANCES.a, tokenA, `/api/networks/${nid2}/members/${instanceIdB}`);
-    assert.equal(rm2.status, 204);
-    await waitFor(async () => tokensWithPeerId('ythril-a', instanceIdB).length === 0);
-
-    await del(INSTANCES.a, tokenA, `/api/networks/${nid1}`).catch(() => {});
-    await del(INSTANCES.a, tokenA, `/api/networks/${nid2}`).catch(() => {});
+      // Remove B from network 2 — now orphaned, credentials must go
+      const rm2 = await del(INSTANCES.a, tokenA, `/api/networks/${nid2}/members/${instanceIdB}`);
+      assert.equal(rm2.status, 204);
+      await waitFor(async () => tokensWithPeerId('ythril-a', instanceIdB).length === 0);
+    } finally {
+      // Always: a network left behind keeps B a member here, so every later case that expects B's credentials to go waits for ever, and a
+      // later join under B's id is refused as a known peer (the cascade one failed assertion here caused in the bundle-47 Full run).
+      await del(INSTANCES.a, tokenA, `/api/networks/${nid1}`).catch(() => {});
+      await del(INSTANCES.a, tokenA, `/api/networks/${nid2}`).catch(() => {});
+    }
   });
 
   describe('remove-vote conclusion + ejection side', () => {

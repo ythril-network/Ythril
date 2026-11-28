@@ -47,7 +47,10 @@ describe('the byte door answers by recreatedSince', { skip }, () => {
     door.coll(S, 'files').insertOne(build.filemeta(S, p, seq, { author, sizeBytes: content.length, sha256: sha(content), ...extra }));
   const asPeer = (p) => bytes.post({ space: S, path: p, bytes: Buffer.from(ERASED), token: peerToken(PEER) });
   const tombstoned = (res) => res.code === 200 && res.body?.tombstoned === true;
-  const stored = (res) => [201, 202].includes(res.code) && res.body?.tombstoned === undefined;
+  // Not shadowed: the bytes go on to the live-file decision. Over a live row with OTHER bytes and no agreed version that is a conflict copy
+  // beside it (bundle-47, Q-410), `200 { conflict }`; over no live row, or the same bytes, a stored upload. Either way the tombstone did not speak.
+  const stored = (res) => res.body?.tombstoned === undefined
+    && ([201, 202].includes(res.code) || (res.code === 200 && typeof res.body?.conflict?.path === 'string'));
 
   before(async () => {
     door = await openPullDoor({ suite: 'recreatedsince', spaces: [S], files: true, meta: { [S]: { suppressEmbeddings: true } } });
@@ -85,7 +88,8 @@ describe('the byte door answers by recreatedSince', { skip }, () => {
       assert.ok(tombstoned(res) || stored(res), `the byte door answered neither: ${JSON.stringify(res)}`);
       assert.equal(tombstoned(res), s.shadowed, `${s.name}: ${JSON.stringify(res)}`);
       if (s.shadowed) assert.equal(door.localFileExists(S, p), false, 'the erased bytes were written');
-      else assert.equal(door.localFileExists(S, p), true, 'the re-created path\'s bytes were refused');
+      // The peer's bytes are kept: at the path, or at the conflict copy the answer names (the fixture's live row has no bytes of its own).
+      else assert.equal(door.localFileExists(S, res.body?.conflict?.path ?? p), true, 'the re-created path\'s bytes were refused');
     });
   }
 });
