@@ -67,7 +67,7 @@ describe('an RDF import past its memory is refused whole (real routes, real Mong
       assert.equal(r.body?.code, 'rdf_bound_exceeded');
       assert.deepEqual({ bound: r.body?.bound, limit: r.body?.limit }, { bound: 'RDF_IMPORT_MAX_MEMORY', limit: room });
       assert.ok(Number.isInteger(r.body?.need) && r.body.need > room, `need is not a figure above the room: ${r.text.slice(0, 300)}`);
-      assert.match(r.body?.error ?? '', /needs at least .* MiB for the import's index and record sets/);
+      assert.match(r.body?.error ?? '', /needs .* MiB for what the import holds in memory/);
       assert.equal(r.body?.importId, undefined, 'no import was registered, so none is named');
       const m = await d.importMcp(writer.key, { space: DOOR, document: goodTurtle(DOOR), format: 'turtle' });
       assert.equal(m.isError, true, m.text.slice(0, 200));

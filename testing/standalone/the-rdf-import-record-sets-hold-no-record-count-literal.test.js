@@ -84,6 +84,15 @@ describe('the import\'s spool, index and count hold no record-count literal', ()
     assert.deepEqual(findings('const small = 99_999 + 12345;'), [], 'a number under six digits was taken for a record count');
   });
 
+  it('no source of the import speaks of a "record bound": what bounds it is memory (a stale phrase the act kept after the count went)', () => {
+    const STALE = /\brecords?[' ]?s? bound\b/i;
+    const sources = ['server/src/spaces/rdf-import-act.ts', 'server/src/spaces/rdf-import-schema-step.ts', 'server/src/rdf/import-memory.ts', 'server/src/rdf/import-window.ts',
+      'server/src/rdf/import-ends.ts', ...SCANNED];
+    for (const file of sources) assert.doesNotMatch(read(file), STALE, `${file} still speaks of a record bound: say the memory bound`);
+    assert.match('the index\'s record bound', STALE, 'the lint does not see the phrase it hunts');
+    assert.doesNotMatch('the memory bound of the index', STALE);
+  });
+
   it('the quad bound is still declared where the lint says it is, as the one bound of ten million quads', () => {
     assert.match(read('server/src/rdf/import-spool.ts'), /export const RDF_IMPORT_MAX_QUADS = 10_000_000;/, 'the owner\'s answer keeps the quad bound');
   });
