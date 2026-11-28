@@ -157,7 +157,8 @@ const clockSeconds = (m: RegExpExecArray | RegExpMatchArray): number =>
  */
 export function durationFromFfmpegLog(stderr: string): number | null {
   const stated = DURATION_LINE.exec(stderr);
-  if (stated) return clockSeconds(stated);
+  // A stated length of zero is no length (the caller reads one of zero or less as none): it falls through to `time=` like `Duration: N/A`.
+  if (stated && clockSeconds(stated) > 0) return clockSeconds(stated);
   let last: RegExpMatchArray | undefined;
   for (const m of stderr.matchAll(PROGRESS_TIME)) last = m;
   return last ? clockSeconds(last) : null;
