@@ -76,8 +76,7 @@ import { authorRef } from '../config/author.js';
 import { toDocId } from '../util/paths.js';
 import { inChunks } from '../util/chunks.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
-import { retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
-import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
+import { requeueEmbedWorkOfChangedRow, retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
 import type { ClientSession } from 'mongodb';
 import type { FileMetaDoc } from '../config/types.js';
 import { writeUnderClaim, type JobClaim } from './media/lease.js';
@@ -525,7 +524,7 @@ export async function setDerivedExcerpt(spaceId: string, claim: JobClaim, filePa
   const outcome = await writeUnderClaim(spaceId, claim, session => writeDerivedFields({
     spaceId, collectionSuffix: 'files', tier: 'top-level', filter: { _id }, set: { excerpt }, session,
   }));
-  if (outcome === 'written') await enqueueEmbedJob(spaceId, 'file', _id, { priority: EMBED_PRIORITY.write });
+  if (outcome === 'written') await requeueEmbedWorkOfChangedRow(spaceId, _id);
   return outcome;
 }
 
@@ -712,8 +711,11 @@ export async function setDerivedDescriptionIfUnset(
    *
    * The read asks whether a version is worth taking; the WRITE asks the same filter again, which is what decides the
    * race a person's description can win in between.
+   *
+   * The description is part of the file's embed text (`fileEmbedText`), so a write that LANDED re-queues the row (Q-428) — after the
+   * transaction has settled, as the excerpt's write does: a run that lost its claim, or a write that declined, queues nothing.
    */
-  return writeUnderClaim(spaceId, claim, async (session) => {
+  const landed = await writeUnderClaim(spaceId, claim, async (session) => {
     const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
     if (await files.findOne(writable, { projection: { _id: 1 }, session }) === null) {
       /*
@@ -758,4 +760,6 @@ export async function setDerivedDescriptionIfUnset(
       }), { session }), 'file.describe');
     return r.modifiedCount > 0;
   }, { positionHolder: 'file.describe' });
+  if (landed) await requeueEmbedWorkOfChangedRow(spaceId, _id);
+  return landed;
 }

@@ -669,8 +669,9 @@ async function processJob(
       return;
     }
 
-    // Write the derived description to the parent file meta if the user has not set one.
-    // This also re-embeds the parent file meta so the description is searchable on the file itself.
+    // Write the derived description to the parent file meta if the user has not set one, and the excerpt.
+    // Each writer re-queues the parent's embed job when its write lands (`requeueEmbedWorkOfChangedRow`), so the
+    // description and the excerpt are searchable on the file itself; a write that declined queues nothing.
     if (derivedDescription || derivedExcerpt) {
       // The excerpt goes in even when a person has written their own description: it is the document's own
       // text, not a competing summary, and it is what makes a remembered phrase find this record. Only the

@@ -1,5 +1,6 @@
 /**
- * Which embed work a file row has — the one answer every remover and every relocator of file rows asks (bundle-111, Q-459).
+ * Which embed work a file row has — the one answer every remover, every relocator and every writer that changes a file row's embed text
+ * asks (bundle-111, Q-459; the writers through {@link requeueEmbedWorkOfChangedRow}, Q-428).
  *
  * ## What it prevents
  *
@@ -26,7 +27,7 @@
  */
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { embedJobId, enqueueEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from '../brain/embed-queue.js';
+import { embedJobId, enqueueEmbedJobs, enqueueWriteEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import { rootsOfDirectoryPages, rowsOfFiles } from './derived-rows.js';
 import { movedId, movedRoot, type PathKind } from './moved-paths.js';
 import { sidecarsOwnedBy } from './sidecar-disk.js';
@@ -47,6 +48,40 @@ export async function retireEmbedWorkOfRemovedRows(spaceId: string, rows: RowsRe
 
 /** A failure after a move's commit, said once per space per window: the move is finished either way. */
 const requeueFailed = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
+
+/** A changed row that was not re-queued, said once per space per window: the write has landed either way. */
+const changedRowNotQueued = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
+
+/**
+ * Queue the embed job of ONE file row whose embed text a write just changed (its path, description or excerpt: `fileEmbedText`), on the
+ * write lane (Q-428). The one function every such writer calls: the derived excerpt and the derived description (`derived-fields.ts`, each
+ * only when its write landed) and the two metadata writes (`file-meta.ts`).
+ *
+ * ## What it keeps inside, so no writer can drop it
+ *
+ *  - **After the write's transaction**, never inside one: the queue takes no session, and a worker woken before the commit finds no row and
+ *    deletes the job as `gone`. The caller calls it once its write has settled.
+ *  - **Bounded and never throws**, as {@link requeueEmbedWorkOfMovedRows} is: the write has landed, so a store that stopped answering must
+ *    not hold the writer, and a throw would be read by the writer as its own write failing (the media worker logged "failed to write
+ *    description" and, the description being set, never wrote it again). A failure is said once per space per window, naming the file and
+ *    that a reembed repairs it.
+ *
+ * The derived description forgot its re-queue when each writer queued its own job (Q-428): a caption written as an image's description
+ * never reached the row's vector until somebody reindexed.
+ */
+export async function requeueEmbedWorkOfChangedRow(spaceId: string, fileId: string): Promise<void> {
+  const say = (why: string): void => {
+    changedRowNotQueued(spaceId, () => log.warn(`embed queue: the file ${peerText(spaceId)}/${peerText(fileId)} `
+      + `changed, but it was not re-queued for embedding (${why}). It keeps the vector of its previous text until the space is reembedded `
+      + '(POST /api/spaces/:id/reembed).'));
+  };
+  try {
+    const { failed } = await withinWriteBound(() => enqueueWriteEmbedJobs(spaceId, [{ recordType: 'file', recordId: fileId }], { priority: EMBED_PRIORITY.write }));
+    if (failed > 0) say('the queue refused the write');
+  } catch (err) {
+    say(peerText(err));
+  }
+}
 
 /**
  * Queue the embed work of the rows a move carried from `src` to `dst`, and retire the work at their old ids — after the last batch has
