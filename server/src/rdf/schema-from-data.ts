@@ -33,6 +33,7 @@ import type { Quad } from './literals.js';
 import type { RecordKind } from './term-iri.js';
 import { recordOfAddress, termOfIri, type AddressNames } from './term-reverse.js';
 import { digestOfKey } from './import-count.js';
+import { textBytes, type ImportMemoryMeter } from './import-memory.js';
 import type { QuadGroup } from './import-spool.js';
 import { classOfType, edgeLabelOf, groupSubjectOf, leaveOutClassKey, leaveOutKey, literalCategory, predicateRole, readSubject, type OpKind } from './quads-to-ops.js';
 import { localPart, nameKey, readTerm, validPropertyKey, validTypeName, type TermReading } from './schema-from-rdf-drafts.js';
@@ -162,7 +163,7 @@ function subjectOf(group: QuadGroup, source: DataSource): { iri: string; own: Qu
  * predicates than `bounds.predicates`, or are typed with more distinct classes than `bounds.classes`, is `over` at the statement that passed it:
  * nothing after it is read. A subject's own statements are checked for membership through sets, so the work is linear in what the subject states.
  */
-export async function gatherClasses(source: DataSource, bounds: { predicates: number; classes: number }): Promise<DataClassesOrOver> {
+export async function gatherClasses(source: DataSource, bounds: { predicates: number; classes: number; memory?: ImportMemoryMeter }): Promise<DataClassesOrOver> {
   const out: DataClasses = { kind: 'classes', classes: [], subjects: new Map(), count: [], markers: new Map(), labelGroups: new Map(), repeated: new Set(), predicates: new Set() };
   const index = new Map<string, number>();
   const seen = new Set<string>();
@@ -197,6 +198,8 @@ export async function gatherClasses(source: DataSource, bounds: { predicates: nu
       if (at.types.length === 0 && at.own.every(q => q.predicate.value === RDFS_LABEL || q.predicate.value === RDFS_COMMENT)) {
         const labels = at.own.map(plainLabel).filter((l): l is string => l !== null);
         const held = out.labelGroups.get(at.iri);
+        // A label-only subject keeps its address (once), its group key and every label in full, however long: charged by its characters, before it is kept.
+        bounds.memory?.charge((held === undefined ? textBytes(at.iri) : 0) + textBytes(group.key) + labels.reduce((n, l) => n + textBytes(l), 0));
         if (held === undefined) out.labelGroups.set(at.iri, { keys: [group.key], labels }); else { held.keys.push(group.key); held.labels.push(...labels); }
       }
       continue;

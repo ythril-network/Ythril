@@ -16,7 +16,9 @@
  * - **Phase one of the act** (translation): the index with its bare edges and the two digest sets, one meter ({@link ImportMemoryMeter}); the door's
  *   count (`import-count.ts`) charges the same figures from the spool alone.
  * - **Phase two of the act** (plan and commit): the minted ends and their copy (`import-ends.ts`), a meter of their own room, since the index and the sets
- *   are gone by then ({@link MINTED_END_BYTES}, {@link ENDS_COPY_BYTES}). The door's count answers the larger of the two phases.
+ *   are gone by then ({@link MINTED_END_BYTES}, {@link ENDS_COPY_BYTES}). The door's count answers the larger of the two phases. The dry plan's read set of the
+ *   edges is freed with its window unless the plan needs what an earlier window planned (a functional edge label, a reified edge): then `EDGE_PLAN_BYTES` an
+ *   edge is charged to this room as well (`import-edge-plan.ts`). A label-only subject of the inference is charged its characters ({@link textBytes}).
  * - **The door's inference from the data**: {@link INFER_SUBJECT_BYTES} a subject and {@link INFER_PAIR_BYTES} a repeated pair, from the spool's count
  *   of subjects, before a statement is read ({@link assertInferenceFits}, {@link inferencePairsRoom}). A door and an act can run at once, each within a room.
  * - **The group window** (`import-window.ts`): capped at `1/WINDOW_DIVISOR` of the room, not charged: a window ends at its share, and a group is held whole.
@@ -133,14 +135,22 @@ export const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 /** A text every character of which V8 can hold in one byte. */
 const ONE_BYTE_TEXT = /^[\u0000-ÿ]*$/;
 
+/** The heap bytes of the characters of `text`: a byte each, or two each when one of them is above U+00FF (V8 then holds the whole string as two-byte text). */
+export function textBytes(text: string): number {
+  return (ONE_BYTE_TEXT.test(text) ? ONE_BYTE_CHARACTER_BYTES : TWO_BYTE_CHARACTER_BYTES) * text.length;
+}
+
 /** The heap bytes the index takes for an entry whose id is `id`: dearest for a text id with a character above U+00FF, whose characters cost two bytes. */
 export function indexEntryBytes(id: string): number {
   if (MINTED_ID.test(id)) return MINTED_ENTRY_BYTES;
-  return TEXT_ENTRY_BYTES + (ONE_BYTE_TEXT.test(id) ? ONE_BYTE_CHARACTER_BYTES : TWO_BYTE_CHARACTER_BYTES) * id.length;
+  return TEXT_ENTRY_BYTES + textBytes(id);
 }
 
-const CGROUP_V2_MAX = '/sys/fs/cgroup/memory.max';
-const CGROUP_V1_LIMIT = '/sys/fs/cgroup/memory/memory.limit_in_bytes';
+const CGROUP_ROOT = '/sys/fs/cgroup';
+const CGROUP_V2_MAX = 'memory.max';
+const CGROUP_V1_LIMIT = 'memory/memory.limit_in_bytes';
+/** Where the kernel names the cgroup this process is in, one line per hierarchy: `0::/path` (v2) or `<id>:<controllers>:/path` (v1). */
+const SELF_CGROUP = '/proc/self/cgroup';
 
 /** What {@link importMemoryRoom} reads: tests inject both. */
 export interface ImportMemorySources {
@@ -167,15 +177,40 @@ function limitOf(text: string): number | null {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
-/** The container's memory limit in bytes, or null. Tries cgroup v2 first, then v1; a file that is missing or unreadable is no limit. */
+/**
+ * The directories, root first, from the cgroup root down to the cgroup this process is in, for each hierarchy `/proc/self/cgroup` names: the process
+ * is held by its own cgroup's limit and by every parent's (a Kubernetes pod, `--cgroupns=host`, a systemd `MemoryMax`), so the limit that binds is the
+ * smallest on the path. The root itself is always named, so a machine whose `/proc/self/cgroup` cannot be read is judged by the root's files as before.
+ */
+function cgroupLimitFiles(readFile: (path: string) => string): string[] {
+  const files = [`${CGROUP_ROOT}/${CGROUP_V2_MAX}`, `${CGROUP_ROOT}/${CGROUP_V1_LIMIT}`];
+  let lines: string[] = [];
+  try { lines = readFile(SELF_CGROUP).split('\n'); } catch { /* no such file: the root's alone */ }
+  for (const line of lines) {
+    const [, controllers, ...rest] = line.split(':');
+    if (controllers === undefined) continue;
+    const isV2 = controllers === '';
+    if (!isV2 && !controllers.split(',').includes('memory')) continue;
+    let dir = '';
+    for (const part of rest.join(':').split('/')) {
+      if (part === '' || part === '.' || part === '..') continue;
+      dir += `/${part}`;
+      files.push(isV2 ? `${CGROUP_ROOT}${dir}/${CGROUP_V2_MAX}` : `${CGROUP_ROOT}/memory${dir}/memory.limit_in_bytes`);
+    }
+  }
+  return files;
+}
+
+/** The container's memory limit in bytes, or null: the smallest of the limits on this process's cgroup path; a file that is missing or unreadable is no limit. */
 function containerLimit(readFile: (path: string) => string): number | null {
-  for (const file of [CGROUP_V2_MAX, CGROUP_V1_LIMIT]) {
+  let smallest: number | null = null;
+  for (const file of cgroupLimitFiles(readFile)) {
     try {
       const limit = limitOf(readFile(file));
-      if (limit !== null) return limit;
+      if (limit !== null && (smallest === null || limit < smallest)) smallest = limit;
     } catch { /* not a container, or not this cgroup version: the next file, then no limit */ }
   }
-  return null;
+  return smallest;
 }
 
 /** How much memory one import may hold for its file here, read now. Never throws. */
@@ -198,6 +233,13 @@ export class ImportMemoryMeter {
   constructor(readonly room: number) {}
 
   get used(): number { return this.#used; }
+
+  /** A meter of the same room that starts where this one stands: what a holder that is freed and made again spends, without taking it from this one. */
+  fork(): ImportMemoryMeter {
+    const forked = new ImportMemoryMeter(this.room);
+    forked.#used = this.#used;
+    return forked;
+  }
 
   charge(bytes: number): void {
     const need = this.#used + bytes;

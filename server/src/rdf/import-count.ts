@@ -18,6 +18,8 @@
 import { createHash } from 'node:crypto';
 import { ENDS_COPY_BYTES, MINTED_END_BYTES, MINTED_ENTRY_BYTES, SET_ENTRY_BYTES, ImportMemoryMeter, indexEntryBytes } from './import-memory.js';
 import { RdfImportBoundExceeded } from './import-bound.js';
+import { edgePlansCharged, hasFunctionalEdge } from './import-edge-plan.js';
+import type { SpaceMeta } from '@ythril-network/schema';
 import { recordOfAddress, type AddressNames } from './term-reverse.js';
 import type { QuadGroup } from './import-spool.js';
 import type { Quad } from './literals.js';
@@ -93,8 +95,8 @@ function subjectBytes(group: QuadGroup, names: AddressNames): number {
  * a group's graph is read under.
  */
 export async function assertRecordsWithinBound(
-  groups: AsyncIterable<QuadGroup>, namesOf: (graph: string | undefined) => AddressNames, memoryBytes: number,
-): Promise<{ need: number }> {
+  groups: AsyncIterable<QuadGroup>, namesOf: (graph: string | undefined) => AddressNames, memoryBytes: number, planSchema?: SpaceMeta['typeSchemas'],
+): Promise<{ need: number; first: number; second: number }> {
   const meter = new ImportMemoryMeter(memoryBytes);
   const sets = new TripletSets(meter);
   let subjects = 0;
@@ -105,7 +107,9 @@ export async function assertRecordsWithinBound(
     subjects += 1;
   }
   // At most one end for each group (a stored record, an edge or a subject that is no record has none): an upper bound, as the first phase's is.
-  const need = Math.max(meter.used + sets.bare() * MINTED_ENTRY_BYTES, subjects * (MINTED_END_BYTES + ENDS_COPY_BYTES));
-  if (need > memoryBytes) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_MEMORY', memoryBytes, need, true);
-  return { need };
+  const first = meter.used + sets.bare() * MINTED_ENTRY_BYTES;
+  // Beside them, the dry plan's shared read set when the plan shares one (`import-edge-plan.ts`): every edge it may plan, a bare one or a reifier's.
+  const second = subjects * (MINTED_END_BYTES + ENDS_COPY_BYTES) + edgePlansCharged(sets.bare() + sets.reified.size, hasFunctionalEdge(planSchema) || sets.reified.size > 0);
+  const need = Math.max(first, second);  if (need > memoryBytes) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_MEMORY', memoryBytes, need, true);
+  return { need, first, second };
 }
