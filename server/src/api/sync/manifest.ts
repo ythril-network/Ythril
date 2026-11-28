@@ -27,8 +27,8 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
   try {
     const { spaceId, networkId, since } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-    if (refuseSyncRung(res, spaceId, ['files'], req.authToken)) return;
     if (refusePeerSpace(res, spaceId, networkId, req.authToken)) return;
+    if (refuseSyncRung(res, spaceId, ['files'], req.authToken)) return;
 
     const sinceDate = since ? new Date(since) : undefined;
     // A conflict copy or a retired per-type schema file is this instance's own and is never offered (Q-66, sync/file-conflict.ts).
@@ -72,8 +72,8 @@ syncManifestRouter.get('/merkle', syncRateLimit, requireAuth, async (req, res) =
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     // The root covers records and files, so it says something about both: a token needs a read of each (Q-247).
-    if (refuseSyncRung(res, spaceId, ['knowledge', 'files'], req.authToken)) return;
     if (refusePeerSpace(res, spaceId, networkId, req.authToken)) return;
+    if (refuseSyncRung(res, spaceId, ['knowledge', 'files'], req.authToken)) return;
 
     const result = await computeMerkleRoot(spaceId);
     res.json({ ...result, networkId: networkId ?? null });

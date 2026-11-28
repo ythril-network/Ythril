@@ -47,8 +47,8 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
   try {
     const { spaceId, networkId, limit } = req.query as Record<string, unknown>;
     if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-    if (refuseSyncRung(res, spaceId, ['knowledge'], req.authToken)) return;
     if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
+    if (refuseSyncRung(res, spaceId, ['knowledge'], req.authToken)) return;
 
     const start = syncPositionStart(req.query as Record<string, unknown>);
     if ('refusal' in start) { res.status(400).json({ error: start.refusal }); return; }
@@ -135,8 +135,8 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
   try {
     const { spaceId, networkId, since, cursor } = req.query as Record<string, unknown>;
     if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-    if (refuseSyncRung(res, spaceId, ['files'], req.authToken)) return;
     if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
+    if (refuseSyncRung(res, spaceId, ['files'], req.authToken)) return;
 
     if (cursor !== undefined && cursor !== '') {
       const after = isoReadStart(cursor);
