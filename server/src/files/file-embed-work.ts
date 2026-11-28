@@ -22,7 +22,7 @@
  *    and a worker woken before the commit finds no row and deletes the job as `gone`). It reads the rows now AT THE DESTINATION — not the
  *    batches, so a retried owed move re-covers the batches an earlier attempt committed — queues every top-level row (its text changed with
  *    its path) and every derived row that had a job at its old id, and retires the old ids' jobs. **Best-effort**: the records are moved, so
- *    a failure is said once through the shared reporter and never makes the move owed; the rows keep their old vectors until a reindex.
+ *    a failure is said once through the shared reporter and never makes the move owed; the rows keep their old vectors until the space is reembedded.
  *    A move into a suppressed ancestor is queued too: the worker answers `excluded` there and drops the vector.
  */
 import { readStoredById } from '../db/read-by-id.js';
@@ -97,7 +97,7 @@ export async function requeueEmbedWorkOfMovedRows(
   // the answer of a move that is already finished. Inside a walk's or a hold's scope the lower figure wins.
   try { await withinWriteBound(() => requeue(spaceId, move)); } catch (err) {
     requeueFailed(spaceId, () => log.warn(`embed queue: the move ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)} finished, but its files were not `
-      + `re-queued for embedding (${peerText(err)}). They keep the vectors of their old paths until the space is reindexed (POST /api/spaces/:id/reindex).`));
+      + `re-queued for embedding (${peerText(err)}). They keep the vectors of their old paths until the space is reembedded (${EMBED_REPAIR_ROUTE}).`));
   }
 }
 
