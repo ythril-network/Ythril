@@ -583,7 +583,7 @@ jobs:
         # A download that stalls must fail its own step in minutes, not hold the job to its limit (main run 46071083951: 44 minutes on a
         # 959 MB image). The first attempt ignores its failure; the second, identical step runs only after it and fails the job if it fails too.
         uses: actions/download-artifact@v4
-        timeout-minutes: 10
+        timeout-minutes: 4
         continue-on-error: true
         with:
           name: ythril-test-image-${{ github.run_attempt }}
@@ -591,7 +591,7 @@ jobs:
       - name: Download the test image (second attempt)
         if: steps.fetch-image.outcome == 'failure'
         uses: actions/download-artifact@v4
-        timeout-minutes: 10
+        timeout-minutes: 4
         with:
           name: ythril-test-image-${{ github.run_attempt }}
 
@@ -682,7 +682,7 @@ jobs:
         # A download that stalls must fail its own step in minutes, not hold the job to its limit (main run 46071083951: 44 minutes on a
         # 959 MB image). The first attempt ignores its failure; the second, identical step runs only after it and fails the job if it fails too.
         uses: actions/download-artifact@v4
-        timeout-minutes: 10
+        timeout-minutes: 4
         continue-on-error: true
         with:
           name: ythril-test-image-${{ github.run_attempt }}
@@ -690,7 +690,7 @@ jobs:
       - name: Download the test image (second attempt)
         if: steps.fetch-image.outcome == 'failure'
         uses: actions/download-artifact@v4
-        timeout-minutes: 10
+        timeout-minutes: 4
         with:
           name: ythril-test-image-${{ github.run_attempt }}
 
@@ -809,7 +809,7 @@ jobs:
         # A download that stalls must fail its own step in minutes, not hold the job to its limit (main run 46071083951: 44 minutes on a
         # 959 MB image). The first attempt ignores its failure; the second, identical step runs only after it and fails the job if it fails too.
         uses: actions/download-artifact@v4
-        timeout-minutes: 10
+        timeout-minutes: 4
         continue-on-error: true
         with:
           name: ythril-test-image-${{ github.run_attempt }}
@@ -817,7 +817,7 @@ jobs:
       - name: Download the test image (second attempt)
         if: steps.fetch-image.outcome == 'failure'
         uses: actions/download-artifact@v4
-        timeout-minutes: 10
+        timeout-minutes: 4
         with:
           name: ythril-test-image-${{ github.run_attempt }}
 
@@ -898,7 +898,7 @@ jobs:
         # A download that stalls must fail its own step in minutes, not hold the job to its limit (main run 46071083951: 44 minutes on a
         # 959 MB image). The first attempt ignores its failure; the second, identical step runs only after it and fails the job if it fails too.
         uses: actions/download-artifact@v4
-        timeout-minutes: 10
+        timeout-minutes: 4
         continue-on-error: true
         with:
           name: ythril-test-image-${{ github.run_attempt }}
@@ -906,7 +906,7 @@ jobs:
       - name: Download the test image (second attempt)
         if: steps.fetch-image.outcome == 'failure'
         uses: actions/download-artifact@v4
-        timeout-minutes: 10
+        timeout-minutes: 4
         with:
           name: ythril-test-image-${{ github.run_attempt }}
 
