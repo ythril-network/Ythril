@@ -409,9 +409,11 @@ describe('RSA invite handshake', () => {
     const member = netR.body.members?.find(m => m.instanceId === '22222222-2222-2222-8222-222222222222');
     assert.ok(member, 'Instance B should be a member after handshake');
 
-    // tokenForB was created by A for B — verify it authenticates against A
-    const pingA = await get(INSTANCES.a, tokenForB, '/api/tokens/me');
-    assert.equal(pingA.status, 200, 'tokenForB (A-issued PAT) must authenticate to instance A');
+    // tokenForB was created by A for B — verify it authenticates against A, on a sync door: a peer token reaches no other (bundle-47, Q-244)
+    const pingA = await get(INSTANCES.a, tokenForB, `/api/sync/networks/${networkId}/members`);
+    assert.notEqual(pingA.status, 401, 'tokenForB (A-issued PAT) must authenticate to instance A');
+    assert.notEqual(pingA.body?.code, 'peer_door', 'a sync door refused tokenForB as off its doors');
+    assert.equal((await get(INSTANCES.a, tokenForB, '/api/tokens/me')).body?.code, 'peer_door', 'tokenForB reached a door that is not a sync door');
   });
 
   after(async () => {
